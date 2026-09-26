@@ -96,6 +96,19 @@ export class AnalyticsView {
       tile('Total R', st.totalR != null ? `${num(st.totalR, 1, true)}R` : '—', cls(st.totalR ?? 0), `${st.trades} trades`),
     ));
 
+    // --- prop-firm challenge summary
+    if (this.scope.length === 1 && this.scope[0].rules && this.scope[0].state.challenge) {
+      const ss = this.scope[0], r = ss.rules!, c = ss.state.challenge!;
+      const statusTxt = c.status === 'active' ? 'In progress' : c.status === 'passed' ? 'PASSED' : 'FAILED';
+      this.body.append(card(`Challenge · ${r.name}`, h('div', { class: 'kpis small' },
+        tile('Status', statusTxt, c.status === 'passed' ? 'up' : c.status === 'failed' ? 'dn' : '', c.reason || 'rules are checked on every 1-minute bar'),
+        tile('Profit vs target', pct((ss.state.broker.balance - ss.balance) / ss.balance, 2, true), cls(ss.state.broker.balance - ss.balance), `target +${r.profitTarget}%`),
+        tile('Worst daily loss', pct(-c.worstDailyLoss / ss.balance, 2), 'dn', r.maxDailyLoss ? `limit −${r.maxDailyLoss}%` : 'no daily limit'),
+        tile('Max drawdown', pct(-c.maxDrawdown / ss.balance, 2), 'dn', `limit −${r.maxTotalLoss}%${r.trailingDrawdown ? ' (trailing)' : ''}`),
+        tile('Trading days', String(c.tradingDays.length), '', `minimum ${r.minTradingDays}`),
+      )));
+    }
+
     // --- detail stats grid
     const S = (k: string, v: string, c = '', title = '') => h('div', { class: 'stat', title }, h('span', {}, k), h('b', { class: c }, v));
     this.body.append(card('Key statistics', h('div', { class: 'stats-grid' },

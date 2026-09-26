@@ -3,7 +3,8 @@ import { fmtLocal, fmtDuration, offsetFn, localToUtc, ZONES } from '../core/tz';
 import { INDICATORS, indicatorDef } from '../core/indicators';
 import type { Bars } from '../core/types';
 import { round2, type OrderType, type Side, type Trade } from '../engine/broker';
-import { Replay, type Session } from '../engine/replay';
+import { Replay, type ChartType, type Session } from '../engine/replay';
+import type { ChallengeState } from '../engine/rules';
 import { saveSession, saveShot, getShot } from '../data/sessions';
 import { ChartPane, IND_COLORS, type PaneHost } from './chartpane';
 import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
@@ -56,6 +57,9 @@ export class Workspace implements PaneHost {
   private magnet = true;
   private stayInTool = false;
   private pendingShots: Trade[] = [];
+  private challengeEvent: ChallengeState | null = null;
+  private lastUi = 0;
+  private menu: HTMLDivElement | null = null;
 
   constructor(
     public session: Session,
@@ -66,6 +70,7 @@ export class Workspace implements PaneHost {
     this.replay.broker.onTradeClosed = (t) => {
       if (this.prefs.autoShot) this.pendingShots.push(t);
     };
+    this.replay.onChallenge = (c) => (this.challengeEvent = c);
     this.grid = h('div', { class: 'grid' });
     this.right = h('div', { class: 'side' });
     this.bottom = h('div', { class: 'bottom' });
@@ -333,6 +338,60 @@ export class Workspace implements PaneHost {
     this.afterTrade();
   }
 
+  crosshairMoved(src: ChartPane, time: number | null) {
+    for (const p of this.panes) if (p !== src) p.showCrosshairAt(time);
+  }
+
+  setChartType(pane: ChartPane, t: ChartType) {
+    (this.session.state.chartType ??= {})[pane.index] = t;
+    pane.setChartType();
+    this.scheduleSave();
+  }
+
+  contextMenu(pane: ChartPane, price: number, x: number, y: number) {
+    this.closeMenu();
+    const sym = pane.cfg.symbol;
+    const br = this.replay.broker;
+    const dg = this.session.specs[sym]?.digits ?? 5;
+    const px = +price.toFixed(dg);
+    const buyType: OrderType = px < br.ask(sym) ? 'limit' : 'stop';
+    const sellType: OrderType = px > br.bid(sym) ? 'limit' : 'stop';
+    const item = (label: string, fn: () => void, cls = '') =>
+      h('button', { class: `menu-item ${cls}`, onclick: () => { this.closeMenu(); fn(); } }, label);
+    const m = h('div', { class: 'ctx-menu' },
+      h('div', { class: 'menu-head' }, `${sym} @ ${px.toFixed(dg)}`),
+      item(`Buy ${buyType} @ ${px.toFixed(dg)}`, () => this.submit('long', { type: buyType, price: px, sym }), 'up'),
+      item(`Sell ${sellType} @ ${px.toFixed(dg)}`, () => this.submit('short', { type: sellType, price: px, sym }), 'dn'),
+      h('div', { class: 'menu-sep' }),
+      item('Market buy now', () => this.submit('long', { type: 'market', price: 0, sym })),
+      item('Market sell now', () => this.submit('short', { type: 'market', price: 0, sym })),
+      h('div', { class: 'menu-sep' }),
+      item('Horizontal line here', () => {
+        this.drawings(sym).push({ id: Math.random().toString(36).slice(2, 10), type: 'hline', pts: [{ t: pane.times[pane.times.length - 1] ?? 0, p: px }], color: '#f0b90b' });
+        this.drawingsChanged(sym);
+      }),
+      item('Remove all drawings', () => {
+        this.session.state.drawings[sym] = [];
+        this.drawingsChanged(sym);
+      }),
+    );
+    m.style.left = `${Math.min(x, innerWidth - 220)}px`;
+    m.style.top = `${Math.min(y, innerHeight - 260)}px`;
+    document.body.append(m);
+    this.menu = m;
+    setTimeout(() => document.addEventListener('pointerdown', this.onDocDown, true));
+  }
+
+  private onDocDown = (e: PointerEvent) => {
+    if (this.menu && !this.menu.contains(e.target as Node)) this.closeMenu();
+  };
+
+  private closeMenu() {
+    this.menu?.remove();
+    this.menu = null;
+    document.removeEventListener('pointerdown', this.onDocDown, true);
+  }
+
   // ---- replay control ------------------------------------------------------------
 
   private stepBase() {
@@ -435,9 +494,37 @@ export class Workspace implements PaneHost {
     for (const p of this.panes) p.sync(full);
     this.flushShots();
     this.renderClock();
+    // tables/ticket are DOM-heavy: refresh at most ~6×/s while playing
+    const now = performance.now();
+    if (!this.playing || now - this.lastUi > 160 || this.challengeEvent) {
+      this.lastUi = now;
+      this.renderSide();
+      this.renderBottom();
+    }
+    this.handleChallenge();
+    this.scheduleSave();
+  }
+
+  private handleChallenge() {
+    const c = this.challengeEvent;
+    if (!c) return;
+    this.challengeEvent = null;
+    this.pause();
+    for (const p of this.panes) p.refreshOverlays();
     this.renderSide();
     this.renderBottom();
-    this.scheduleSave();
+    const passed = c.status === 'passed';
+    modal(passed ? '🏆 Challenge passed!' : '✖ Challenge failed', h('div', { class: 'stack' },
+      h('p', {}, c.reason + '.'),
+      h('div', { class: 'kv-grid' },
+        kv('Balance', money(this.replay.broker.s.balance)),
+        kv('Trading days', String(c.tradingDays.length)),
+        kv('Worst daily loss', money(-c.worstDailyLoss)),
+      ),
+      h('p', { class: 'muted' }, passed
+        ? 'You can keep replaying this session; the result is saved in analytics.'
+        : this.session.rules?.stopOnBreach ? 'Positions were closed and trading is locked for this session. Duplicate it from the Sessions page to try again.' : 'Trading is still allowed (stop-on-breach is off).'),
+    ));
   }
 
   private afterTrade() {
@@ -477,30 +564,31 @@ export class Workspace implements PaneHost {
     return br.lotsForRisk(sym, risk, slDist, price);
   }
 
-  private ticketLevels(side: Side) {
-    const sym = this.active.cfg.symbol;
+  private ticketLevels(side: Side, o?: { type: OrderType; price: number; sym: string }) {
+    const sym = o?.sym ?? this.active.cfg.symbol;
+    const type = o?.type ?? this.ticket.type;
     const br = this.replay.broker;
     const pip = this.session.specs[sym]?.pipSize ?? 0.0001;
     const dir = side === 'long' ? 1 : -1;
-    const entry = this.ticket.type === 'market' ? (side === 'long' ? br.ask(sym) : br.bid(sym)) : this.ticket.price;
+    const entry = type === 'market' ? (side === 'long' ? br.ask(sym) : br.bid(sym)) : o?.price ?? this.ticket.price;
     const slP = this.prefs.slPips > 0 ? entry - dir * this.prefs.slPips * pip : null;
     let tpP: number | null = null;
     if (this.prefs.tpVal > 0) tpP = this.prefs.tpMode === 'rr' ? (slP != null ? entry + dir * Math.abs(entry - slP) * this.prefs.tpVal : null) : entry + dir * this.prefs.tpVal * pip;
     const lots = this.sizeFor(sym, slP != null ? Math.abs(entry - slP) : 0, entry);
-    return { sym, entry, sl: slP, tp: tpP, lots };
+    return { sym, entry, sl: slP, tp: tpP, lots, type };
   }
 
-  private submit(side: Side) {
-    const lv = this.ticketLevels(side);
+  private submit(side: Side, o?: { type: OrderType; price: number; sym: string }) {
+    const lv = this.ticketLevels(side, o);
     const dg = this.session.specs[lv.sym]?.digits ?? 5;
     const r = this.replay.broker.place({
-      symbol: lv.sym, side, type: this.ticket.type, lots: lv.lots, price: lv.entry,
+      symbol: lv.sym, side, type: lv.type, lots: lv.lots, price: lv.entry,
       sl: lv.sl != null ? +lv.sl.toFixed(dg) : null, tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
       tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), note: this.ticket.note,
       trailPips: this.ticket.trail || null, beAtR: this.ticket.be || null,
     });
     if (!r.ok) return toast(r.error, 'err');
-    toast(`${side === 'long' ? 'BUY' : 'SELL'} ${this.ticket.type} ${lv.lots} ${lv.sym}`, 'ok');
+    toast(`${side === 'long' ? 'BUY' : 'SELL'} ${lv.type} ${lv.lots} ${lv.sym}`, 'ok');
     this.afterTrade();
   }
 
@@ -617,6 +705,7 @@ export class Workspace implements PaneHost {
         ),
         h('div', { class: 'calc', id: 'calc' }),
       ),
+      this.challengeCard() ?? '',
       h('section', { class: 'card acct' },
         h('div', { class: 'card-title' }, h('span', {}, 'Account')),
         kv('Balance', money(br.s.balance)),
@@ -628,6 +717,32 @@ export class Workspace implements PaneHost {
       ),
     );
     this.renderTicketCalc();
+  }
+
+  private challengeCard() {
+    const r = this.session.rules, c = this.session.state.challenge;
+    if (!r || !c) return null;
+    const init = this.session.balance;
+    const br = this.replay.broker;
+    const bar = (label: string, frac: number, text: string, kind: 'good' | 'bad') =>
+      h('div', { class: 'rule' },
+        h('div', { class: 'rule-top' }, h('span', {}, label), h('b', {}, text)),
+        h('div', { class: `meter ${kind}` }, h('div', { style: `width:${Math.max(0, Math.min(100, frac * 100)).toFixed(1)}%` })));
+    const profit = br.s.balance - init;
+    const target = (r.profitTarget / 100) * init;
+    const dailyLim = (r.maxDailyLoss / 100) * init;
+    const totalLim = (r.maxTotalLoss / 100) * init;
+    const eq = br.equity();
+    const floor = (r.trailingDrawdown ? Math.min(c.highWater, init + totalLim) : init) - totalLim;
+    const badge = c.status === 'active' ? h('span', { class: 'badge' }, 'In progress') : h('span', { class: `badge ${c.status}` }, c.status === 'passed' ? 'PASSED' : 'FAILED');
+    return h('section', { class: 'card challenge' },
+      h('div', { class: 'card-title' }, h('span', {}, r.name), badge),
+      r.profitTarget > 0 ? bar('Profit target', target ? profit / target : 0, `${money(profit, true)} / ${money(target)}`, 'good') : null,
+      r.maxDailyLoss > 0 ? bar('Daily loss used', dailyLim ? c.todayLoss / dailyLim : 0, `${money(c.todayLoss)} / ${money(dailyLim)}`, 'bad') : null,
+      r.maxTotalLoss > 0 ? bar(r.trailingDrawdown ? 'Trailing loss used' : 'Max loss used', totalLim ? (totalLim - (eq - floor)) / totalLim : 0, `floor ${money(floor)}`, 'bad') : null,
+      bar('Trading days', r.minTradingDays ? c.tradingDays.length / r.minTradingDays : 1, `${c.tradingDays.length} / ${r.minTradingDays}`, 'good'),
+      c.status !== 'active' ? h('div', { class: 'muted small' }, c.reason) : null,
+    );
   }
 
   private renderTicketCalc() {

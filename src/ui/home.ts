@@ -8,7 +8,9 @@ import { saveDataset, listDatasets, deleteDataset, loadBars, updateDatasetMeta }
 import { listSessions, saveSession, deleteSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, type Session } from '../engine/replay';
-import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput } from './dom';
+import { PRESETS, type ChallengeRules } from '../engine/rules';
+import { idb } from '../data/store';
+import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download } from './dom';
 
 const fmtDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -48,7 +50,11 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
 
   main.append(h('div', { class: 'section-head' },
     h('h2', {}, 'Backtesting sessions'),
-    h('button', { class: 'primary', onclick: () => newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '+ New session'),
+    h('div', { class: 'row-btns' },
+      h('button', { class: 'ghost', title: 'Download all sessions, trades, drawings & journal screenshots as one JSON file', onclick: () => exportBackup(sessions) }, '⭳ Backup'),
+      h('button', { class: 'ghost', title: 'Restore sessions from a backup file', onclick: () => importBackup(() => renderHome(root, nav, 'sessions')) }, '⭱ Restore'),
+      h('button', { class: 'primary', onclick: () => newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '+ New session'),
+    ),
   ));
   if (!sessions.length) {
     main.append(h('div', { class: 'empty-state' }, h('h3', {}, 'No sessions yet'), h('p', {}, 'Create a session: pick symbols, a start date and your account size. Everything after the start date stays hidden until you replay it.')));
@@ -59,7 +65,10 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
     const st = computeStats(s.state.broker.trades, s.balance);
     const bal = s.state.broker.balance;
     const card = h('article', { class: 'scard' },
-      h('div', { class: 'scard-head' }, h('h3', {}, s.name), s.state.finished ? h('span', { class: 'badge' }, 'Finished') : null),
+      h('div', { class: 'scard-head' }, h('h3', {}, s.name),
+        s.state.challenge
+          ? h('span', { class: `badge ${s.state.challenge.status}` }, s.state.challenge.status === 'active' ? `🎯 ${s.rules?.name ?? 'Challenge'}` : s.state.challenge.status.toUpperCase())
+          : s.state.finished ? h('span', { class: 'badge' }, 'Finished') : null),
       h('div', { class: 'muted small' }, `${s.symbols.join(' · ')} · started ${fmtDate(s.start).slice(0, 10)}`),
       h('div', { class: 'muted small' }, `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
       h('div', { class: 'scard-stats' },
@@ -149,6 +158,32 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
   const comm = h('input', { type: 'number', value: 3.5, min: 0, step: 0.1 });
   const spread = h('input', { type: 'number', value: 0.8, min: 0, step: 0.1 });
   const tz = h('select', {}, ...ZONES.map((z) => h('option', { value: z, selected: z === 'Asia/Jakarta' }, z)));
+  const preset = h('select', {}, h('option', { value: '' }, 'None — free backtesting'), ...PRESETS.map((p, i) => h('option', { value: i }, p.name)), h('option', { value: 'custom' }, 'Custom rules…'));
+  const target = h('input', { type: 'number', value: 10, step: 0.5, min: 0 });
+  const daily = h('input', { type: 'number', value: 5, step: 0.5, min: 0 });
+  const total = h('input', { type: 'number', value: 10, step: 0.5, min: 0 });
+  const days = h('input', { type: 'number', value: 4, step: 1, min: 0 });
+  const trailing = h('input', { type: 'checkbox' });
+  const stop = h('input', { type: 'checkbox', checked: true });
+  const ruleBox = h('div', { class: 'stack hidden' },
+    h('div', { class: 'row2' }, field('Profit target (%)', target), field('Max daily loss (%)', daily)),
+    h('div', { class: 'row2' }, field('Max total loss (%)', total), field('Min trading days', days)),
+    h('label', { class: 'check' }, trailing, ' Trailing max loss (follows the equity high)'),
+    h('label', { class: 'check' }, stop, ' Close everything and lock trading when a limit is breached'),
+  );
+  preset.onchange = () => {
+    ruleBox.classList.toggle('hidden', !preset.value);
+    const p = PRESETS[+preset.value];
+    if (preset.value && preset.value !== 'custom' && p) {
+      target.value = String(p.profitTarget);
+      daily.value = String(p.maxDailyLoss);
+      total.value = String(p.maxTotalLoss);
+      days.value = String(p.minTradingDays);
+      trailing.checked = p.trailingDrawdown;
+      stop.checked = p.stopOnBreach;
+      name.value = `${p.name} ${new Date().toISOString().slice(0, 10)}`;
+    }
+  };
   const go = h('button', { class: 'primary' }, 'Create & start replay');
   const close = modal('New backtesting session', h('div', { class: 'stack' },
     field('Session name', name),
@@ -157,6 +192,8 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     h('div', { class: 'row2' }, field('Starting balance ($)', bal), field('Default risk per trade (%)', risk)),
     h('div', { class: 'row2' }, field('Commission / lot / side ($)', comm), field('Spread (pips, editable per symbol later)', spread)),
     field('Chart timezone', tz),
+    field('Prop firm challenge mode', preset, 'Simulate a funded-account evaluation: profit target, daily & max loss (on equity), minimum trading days.'),
+    ruleBox,
     go,
   ), { wide: true });
   go.onclick = () => {
@@ -164,7 +201,15 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     if (!syms.length) return toast('Pick at least one symbol', 'err');
     const s0 = parseDateInput(start.value);
     if (!isFinite(s0)) return toast('Invalid start date', 'err');
+    const rules: ChallengeRules | null = preset.value
+      ? {
+          name: preset.value === 'custom' ? 'Custom challenge' : PRESETS[+preset.value].name,
+          profitTarget: +target.value, maxDailyLoss: +daily.value, maxTotalLoss: +total.value, minTradingDays: +days.value,
+          trailingDrawdown: trailing.checked, stopOnBreach: stop.checked,
+        }
+      : null;
     const s = newSession({
+      rules,
       id: uid(), name: name.value || 'Session', description: '', symbols: syms.map((d) => d.id), start: s0,
       end: end.value ? parseDateInput(end.value) : null, balance: +bal.value, commissionPerLot: +comm.value,
       spreadPips: { '*': +spread.value }, slFirst: true, timezone: tz.value, riskPct: +risk.value, createdAt: Date.now(),
@@ -206,7 +251,7 @@ function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => v
       h('td', {}, h('b', {}, d.symbol)), h('td', {}, d.source), h('td', {}, tfSeconds(d.resolution).label),
       h('td', {}, fmtDate(d.from)), h('td', {}, fmtDate(d.to)), h('td', {}, d.count.toLocaleString('en-US')),
       h('td', {}, pip), h('td', {}, cs), h('td', {}, dg),
-      h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: async () => {
+      h('td', { class: 'acts' }, h('button', { class: 'mini', title: 'Download as CSV (UTC)', onclick: () => exportDataset(d) }, 'CSV'), h('button', { class: 'mini danger', onclick: async () => {
         if (!confirm(`Delete ${d.symbol} data? Sessions using it will not open.`)) return;
         await deleteDataset(d.id);
         refresh();
@@ -320,4 +365,47 @@ function syntheticModal(refresh: () => void) {
     close();
     refresh();
   };
+}
+
+// ---- backup / restore --------------------------------------------------------
+
+async function exportBackup(sessions: Session[]) {
+  const shots: Record<string, string> = {};
+  for (const s of sessions) for (const t of s.state.broker.trades) if (t.shot) {
+    const u = await idb.get<string>('shots', t.shot);
+    if (u) shots[t.shot] = u;
+  }
+  const payload = { app: 'replaylab', version: 1, exportedAt: new Date().toISOString(), sessions, shots };
+  download(`replaylab-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload), 'application/json');
+  toast(`Backed up ${sessions.length} sessions`, 'ok');
+}
+
+function importBackup(done: () => void) {
+  const input = h('input', { type: 'file', accept: '.json,application/json' });
+  input.onchange = async () => {
+    const f = input.files?.[0];
+    if (!f) return;
+    try {
+      const data = JSON.parse(await f.text()) as { app?: string; sessions?: Session[]; shots?: Record<string, string> };
+      if (data.app !== 'replaylab' || !Array.isArray(data.sessions)) throw new Error('Not a ReplayLab backup file');
+      for (const [k, v] of Object.entries(data.shots ?? {})) await idb.put('shots', k, v);
+      for (const s of data.sessions) await saveSession(s);
+      const missing = [...new Set(data.sessions.flatMap((s) => s.symbols))];
+      const have = new Set((await listDatasets()).map((d) => d.id));
+      const need = missing.filter((m) => !have.has(m));
+      toast(`Restored ${data.sessions.length} sessions${need.length ? ` — import data for ${need.join(', ')} to open them` : ''}`, need.length ? 'info' : 'ok');
+      done();
+    } catch (e) {
+      toast(String((e as Error).message ?? e), 'err');
+    }
+  };
+  input.click();
+}
+
+async function exportDataset(d: DatasetMeta) {
+  const b = await loadBars(d.id);
+  if (!b) return;
+  const lines = ['time,open,high,low,close,volume'];
+  for (let i = 0; i < b.n; i++) lines.push(`${new Date(b.t[i] * 1000).toISOString().slice(0, 19).replace('T', ' ')},${b.o[i]},${b.h[i]},${b.l[i]},${b.c[i]},${b.v[i]}`);
+  download(`${d.symbol}_${tfSeconds(d.resolution).label}.csv`, lines.join('\n'));
 }

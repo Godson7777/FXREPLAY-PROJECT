@@ -1,12 +1,12 @@
 import {
-  CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, HistogramSeries, LineSeries, LineStyle,
-  type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
+  AreaSeries, BarSeries, CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, HistogramSeries, LineSeries, LineStyle,
+  type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type SeriesType, type Time, type UTCTimestamp,
 } from 'lightweight-charts';
 import { aggregate, parseTf, partialCandle, type Agg, type Timeframe } from '../core/timeframe';
 import { indexAtOrBefore, type Bars } from '../core/types';
 import { offsetFn, fmtLocal } from '../core/tz';
 import { indicatorDef, type Series } from '../core/indicators';
-import type { PaneConfig, Replay } from '../engine/replay';
+import type { ChartType, PaneConfig, Replay } from '../engine/replay';
 import { DrawingLayer, type DragLine, type Drawing } from './drawings';
 import { h, money, theme } from './dom';
 
@@ -37,6 +37,32 @@ export interface PaneHost {
   placeFromTool(d: Drawing, sym: string): void;
   paneChanged(): void;
   onTfRequest(pane: ChartPane): void;
+  crosshairMoved(pane: ChartPane, time: number | null): void;
+  contextMenu(pane: ChartPane, price: number, x: number, y: number): void;
+  setChartType(pane: ChartPane, t: ChartType): void;
+}
+
+export const CHART_TYPES: { type: ChartType; label: string }[] = [
+  { type: 'candles', label: 'Candles' },
+  { type: 'hollow', label: 'Hollow candles' },
+  { type: 'heikin', label: 'Heikin Ashi' },
+  { type: 'bars', label: 'OHLC bars' },
+  { type: 'line', label: 'Line' },
+  { type: 'area', label: 'Area' },
+];
+
+const haCache = new WeakMap<Agg, Float64Array>();
+/** Heikin-Ashi open for every candle. Candle j's HA open depends only on completed candles < j. */
+function haOpen(a: Agg): Float64Array {
+  let ha = haCache.get(a);
+  if (ha) return ha;
+  ha = new Float64Array(a.n);
+  for (let j = 0; j < a.n; j++) {
+    if (j === 0) ha[j] = (a.o[0] + a.c[0]) / 2;
+    else ha[j] = (ha[j - 1] + (a.o[j - 1] + a.h[j - 1] + a.l[j - 1] + a.c[j - 1]) / 4) / 2;
+  }
+  haCache.set(a, ha);
+  return ha;
 }
 
 interface IndSeries {
@@ -49,7 +75,7 @@ export class ChartPane {
   el: HTMLDivElement;
   chartEl: HTMLDivElement;
   chart: IChartApi;
-  candles: ISeriesApi<'Candlestick'>;
+  main!: ISeriesApi<SeriesType>;
   layer: DrawingLayer;
   tf!: Timeframe;
   agg!: Agg;
@@ -58,7 +84,7 @@ export class ChartPane {
   k = -1; // last displayed agg index
   times: Float64Array<ArrayBufferLike> = new Float64Array(0);
   private ind: IndSeries[] = [];
-  private markers: ISeriesMarkersPluginApi<Time>;
+  private markers!: ISeriesMarkersPluginApi<Time>;
   private priceLines = new Map<string, IPriceLine>();
   private legend: HTMLDivElement;
   private header: HTMLDivElement;
@@ -90,14 +116,13 @@ export class ChartPane {
       timeScale: { borderColor: th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
     });
-    this.candles = this.chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a', downColor: '#ef5350', borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
-    });
-    this.markers = createSeriesMarkers(this.candles, []);
+    this.createMain();
+    const self = this;
     this.layer = new DrawingLayer({
       chart: this.chart,
-      series: this.candles,
+      get series() {
+        return self.main;
+      },
       container: this.chartEl,
       times: () => this.times,
       count: () => this.k - this.start + 1,
@@ -116,12 +141,69 @@ export class ChartPane {
       onPlaceFromTool: (d) => host.placeFromTool(d, this.cfg.symbol),
     });
     this.chart.subscribeCrosshairMove((p) => {
-      const d = p.time != null ? (p.seriesData.get(this.candles) as { open: number; high: number; low: number; close: number } | undefined) : undefined;
-      this.renderLegend(d ? { o: d.open, h: d.high, l: d.low, c: d.close, v: 0, t: p.time as number } : this.lastC);
+      const t = p.time as number | undefined;
+      const j = t != null ? indexAtOrBefore(this.times, this.k - this.start + 1, t) : -1;
+      if (j >= 0 && this.times[j] === t) {
+        const g = this.start + j;
+        const c = g === this.k && this.lastC ? this.lastC : { o: this.agg.o[g], h: this.agg.h[g], l: this.agg.l[g], c: this.agg.c[g], v: this.agg.v[g], t: t! };
+        this.renderLegend({ ...c, t: t! });
+      } else this.renderLegend(this.lastC);
+      if (!this.syncingCrosshair) host.crosshairMoved(this, p.point ? (t ?? null) : null);
+    });
+    this.chartEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const r = this.chartEl.getBoundingClientRect();
+      const price = this.main.coordinateToPrice(e.clientY - r.top);
+      if (price != null) host.contextMenu(this, price as number, e.clientX, e.clientY);
     });
     this.ro = new ResizeObserver(() => this.layer.schedule());
     this.ro.observe(this.chartEl);
     this.renderHeader();
+    this.load();
+  }
+
+  syncingCrosshair = false;
+
+  /** Mirror another pane's crosshair (time in local seconds). */
+  showCrosshairAt(t: number | null) {
+    this.syncingCrosshair = true;
+    try {
+      const j = t == null ? -1 : indexAtOrBefore(this.times, this.k - this.start + 1, t);
+      if (j < 0) this.chart.clearCrosshairPosition();
+      else {
+        const g = this.start + j;
+        this.chart.setCrosshairPosition(g === this.k && this.lastC ? this.lastC.c : this.agg.c[g], this.times[j] as UTCTimestamp, this.main);
+      }
+    } finally {
+      this.syncingCrosshair = false;
+    }
+  }
+
+  chartType(): ChartType {
+    return this.host.replay.session.state.chartType?.[this.index] ?? 'candles';
+  }
+
+  private createMain() {
+    if (this.main) {
+      this.clearIndicators();
+      this.markers.detach();
+      this.chart.removeSeries(this.main);
+      this.priceLines.clear();
+    }
+    const t = this.chartType();
+    const up = '#26a69a', dn = '#ef5350';
+    if (t === 'line') this.main = this.chart.addSeries(LineSeries, { color: '#3987e5', lineWidth: 2 }, 0);
+    else if (t === 'area') this.main = this.chart.addSeries(AreaSeries, { lineColor: '#3987e5', topColor: 'rgba(57,135,229,0.35)', bottomColor: 'rgba(57,135,229,0)', lineWidth: 2 }, 0);
+    else if (t === 'bars') this.main = this.chart.addSeries(BarSeries, { upColor: up, downColor: dn, thinBars: false }, 0);
+    else
+      this.main = this.chart.addSeries(CandlestickSeries, {
+        upColor: t === 'hollow' ? 'rgba(0,0,0,0)' : up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn,
+      }, 0);
+    this.markers = createSeriesMarkers(this.main, []);
+  }
+
+  setChartType() {
+    this.createMain();
     this.load();
   }
 
@@ -147,7 +229,10 @@ export class ChartPane {
     };
     const tfBtn = h('button', { class: 'pane-tf', title: 'Change timeframe (type any: 7m, 2H, 3D…)' }, this.cfg.tf);
     tfBtn.onclick = () => this.host.onTfRequest(this);
-    this.header.append(sel, tfBtn);
+    const ct = this.chartType();
+    const typeSel = h('select', { class: 'pane-type', title: 'Chart type' }, ...CHART_TYPES.map((c) => h('option', { value: c.type, selected: c.type === ct }, c.label)));
+    typeSel.onchange = () => this.host.setChartType(this, typeSel.value as ChartType);
+    this.header.append(sel, tfBtn, typeSel);
   }
 
   setTf(tf: string) {
@@ -171,18 +256,32 @@ export class ChartPane {
     this.bars = b;
     this.agg = getAgg(this.cfg.symbol, b, this.tf, this.host.tz);
     const sp = this.spec();
-    this.candles.applyOptions({ priceFormat: { type: 'price', precision: sp.digits, minMove: Math.pow(10, -sp.digits) } });
+    this.main.applyOptions({ priceFormat: { type: 'price', precision: sp.digits, minMove: Math.pow(10, -sp.digits) } });
     this.k = -1;
-    this.priceLines.forEach((l) => this.candles.removePriceLine(l));
+    this.priceLines.forEach((l) => this.main.removePriceLine(l));
     this.priceLines.clear();
     this.sync(true);
     this.chart.timeScale().scrollToRealTime();
     this.renderHeader();
   }
 
+  /** Raw OHLC of candle j as seen at `cursor`. */
   private candleAt(j: number, cursor: number) {
     const c = partialCandle(this.bars, this.agg, j, cursor);
     return { time: c.time as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close };
+  }
+
+  /** Series point for candle j in the current chart type. */
+  private point(j: number, cursor: number) {
+    const c = this.candleAt(j, cursor);
+    const t = this.chartType();
+    if (t === 'line' || t === 'area') return { time: c.time, value: c.close };
+    if (t === 'heikin') {
+      const ho = haOpen(this.agg)[j];
+      const hc = (c.open + c.high + c.low + c.close) / 4;
+      return { time: c.time, open: ho, high: Math.max(c.high, ho, hc), low: Math.min(c.low, ho, hc), close: hc };
+    }
+    return c;
   }
 
   /** Bring the chart up to the replay cursor (incrementally when possible). */
@@ -193,15 +292,14 @@ export class ChartPane {
     if (full || this.k < 0 || k < this.k || k - this.k > 400) {
       this.start = Math.max(0, k - MAX_DISPLAY + 1);
       const data = [];
-      for (let j = this.start; j < k; j++) data.push({ time: a.time[j] as UTCTimestamp, open: a.o[j], high: a.h[j], low: a.l[j], close: a.c[j] });
-      data.push(this.candleAt(k, cursor));
-      this.candles.setData(data);
+      for (let j = this.start; j <= k; j++) data.push(this.point(j, cursor));
+      this.main.setData(data);
       this.k = k;
       this.times = a.time.subarray(this.start, k + 1);
       this.rebuildIndicators();
     } else {
-      if (k > this.k) this.candles.update(this.candleAt(this.k, cursor));
-      for (let j = Math.max(this.k, this.start); j <= k; j++) this.candles.update(this.candleAt(j, cursor));
+      if (k > this.k) this.main.update(this.point(this.k, cursor));
+      for (let j = Math.max(this.k, this.start); j <= k; j++) this.main.update(this.point(j, cursor));
       const prevK = this.k;
       this.k = k;
       this.times = a.time.subarray(this.start, k + 1);
@@ -237,11 +335,15 @@ export class ChartPane {
     return { time: a.time.subarray(from, k + 1), o, h: hh, l, c, v, n };
   }
 
-  rebuildIndicators() {
+  private clearIndicators() {
     for (const s of this.ind) for (const x of s.series) this.chart.removeSeries(x);
     this.ind = [];
     // remove empty sub-panes
     while (this.chart.panes().length > 1) this.chart.removePane(this.chart.panes().length - 1);
+  }
+
+  rebuildIndicators() {
+    this.clearIndicators();
     const data = this.series(this.start);
     let paneIdx = 0;
     this.cfg.indicators.forEach((cfg) => {
@@ -322,7 +424,7 @@ export class ChartPane {
     }
     for (const [key, pl] of this.priceLines) {
       if (!want.has(key)) {
-        this.candles.removePriceLine(pl);
+        this.main.removePriceLine(pl);
         this.priceLines.delete(key);
       }
     }
@@ -330,7 +432,7 @@ export class ChartPane {
       const opts = { price: w.price, color: w.color, title: w.title, lineStyle: w.style, lineWidth: w.width, axisLabelVisible: true };
       const ex = this.priceLines.get(key);
       if (ex) ex.applyOptions(opts);
-      else this.priceLines.set(key, this.candles.createPriceLine(opts));
+      else this.priceLines.set(key, this.main.createPriceLine(opts));
     }
     // markers: entries & exits of closed trades + open positions (last 300)
     const ms: SeriesMarker<Time>[] = [];

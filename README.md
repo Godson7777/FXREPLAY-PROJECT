@@ -14,7 +14,13 @@ Semua berjalan **100% di browser**: data dan session disimpan di IndexedDB, jadi
 - **Multi-chart:** layout 1/2/3/4 chart. Tiap pane punya symbol dan timeframe sendiri, dan semuanya tersinkron ke jam replay yang sama.
 - **Multi-symbol:** satu session bisa berisi beberapa pair (EURUSD + GBPUSD + XAUUSD…), semuanya tersinkron waktu.
 - **Kontrol replay:** Play/Pause, next candle, next tick 1m, kecepatan 0.5–100×/detik, lompat +1H/+4H/+1D, lompat ke London/NY open, lompat ke tanggal tertentu. Kamu hanya bisa maju, jadi tidak bisa mengintip hasilnya.
+- **Tipe chart:** Candles, Hollow candles, Heikin Ashi, OHLC bars, Line, Area (per pane).
+- **Crosshair tersinkron** di semua chart, walaupun beda timeframe.
+- **Klik-kanan di chart** untuk Buy/Sell Limit/Stop di harga itu (tipe order dipilih otomatis), market order, atau horizontal line.
 - **Timezone chart:** UTC, Jakarta, New York (DST otomatis), London, dll. Candle harian ikut timezone.
+
+### Prop Firm Challenge mode
+Simulasi evaluasi akun funded: preset **FTMO Phase 1/2, The5ers, Funding Pips, trailing drawdown**, atau aturan custom. Aturannya: profit target, max daily loss, max total loss (bisa trailing), dan minimal hari trading. Aturan dicek terhadap **equity** (floating ikut dihitung) di setiap bar 1 menit. Kalau batas tembus, semua posisi ditutup dan trading dikunci. Progres tampil live di panel samping, lalu hasil LULUS/GAGAL tercatat di analytics.
 
 ### Trading engine
 - Order Market / Limit / Stop dengan SL & TP.
@@ -42,9 +48,12 @@ SMA, EMA, Bollinger Bands, VWAP harian, Donchian, RSI, MACD, ATR, Stochastic, Vo
 - Kalender P&L harian dan tabel return bulanan.
 - **Simulasi Monte Carlo:** band persentil equity, peluang profit, median/95% drawdown, dan risk of ruin.
 - **Jurnal:** screenshot chart otomatis setiap trade ditutup, plus tag, catatan, dan rating bintang. Bisa export CSV.
+- **Backup/restore** semua session (termasuk trade, drawing, jurnal, dan screenshot) ke satu file JSON, plus export data market ke CSV. Cocok untuk pindah laptop.
 - Filter: symbol, side, tag, exit reason, rentang tanggal. Tersedia mode gabungan semua session.
 
 ![Analytics](docs/analytics.png)
+
+![Challenge](docs/challenge.png)
 
 ## Menjalankan
 

@@ -133,6 +133,7 @@ export function newBrokerState(initialBalance: number): BrokerState {
 export class Broker {
   onTradeClosed: ((t: Trade) => void) | null = null;
   onFill: ((p: Position) => void) | null = null;
+  blocked: (() => string | null) | null = null;
 
   constructor(
     public cfg: BrokerConfig,
@@ -199,6 +200,8 @@ export class Broker {
 
   place(req: OrderRequest): { ok: true; id: number } | { ok: false; error: string } {
     const sym = req.symbol;
+    const block = this.blocked?.();
+    if (block) return { ok: false, error: block };
     if (!this.s.last[sym]) return { ok: false, error: 'No price yet for ' + sym };
     if (!(req.lots > 0)) return { ok: false, error: 'Lot size must be > 0' };
     const bid = this.bid(sym), ask = this.ask(sym);

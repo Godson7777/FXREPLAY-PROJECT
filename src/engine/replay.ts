@@ -1,6 +1,8 @@
 import { indexAtOrBefore, type Bars, type InstrumentSpec } from '../core/types';
 import { Broker, newBrokerState, type BrokerState } from './broker';
 import type { Drawing } from '../ui/drawings';
+import { offsetFn } from '../core/tz';
+import { evaluate, markTradingDay, newChallengeState, type ChallengeRules, type ChallengeState } from './rules';
 
 export interface PaneConfig {
   symbol: string;
@@ -30,6 +32,7 @@ export interface SessionConfig {
   riskPct: number;
   createdAt: number;
   specs: Record<string, InstrumentSpec>;
+  rules?: ChallengeRules | null;
 }
 
 export interface SessionState {
@@ -42,7 +45,11 @@ export interface SessionState {
   updatedAt: number;
   finished: boolean;
   favTfs: string[];
+  challenge?: ChallengeState;
+  chartType?: Record<number, ChartType>;
 }
+
+export type ChartType = 'candles' | 'hollow' | 'heikin' | 'bars' | 'line' | 'area';
 
 export interface Session extends SessionConfig {
   state: SessionState;
@@ -81,6 +88,7 @@ export class Replay {
   cursor: Record<string, number> = {};
   broker: Broker;
   listeners = new Set<(kind: 'step' | 'jump') => void>();
+  onChallenge: ((st: ChallengeState) => void) | null = null;
 
   constructor(
     public session: Session,
@@ -99,6 +107,26 @@ export class Replay {
       this.cursor[sym] = i;
       if (!this.broker.s.last[sym]) this.broker.setPrice(sym, b.t[i], b.c[i]);
     }
+    if (s.rules && !s.state.challenge) s.state.challenge = newChallengeState(s.balance);
+    const off = offsetFn(s.timezone);
+    this.broker.onFill = (p) => {
+      if (s.state.challenge) markTradingDay(s.state.challenge, p.entryTime, off);
+    };
+    this.broker.blocked = () => this.locked;
+    this.checkRules();
+  }
+
+  get locked(): string | null {
+    const c = this.session.state.challenge;
+    if (c && c.status === 'failed' && this.session.rules?.stopOnBreach) return `Challenge failed: ${c.reason}`;
+    return null;
+  }
+
+  checkRules() {
+    const s = this.session;
+    if (!s.rules || !s.state.challenge) return;
+    const changed = evaluate(s.rules, s.state.challenge, this.broker, s.balance, s.state.clock, offsetFn(s.timezone));
+    if (changed) this.onChallenge?.(s.state.challenge);
   }
 
   get clock() {
@@ -133,6 +161,7 @@ export class Replay {
       }
     }
     this.session.state.clock = nt + 1;
+    this.checkRules();
     return true;
   }
 
