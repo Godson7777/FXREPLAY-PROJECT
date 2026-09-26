@@ -1,8 +1,8 @@
-# ReplayLab — Market Replay & Backtesting
+# Overflow Trade — Market Replay & Backtesting
 
-Platform *market replay* dan *manual backtesting* ala FX Replay yang kamu host sendiri. Kamu bisa replay chart bar-per-bar dengan data masa depan tersembunyi, trading dengan order engine sungguhan, lalu membedah performa lewat analytics yang dalam.
+**Overflow Trade** adalah platform *market replay* dan *manual backtesting*. Kamu bisa replay chart bar-per-bar dengan data masa depan tersembunyi, trading dengan order engine sungguhan, lalu membedah performa lewat analytics yang dalam.
 
-Semua berjalan **100% di browser**: data dan session disimpan di IndexedDB, jadi tidak perlu server atau database.
+Aplikasinya berjalan **100% di browser** (IndexedDB), jadi bisa dipakai tanpa server. Kalau Supabase diaktifkan, tersedia **login dan sinkron cloud** antar perangkat.
 
 ![Replay](docs/replay.png)
 
@@ -55,6 +55,23 @@ SMA, EMA, Bollinger Bands, VWAP harian, Donchian, RSI, MACD, ATR, Stochastic, Vo
 
 ![Challenge](docs/challenge.png)
 
+## Login & sinkron cloud (Supabase)
+
+Aplikasi bisa dipakai tanpa login (data tersimpan di browser). Kalau mau akun dan sinkron antar perangkat (laptop ↔ HP ↔ PC kantor):
+
+1. Buat project gratis di [supabase.com](https://supabase.com/dashboard).
+2. Buka **SQL Editor**, tempel isi [`supabase/schema.sql`](supabase/schema.sql), lalu **Run**. Ini membuat tabel `sessions` dan `shots` serta bucket `datasets`, lengkap dengan Row Level Security, sehingga tiap user hanya bisa mengakses datanya sendiri.
+3. Ambil **Project URL** dan **anon public key** di *Project Settings → API*, lalu pilih salah satu:
+   - **Untuk website publik:** simpan sebagai GitHub Secrets `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY`. Workflow deploy akan memasukkannya ke build, dan semua pengunjung langsung melihat tombol **Sign in**. Untuk lokal, taruh di file `.env.local`.
+   - **Tanpa rebuild:** klik **☁ Cloud sync** di aplikasi, lalu tempel URL dan key-nya.
+4. *(Opsional)* Di *Authentication → Providers → Email*, matikan "Confirm email" kalau ingin user bisa langsung masuk tanpa verifikasi email.
+
+Yang tersinkron:
+- **Otomatis:** session, trade, drawing, catatan jurnal, screenshot, dan status challenge. Konflik diselesaikan dengan *last write wins* per session, dan penghapusan ikut tersinkron.
+- **Data market:** tombol **☁** per symbol di tab Data mengunggah file terkompresi (sekitar 10 MB per tahun data 1 menit). Di perangkat lain, data diunduh otomatis saat session membutuhkannya.
+
+> Anon key memang dirancang untuk dipakai di frontend. Keamanannya dijamin oleh Row Level Security di `schema.sql`. Jangan pernah memasukkan `service_role` key ke aplikasi.
+
 ## Menjalankan
 
 ```bash
@@ -67,7 +84,7 @@ npm run build     # hasil static di dist/, bisa di-host di mana saja
 Buka aplikasinya, klik **Load demo data** (EURUSD, GBPUSD, XAUUSD sintetis 1 tahun), lalu **+ New session**.
 
 ### Deploy
-`dist/` adalah website statis murni, jadi bisa di-deploy ke GitHub Pages, Netlify, Vercel, Cloudflare Pages, atau nginx. Workflow `.github/workflows/deploy.yml` otomatis deploy ke GitHub Pages setiap push ke `main` (aktifkan Pages → Source: GitHub Actions).
+`dist/` adalah website statis murni, jadi bisa di-deploy ke GitHub Pages, Netlify, Vercel, Cloudflare Pages, atau nginx. Workflow `.github/workflows/deploy.yml` otomatis menjalankan test, build, lalu deploy ke GitHub Pages setiap push ke `main`. Aktifkan dulu lewat *Settings → Pages → Source: GitHub Actions*.
 
 ## Data historis
 
@@ -98,8 +115,8 @@ Parser CSV mendeteksi format secara otomatis. Import symbol yang sama berkali-ka
 ```
 src/
   core/        timeframe.ts (parser + agregasi TF apa pun), tz.ts, indicators.ts, types.ts
-  data/        csv.ts, binance.ts, synthetic.ts, store.ts (IndexedDB), sessions.ts
-  engine/      broker.ts (order, fill, SL/TP, MAE/MFE), replay.ts (jam replay multi-symbol)
+  data/        csv.ts, binance.ts, synthetic.ts, store.ts (IndexedDB), sessions.ts, sync.ts (engine sinkron), cloud.ts (Supabase)
+  engine/      broker.ts (order, fill, SL/TP, MAE/MFE), replay.ts (jam replay multi-symbol), rules.ts (prop firm challenge)
   analytics/   stats.ts (metrik, breakdown, Monte Carlo)
   ui/          workspace, chartpane (Lightweight Charts), drawings (canvas overlay), analytics, charts (SVG)
 ```

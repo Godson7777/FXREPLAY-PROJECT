@@ -1,9 +1,9 @@
 {
-  "name": "replaylab",
+  "name": "overflow-trade",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Self-hosted market replay & backtesting platform (FX Replay style) with unlimited timeframes and deep analytics.",
+  "description": "Overflow Trade — market replay & backtesting platform with unlimited timeframes and deep analytics.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
     "lightweight-charts": "^5.2.1"
   },
   "devDependencies": {

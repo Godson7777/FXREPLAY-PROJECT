@@ -1,7 +1,7 @@
 import type { Bars, DatasetMeta } from '../core/types';
 
 /** Tiny promise wrapper around IndexedDB. Everything stays in the user's browser. */
-const DB_NAME = 'replaylab';
+const DB_NAME = 'overflowtrade';
 const DB_VER = 1;
 let dbp: Promise<IDBDatabase> | null = null;
 
