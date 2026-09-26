@@ -5,6 +5,8 @@ import { offsetFn, fmtLocal, fmtDuration } from '../core/tz';
 import { lineChart, barChart, scatter, showTip, hideTip } from './charts';
 import { h, money, pct, num, cls, modal, field, download, esc } from './dom';
 import { getShot, saveSession } from '../data/sessions';
+import { cloudButton } from './cloudui';
+import { LOGO } from './home';
 
 type Metric = 'pnl' | 'r' | 'winrate' | 'count';
 interface Row extends Trade {
@@ -57,12 +59,14 @@ export class AnalyticsView {
       ? h('button', { class: 'ghost', onclick: () => this.nav(`#/replay/${this.selectedId}`) }, '▶ Back to replay')
       : null;
     return h('header', { class: 'topbar' },
+      h('a', { class: 'brand-mark', href: '#/', title: 'Overflow Trade', html: LOGO }),
       h('button', { class: 'ghost', onclick: () => this.nav('#/') }, '← Sessions'),
       h('div', { class: 'brand-sm' }, h('b', {}, 'Analytics'), h('small', {}, 'Performance deep-dive')),
       sel,
       h('div', { class: 'spacer' }),
       back,
       h('button', { class: 'ghost', onclick: () => this.exportCsv() }, '⭳ Export CSV'),
+      cloudButton(),
     );
   }
 

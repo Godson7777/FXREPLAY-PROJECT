@@ -9,6 +9,8 @@ import { saveSession, saveShot, getShot } from '../data/sessions';
 import { ChartPane, IND_COLORS, type PaneHost } from './chartpane';
 import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
 import { h, money, num, cls, toast, modal, field, esc, parseDateInput } from './dom';
+import { cloudButton } from './cloudui';
+import { LOGO } from './home';
 
 type PlayUnit = 'candle' | 'base';
 
@@ -24,7 +26,7 @@ interface Prefs {
   confirmClose: boolean;
 }
 
-const PREF_KEY = 'replaylab.prefs';
+const PREF_KEY = 'overflowtrade.prefs';
 function loadPrefs(): Prefs {
   const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false };
   try {
@@ -108,6 +110,7 @@ export class Workspace implements PaneHost {
       h('button', { class: `seg${s.state.layout === n ? ' on' : ''}`, 'data-layout': n, title: `${n} chart${n > 1 ? 's' : ''}`, onclick: () => this.setLayout(n) }, ['▣', '◫', '◫▯', '⊞'][n - 1]),
     );
     return h('header', { class: 'topbar' },
+      h('a', { class: 'brand-mark', href: '#/', title: 'Overflow Trade', html: LOGO }),
       h('button', { class: 'ghost', onclick: () => this.nav('#/'), title: 'Back to sessions' }, '← Sessions'),
       h('div', { class: 'brand-sm' }, h('b', {}, s.name), h('small', {}, s.symbols.join(' · '))),
       h('div', { class: 'spacer' }),
@@ -115,6 +118,7 @@ export class Workspace implements PaneHost {
       h('button', { class: 'ghost', onclick: () => this.indicatorsModal() }, 'ƒx Indicators'),
       h('button', { class: 'ghost', onclick: () => this.settingsModal() }, '⚙ Settings'),
       h('button', { class: 'ghost', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
+      cloudButton(),
       h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, '📊 Analytics'),
     );
   }

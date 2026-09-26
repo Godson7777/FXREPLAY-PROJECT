@@ -5,12 +5,16 @@ import { parseCsv } from '../data/csv';
 import { downloadBinance } from '../data/binance';
 import { generateSynthetic } from '../data/synthetic';
 import { saveDataset, listDatasets, deleteDataset, loadBars, updateDatasetMeta } from '../data/store';
+import { cloudState, uploadDataset, listCloudDatasets, downloadDataset, deleteCloudDataset } from '../data/cloud';
+import { cloudButton, authModal } from './cloudui';
 import { listSessions, saveSession, deleteSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, type Session } from '../engine/replay';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
 import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download } from './dom';
+
+export const LOGO = `<svg class="logo-svg" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="otg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1d4ed8"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#otg)"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#fff" opacity=".75"/><rect x="14" y="12" width="4" height="13" rx="1" fill="#fff" opacity=".88"/><rect x="21" y="7" width="4" height="18" rx="1" fill="#fff"/><path d="M5 12c3-4 6-4 9-1s6 3 9-2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;
 
 const fmtDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -21,13 +25,14 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
   root.append(page);
   page.append(
     h('header', { class: 'topbar' },
-      h('div', { class: 'brand' }, h('span', { class: 'logo' }, '◧'), h('b', {}, 'ReplayLab'), h('small', {}, 'market replay & backtesting')),
+      h('a', { class: 'brand', href: '#/' }, h('span', { class: 'logo', html: LOGO }), h('b', {}, 'Overflow Trade'), h('small', {}, 'market replay & backtesting')),
       h('nav', { class: 'nav' },
         h('a', { href: '#/', class: tab === 'sessions' ? 'on' : '' }, 'Sessions'),
         h('a', { href: '#/data', class: tab === 'data' ? 'on' : '' }, `Data (${datasets.length})`),
         h('a', { href: '#/analytics/all' }, 'Analytics'),
       ),
       h('div', { class: 'spacer' }),
+      cloudButton(),
       h('button', { class: 'ghost', title: 'Toggle light / dark', onclick: toggleTheme }, '◐'),
     ),
   );
@@ -35,8 +40,9 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
   page.append(main);
   if (tab === 'data') return renderData(main, datasets, () => renderHome(root, nav, 'data'));
 
-  if (!datasets.length) {
+  if (!datasets.length && !sessions.length) {
     main.append(h('section', { class: 'hero' },
+      h('div', { class: 'eyebrow' }, 'Overflow Trade'),
       h('h1', {}, 'Replay any market, bar by bar.'),
       h('p', {}, 'Backtest manually like it\'s live: hidden future, any timeframe you can type (7m, 2H, 3D…), multi-chart sync, a real order engine with SL/TP at 1-minute precision, and analytics deep enough to find your edge.'),
       h('div', { class: 'hero-actions' },
@@ -53,7 +59,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
     h('div', { class: 'row-btns' },
       h('button', { class: 'ghost', title: 'Download all sessions, trades, drawings & journal screenshots as one JSON file', onclick: () => exportBackup(sessions) }, '⭳ Backup'),
       h('button', { class: 'ghost', title: 'Restore sessions from a backup file', onclick: () => importBackup(() => renderHome(root, nav, 'sessions')) }, '⭱ Restore'),
-      h('button', { class: 'primary', onclick: () => newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '+ New session'),
+      h('button', { class: 'primary', onclick: () => (datasets.length ? newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) : nav('#/data')) }, '+ New session'),
     ),
   ));
   if (!sessions.length) {
@@ -107,7 +113,7 @@ function toggleTheme() {
   const next = d.dataset.theme === 'light' ? 'dark' : 'light';
   d.dataset.theme = next;
   try {
-    localStorage.setItem('replaylab.theme', next);
+    localStorage.setItem('overflowtrade.theme', next);
   } catch {
     /* ignore */
   }
@@ -216,8 +222,8 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
       specs: Object.fromEntries(syms.map((d) => [d.id, d.spec])),
     });
     try {
-      const p = JSON.parse(localStorage.getItem('replaylab.prefs') || '{}');
-      localStorage.setItem('replaylab.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value }));
+      const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
+      localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value }));
     } catch {
       /* ignore */
     }
@@ -251,7 +257,23 @@ function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => v
       h('td', {}, h('b', {}, d.symbol)), h('td', {}, d.source), h('td', {}, tfSeconds(d.resolution).label),
       h('td', {}, fmtDate(d.from)), h('td', {}, fmtDate(d.to)), h('td', {}, d.count.toLocaleString('en-US')),
       h('td', {}, pip), h('td', {}, cs), h('td', {}, dg),
-      h('td', { class: 'acts' }, h('button', { class: 'mini', title: 'Download as CSV (UTC)', onclick: () => exportDataset(d) }, 'CSV'), h('button', { class: 'mini danger', onclick: async () => {
+      h('td', { class: 'acts' },
+        h('button', { class: 'mini', title: 'Upload to your cloud so other devices can use it', onclick: async (e: Event) => {
+          if (!cloudState().user) return authModal();
+          const b = e.target as HTMLButtonElement;
+          b.disabled = true;
+          b.textContent = '…';
+          try {
+            const size = await uploadDataset(d);
+            toast(`${d.symbol} uploaded (${(size / 1e6).toFixed(1)} MB)`, 'ok');
+            refresh();
+          } catch (err) {
+            toast((err as Error).message, 'err');
+            b.disabled = false;
+            b.textContent = '☁';
+          }
+        } }, '☁'),
+        h('button', { class: 'mini', title: 'Download as CSV (UTC)', onclick: () => exportDataset(d) }, 'CSV'), h('button', { class: 'mini danger', onclick: async () => {
         if (!confirm(`Delete ${d.symbol} data? Sessions using it will not open.`)) return;
         await deleteDataset(d.id);
         refresh();
@@ -261,6 +283,7 @@ function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => v
   if (!datasets.length) tb.append(h('tr', {}, h('td', { colspan: 10, class: 'empty' }, 'No data yet.')));
   t.append(tb);
   main.append(h('div', { class: 'card' }, h('div', { class: 'table-wrap' }, t)));
+  if (cloudState().user) main.append(cloudDataCard(datasets, refresh));
   main.append(h('section', { class: 'card help' },
     h('h3', {}, 'Where to get free historical data'),
     h('ul', {},
@@ -375,8 +398,8 @@ async function exportBackup(sessions: Session[]) {
     const u = await idb.get<string>('shots', t.shot);
     if (u) shots[t.shot] = u;
   }
-  const payload = { app: 'replaylab', version: 1, exportedAt: new Date().toISOString(), sessions, shots };
-  download(`replaylab-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload), 'application/json');
+  const payload = { app: 'overflowtrade', version: 1, exportedAt: new Date().toISOString(), sessions, shots };
+  download(`overflowtrade-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload), 'application/json');
   toast(`Backed up ${sessions.length} sessions`, 'ok');
 }
 
@@ -387,7 +410,7 @@ function importBackup(done: () => void) {
     if (!f) return;
     try {
       const data = JSON.parse(await f.text()) as { app?: string; sessions?: Session[]; shots?: Record<string, string> };
-      if (data.app !== 'replaylab' || !Array.isArray(data.sessions)) throw new Error('Not a ReplayLab backup file');
+      if (!['overflowtrade', 'replaylab'].includes(data.app ?? '') || !Array.isArray(data.sessions)) throw new Error('Not an Overflow Trade backup file');
       for (const [k, v] of Object.entries(data.shots ?? {})) await idb.put('shots', k, v);
       for (const s of data.sessions) await saveSession(s);
       const missing = [...new Set(data.sessions.flatMap((s) => s.symbols))];
@@ -408,4 +431,44 @@ async function exportDataset(d: DatasetMeta) {
   const lines = ['time,open,high,low,close,volume'];
   for (let i = 0; i < b.n; i++) lines.push(`${new Date(b.t[i] * 1000).toISOString().slice(0, 19).replace('T', ' ')},${b.o[i]},${b.h[i]},${b.l[i]},${b.c[i]},${b.v[i]}`);
   download(`${d.symbol}_${tfSeconds(d.resolution).label}.csv`, lines.join('\n'));
+}
+
+function cloudDataCard(local: DatasetMeta[], refresh: () => void) {
+  const body = h('div', { class: 'muted small' }, 'Loading…');
+  const card = h('section', { class: 'card' }, h('div', { class: 'card-title' }, h('span', {}, '☁ Market data in your cloud')), body);
+  void listCloudDatasets().then((files) => {
+    body.innerHTML = '';
+    if (!files.length) {
+      body.textContent = 'Nothing uploaded yet — press ☁ next to a symbol above.';
+      return;
+    }
+    const have = new Set(local.map((d) => d.id));
+    const t = h('table', { class: 'tbl' }, h('thead', { html: '<tr><th>Symbol</th><th>Size</th><th>Uploaded</th><th>On this device</th><th></th></tr>' }));
+    const tb = h('tbody');
+    for (const f of files) {
+      tb.append(h('tr', {},
+        h('td', {}, h('b', {}, f.id)), h('td', {}, `${(f.size / 1e6).toFixed(1)} MB`), h('td', {}, f.updated.slice(0, 16).replace('T', ' ')),
+        h('td', {}, have.has(f.id) ? '✓' : '—'),
+        h('td', { class: 'acts' },
+          h('button', { class: 'mini', onclick: async (e: Event) => {
+            (e.target as HTMLButtonElement).disabled = true;
+            try {
+              const m = await downloadDataset(f.id);
+              toast(`${m.symbol}: ${m.count.toLocaleString('en-US')} bars downloaded`, 'ok');
+              refresh();
+            } catch (err) {
+              toast((err as Error).message, 'err');
+            }
+          } }, have.has(f.id) ? 'Re-download' : 'Download'),
+          h('button', { class: 'mini danger', onclick: async () => {
+            if (!confirm(`Delete ${f.id} from the cloud? Local copies are kept.`)) return;
+            await deleteCloudDataset(f.id);
+            refresh();
+          } }, 'Delete'),
+        )));
+    }
+    t.append(tb);
+    body.append(h('div', { class: 'table-wrap' }, t));
+  }).catch((e) => (body.textContent = 'Could not list cloud data: ' + (e as Error).message));
+  return card;
 }
