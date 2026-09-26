@@ -1,0 +1,923 @@
+import { parseTf } from '../core/timeframe';
+import { fmtLocal, fmtDuration, offsetFn, localToUtc, ZONES } from '../core/tz';
+import { INDICATORS, indicatorDef } from '../core/indicators';
+import type { Bars } from '../core/types';
+import { round2, type OrderType, type Side, type Trade } from '../engine/broker';
+import { Replay, type Session } from '../engine/replay';
+import { saveSession, saveShot, getShot } from '../data/sessions';
+import { ChartPane, IND_COLORS, type PaneHost } from './chartpane';
+import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
+import { h, money, num, cls, toast, modal, field, esc, parseDateInput } from './dom';
+
+type PlayUnit = 'candle' | 'base';
+
+interface Prefs {
+  speed: number;
+  unit: PlayUnit;
+  autoShot: boolean;
+  sizeMode: 'risk%' | 'risk$' | 'lots';
+  sizeVal: number;
+  slPips: number;
+  tpMode: 'rr' | 'pips';
+  tpVal: number;
+  confirmClose: boolean;
+}
+
+const PREF_KEY = 'replaylab.prefs';
+function loadPrefs(): Prefs {
+  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false };
+  try {
+    return { ...def, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') };
+  } catch {
+    return def;
+  }
+}
+
+export class Workspace implements PaneHost {
+  replay: Replay;
+  panes: ChartPane[] = [];
+  active!: ChartPane;
+  root: HTMLDivElement;
+  private grid: HTMLDivElement;
+  private right: HTMLDivElement;
+  private bottom: HTMLDivElement;
+  private clockEl: HTMLSpanElement;
+  private progress: HTMLDivElement;
+  private playBtn!: HTMLButtonElement;
+  private toolBtns = new Map<string, HTMLButtonElement>();
+  private playing = false;
+  private rafId = 0;
+  private lastFrame = 0;
+  private acc = 0;
+  private saveTimer = 0;
+  private prefs = loadPrefs();
+  private tab: 'positions' | 'orders' | 'history' = 'positions';
+  private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0 };
+  private magnet = true;
+  private stayInTool = false;
+  private pendingShots: Trade[] = [];
+
+  constructor(
+    public session: Session,
+    data: Record<string, Bars>,
+    private nav: (hash: string) => void,
+  ) {
+    this.replay = new Replay(session, data);
+    this.replay.broker.onTradeClosed = (t) => {
+      if (this.prefs.autoShot) this.pendingShots.push(t);
+    };
+    this.grid = h('div', { class: 'grid' });
+    this.right = h('div', { class: 'side' });
+    this.bottom = h('div', { class: 'bottom' });
+    this.clockEl = h('span', { class: 'clock' });
+    this.progress = h('div', { class: 'progress-fill' });
+    this.root = h('div', { class: 'ws' }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), h('div', { class: 'center' }, this.grid, this.controls(), this.bottom), this.right));
+    document.addEventListener('keydown', this.onKey);
+    window.addEventListener('beforeunload', this.flushSave);
+  }
+
+  get tz() {
+    return this.session.timezone;
+  }
+
+  mount(parent: HTMLElement) {
+    parent.append(this.root);
+    this.buildPanes();
+    this.renderAll();
+  }
+
+  destroy() {
+    this.pause();
+    this.flushSave();
+    document.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('beforeunload', this.flushSave);
+    this.panes.forEach((p) => p.destroy());
+    this.root.remove();
+  }
+
+  // ---- layout -------------------------------------------------------------------
+
+  private topbar() {
+    const s = this.session;
+    const layoutBtns = [1, 2, 3, 4].map((n) =>
+      h('button', { class: `seg${s.state.layout === n ? ' on' : ''}`, 'data-layout': n, title: `${n} chart${n > 1 ? 's' : ''}`, onclick: () => this.setLayout(n) }, ['▣', '◫', '◫▯', '⊞'][n - 1]),
+    );
+    return h('header', { class: 'topbar' },
+      h('button', { class: 'ghost', onclick: () => this.nav('#/'), title: 'Back to sessions' }, '← Sessions'),
+      h('div', { class: 'brand-sm' }, h('b', {}, s.name), h('small', {}, s.symbols.join(' · '))),
+      h('div', { class: 'spacer' }),
+      h('div', { class: 'segs', title: 'Chart layout' }, ...layoutBtns),
+      h('button', { class: 'ghost', onclick: () => this.indicatorsModal() }, 'ƒx Indicators'),
+      h('button', { class: 'ghost', onclick: () => this.settingsModal() }, '⚙ Settings'),
+      h('button', { class: 'ghost', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
+      h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, '📊 Analytics'),
+    );
+  }
+
+  private toolbar() {
+    const bar = h('div', { class: 'tools' });
+    for (const t of TOOL_INFO) {
+      const b = h('button', { class: 'tool', title: t.title, onclick: () => this.setTool(t.type) }, t.icon);
+      this.toolBtns.set(t.type, b);
+      bar.append(b);
+    }
+    bar.append(h('div', { class: 'tool-sep' }));
+    const mag = h('button', { class: 'tool on', title: 'Magnet: snap to OHLC' }, '🧲');
+    mag.onclick = () => {
+      this.magnet = !this.magnet;
+      mag.classList.toggle('on', this.magnet);
+      this.panes.forEach((p) => (p.layer.magnet = this.magnet));
+    };
+    const lock = h('button', { class: 'tool', title: 'Keep drawing tool active after use' }, '🔒');
+    lock.onclick = () => {
+      this.stayInTool = !this.stayInTool;
+      lock.classList.toggle('on', this.stayInTool);
+      this.panes.forEach((p) => (p.layer.stayInTool = this.stayInTool));
+    };
+    const clear = h('button', { class: 'tool', title: 'Remove all drawings on this symbol' }, '🗑');
+    clear.onclick = () => {
+      const sym = this.active.cfg.symbol;
+      if (!(this.session.state.drawings[sym]?.length) || !confirm(`Remove all drawings on ${sym}?`)) return;
+      this.session.state.drawings[sym] = [];
+      this.drawingsChanged(sym);
+    };
+    bar.append(mag, lock, clear);
+    this.toolBtns.get('cursor')!.classList.add('on');
+    return bar;
+  }
+
+  private setTool(t: DrawingType | 'cursor') {
+    for (const [k, b] of this.toolBtns) b.classList.toggle('on', k === t);
+    this.panes.forEach((p) => p.layer.setTool(p === this.active ? t : 'cursor'));
+  }
+
+  private controls() {
+    this.playBtn = h('button', { class: 'play', title: 'Play / pause (Space)', onclick: () => this.togglePlay() }, '▶');
+    const speed = h('select', { title: 'Playback speed' },
+      ...[0.5, 1, 2, 3, 5, 10, 20, 50, 100].map((v) => h('option', { value: v, selected: v === this.prefs.speed }, `${v}×/s`)));
+    speed.onchange = () => {
+      this.prefs.speed = +speed.value;
+      this.savePrefs();
+    };
+    const unit = h('select', { title: 'What one playback step reveals' },
+      h('option', { value: 'candle', selected: this.prefs.unit === 'candle' }, 'per candle'),
+      h('option', { value: 'base', selected: this.prefs.unit === 'base' }, 'per 1m tick'),
+    );
+    unit.onchange = () => {
+      this.prefs.unit = unit.value as PlayUnit;
+      this.savePrefs();
+    };
+    const jumpInput = h('input', { type: 'datetime-local', class: 'jump', title: 'Jump forward to (chart timezone)' });
+    const jumpBtn = h('button', { class: 'ghost', title: 'Jump forward — all orders are processed on the way' }, 'Go');
+    jumpBtn.onclick = () => {
+      if (!jumpInput.value) return;
+      const utc = localToUtc(parseDateInput(jumpInput.value), offsetFn(this.tz));
+      if (utc <= this.replay.clock) return toast('You can only move forward in time — no peeking at the past outcome.', 'err');
+      this.jump(utc);
+    };
+    const quick = (label: string, title: string, fn: () => void) => h('button', { class: 'ghost sm', title, onclick: fn }, label);
+    return h('div', { class: 'controls' },
+      this.playBtn,
+      h('button', { class: 'ctl', title: 'Next candle (→)', onclick: () => this.stepCandle() }, '⏭'),
+      h('button', { class: 'ctl', title: 'Next 1-minute tick (Shift+→)', onclick: () => this.stepBase() }, '›'),
+      speed, unit,
+      h('div', { class: 'ctl-sep' }),
+      quick('+1H', 'Skip 1 hour', () => this.jump(this.replay.clock + 3600)),
+      quick('+4H', 'Skip 4 hours', () => this.jump(this.replay.clock + 4 * 3600)),
+      quick('+1D', 'Skip 1 day', () => this.jump(this.replay.clock + 86400)),
+      quick('London', 'Skip to next London open (07:00 UTC)', () => this.jump(nextUtcHour(this.replay.clock, 7))),
+      quick('NY', 'Skip to next New York open (13:30 UTC)', () => this.jump(nextUtcHour(this.replay.clock, 13.5))),
+      h('div', { class: 'ctl-sep' }),
+      jumpInput, jumpBtn,
+      h('div', { class: 'spacer' }),
+      this.clockEl,
+      h('div', { class: 'progress', title: 'Session progress' }, this.progress),
+    );
+  }
+
+  private setLayout(n: number) {
+    this.session.state.layout = n;
+    this.root.querySelectorAll('[data-layout]').forEach((b) => b.classList.toggle('on', +(b as HTMLElement).dataset.layout! === n));
+    this.buildPanes();
+    this.scheduleSave();
+  }
+
+  private buildPanes() {
+    this.panes.forEach((p) => p.destroy());
+    this.panes = [];
+    const st = this.session.state;
+    this.grid.className = `grid g${st.layout}`;
+    for (let i = 0; i < st.layout; i++) {
+      const cfg = st.panes[i];
+      if (!this.session.symbols.includes(cfg.symbol)) cfg.symbol = this.session.symbols[0];
+      const p = new ChartPane(this, cfg, i);
+      p.layer.magnet = this.magnet;
+      p.layer.stayInTool = this.stayInTool;
+      p.layer.onToolDone = () => this.setTool('cursor');
+      this.grid.append(p.el);
+      this.panes.push(p);
+    }
+    this.activate(this.panes[Math.min(st.active, this.panes.length - 1)]);
+  }
+
+  activate(p: ChartPane) {
+    if (this.active === p) return;
+    const tool = [...this.toolBtns].find(([, b]) => b.classList.contains('on'))?.[0] ?? 'cursor';
+    this.active = p;
+    this.session.state.active = p.index;
+    this.panes.forEach((x) => {
+      x.setActive(x === p);
+      x.layer.setTool(x === p ? (tool as DrawingType) : 'cursor');
+    });
+    this.renderSide();
+  }
+
+  paneChanged() {
+    this.renderSide();
+    this.scheduleSave();
+  }
+
+  onTfRequest(pane: ChartPane) {
+    this.tfPrompt(pane, '');
+  }
+
+  private tfPrompt(pane: ChartPane, initial: string) {
+    const fav = this.session.state.favTfs;
+    const input = h('input', { type: 'text', value: initial, placeholder: 'e.g. 3m, 7m, 45m, 2H, 6H, 3D, 2W, M', class: 'tf-input' });
+    const preview = h('div', { class: 'muted' }, ' ');
+    const upd = () => {
+      const tf = parseTf(input.value);
+      preview.textContent = input.value ? (tf ? `→ ${tf.label}` : 'Not a timeframe') : 'Any timeframe works: seconds (if your data has them), minutes, hours, days, weeks, months.';
+    };
+    input.oninput = upd;
+    upd();
+    const grid = h('div', { class: 'tf-grid' },
+      ...['1m', '2m', '3m', '5m', '10m', '15m', '30m', '45m', '1H', '2H', '3H', '4H', '6H', '8H', '12H', 'D', '2D', 'W', 'M'].map((t) =>
+        h('button', { class: `chip${t === pane.cfg.tf ? ' on' : ''}`, onclick: () => apply(t) }, t, fav.includes(t) ? ' ★' : ''),
+      ),
+    );
+    const favBtn = h('button', { class: 'ghost sm' }, '★ Toggle favourite for current');
+    favBtn.onclick = () => {
+      const t = parseTf(input.value)?.label ?? pane.cfg.tf;
+      const i = fav.indexOf(t);
+      if (i >= 0) fav.splice(i, 1);
+      else fav.push(t);
+      this.renderSide();
+      this.scheduleSave();
+      close();
+    };
+    const apply = (t: string) => {
+      if (!pane.setTf(parseTf(t)?.label ?? t)) return toast('Unknown timeframe', 'err');
+      close();
+    };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') apply(input.value);
+    };
+    const close = modal('Timeframe', h('div', { class: 'stack' }, input, preview, grid, favBtn));
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  }
+
+  // ---- PaneHost ---------------------------------------------------------------
+
+  drawings(sym: string): Drawing[] {
+    return (this.session.state.drawings[sym] ??= []);
+  }
+  drawingsChanged(sym: string) {
+    this.panes.forEach((p) => p.cfg.symbol === sym && p.layer.schedule());
+    this.scheduleSave();
+  }
+
+  dragLines(sym: string): DragLine[] {
+    const br = this.replay.broker;
+    const out: DragLine[] = [];
+    const dg = this.session.specs[sym]?.digits ?? 5;
+    for (const p of br.s.positions) {
+      if (p.symbol !== sym) continue;
+      const valid = (price: number, kind: 'sl' | 'tp') => {
+        const bid = br.bid(sym);
+        const above = price > bid;
+        if (p.side === 'long') return kind === 'sl' ? !above : above;
+        return kind === 'sl' ? above : !above;
+      };
+      if (p.sl != null) out.push({ key: `s${p.id}`, price: p.sl, color: '#ef5350', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }, valid(px, 'sl')) });
+      if (p.tp != null) out.push({ key: `t${p.id}`, price: p.tp, color: '#26a69a', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }, valid(px, 'tp')) });
+    }
+    for (const o of br.s.orders) {
+      if (o.symbol !== sym) continue;
+      out.push({ key: `o${o.id}`, price: o.price, color: '#f0b90b', label: 'Entry', onDrop: (px) => { br.modifyOrder(o.id, { price: +px.toFixed(dg) }); this.afterTrade(); } });
+      if (o.sl != null) out.push({ key: `os${o.id}`, price: o.sl, color: '#ef5350', label: 'SL', onDrop: (px) => { br.modifyOrder(o.id, { sl: +px.toFixed(dg) }); this.afterTrade(); } });
+      if (o.tp != null) out.push({ key: `ot${o.id}`, price: o.tp, color: '#26a69a', label: 'TP', onDrop: (px) => { br.modifyOrder(o.id, { tp: +px.toFixed(dg) }); this.afterTrade(); } });
+    }
+    return out;
+  }
+
+  private modifyPos(id: number, patch: { sl?: number | null; tp?: number | null }, valid = true) {
+    if (!valid) return toast('That level is on the wrong side of the current price', 'err');
+    this.replay.broker.modifyPosition(id, patch);
+    this.afterTrade();
+  }
+
+  placeFromTool(d: Drawing, sym: string) {
+    const side: Side = d.type === 'long' ? 'long' : 'short';
+    const br = this.replay.broker;
+    const entry = d.pts[0].p, sl = d.pts[1].p, tp = d.pts[2].p;
+    const cur = side === 'long' ? br.ask(sym) : br.bid(sym);
+    const type: OrderType = Math.abs(entry - cur) < (this.session.specs[sym]?.pipSize ?? 0.0001) ? 'market' : (side === 'long') === entry < cur ? 'limit' : 'stop';
+    const lots = this.sizeFor(sym, Math.abs((type === 'market' ? cur : entry) - sl), type === 'market' ? cur : entry);
+    const r = br.place({ symbol: sym, side, type, lots, price: entry, sl, tp });
+    if (!r.ok) return toast(r.error, 'err');
+    toast(`${side === 'long' ? 'Buy' : 'Sell'} ${type} ${lots} lots placed from R:R tool`, 'ok');
+    this.afterTrade();
+  }
+
+  // ---- replay control ------------------------------------------------------------
+
+  private stepBase() {
+    if (!this.replay.stepBase()) return this.endReached();
+    this.afterStep();
+  }
+
+  private stepCandle() {
+    const p = this.active;
+    const sym = p.cfg.symbol;
+    const a = p.agg, b = p.bars;
+    const cur = this.replay.cursor[sym];
+    const k = a.baseToAgg[cur];
+    const lastOf = (j: number) => (j + 1 < a.n ? a.start[j + 1] - 1 : b.n - 1);
+    let target = lastOf(k);
+    if (cur >= target) target = k + 1 < a.n ? lastOf(k + 1) : b.n - 1;
+    const moved = this.replay.advanceWhile(() => this.replay.cursor[sym] < target);
+    if (!moved) return this.endReached();
+    this.afterStep();
+  }
+
+  private jump(utc: number) {
+    const t0 = performance.now();
+    this.replay.jumpTo(utc);
+    this.afterStep(true);
+    if (performance.now() - t0 > 300) toast(`Jumped to ${fmtLocal(this.replay.clock + offsetFn(this.tz)(this.replay.clock))}`);
+  }
+
+  private endReached() {
+    this.pause();
+    toast('End of data / session reached', 'info');
+  }
+
+  togglePlay() {
+    if (this.playing) this.pause();
+    else this.play();
+  }
+
+  play() {
+    if (this.playing) return;
+    this.playing = true;
+    this.playBtn.textContent = '❚❚';
+    this.playBtn.classList.add('on');
+    this.lastFrame = performance.now();
+    this.acc = 0;
+    const frame = (now: number) => {
+      if (!this.playing) return;
+      this.acc += ((now - this.lastFrame) / 1000) * this.prefs.speed;
+      this.lastFrame = now;
+      let steps = Math.floor(this.acc);
+      this.acc -= steps;
+      steps = Math.min(steps, this.prefs.unit === 'base' ? 5000 : 200);
+      let alive = true;
+      const trades0 = this.replay.broker.s.trades.length;
+      for (let i = 0; i < steps && alive; i++) {
+        if (this.prefs.unit === 'base') alive = this.replay.stepBase();
+        else {
+          const sym = this.active.cfg.symbol;
+          const before = this.replay.cursor[sym];
+          this.stepCandleSilent();
+          alive = this.replay.cursor[sym] !== before;
+        }
+      }
+      if (steps) this.afterStep();
+      if (!alive) return this.endReached();
+      if (this.replay.broker.s.trades.length !== trades0 && this.pauseOnClose) {
+        this.pause();
+        toast('Paused: a trade was closed', 'info');
+        return;
+      }
+      this.rafId = requestAnimationFrame(frame);
+    };
+    this.rafId = requestAnimationFrame(frame);
+  }
+
+  private pauseOnClose = true;
+
+  private stepCandleSilent() {
+    const p = this.active;
+    const sym = p.cfg.symbol;
+    const a = p.agg, b = p.bars;
+    const cur = this.replay.cursor[sym];
+    const k = a.baseToAgg[cur];
+    const lastOf = (j: number) => (j + 1 < a.n ? a.start[j + 1] - 1 : b.n - 1);
+    let target = lastOf(k);
+    if (cur >= target) target = k + 1 < a.n ? lastOf(k + 1) : b.n - 1;
+    this.replay.advanceWhile(() => this.replay.cursor[sym] < target);
+  }
+
+  pause() {
+    this.playing = false;
+    cancelAnimationFrame(this.rafId);
+    if (this.playBtn) {
+      this.playBtn.textContent = '▶';
+      this.playBtn.classList.remove('on');
+    }
+  }
+
+  private afterStep(full = false) {
+    for (const p of this.panes) p.sync(full);
+    this.flushShots();
+    this.renderClock();
+    this.renderSide();
+    this.renderBottom();
+    this.scheduleSave();
+  }
+
+  private afterTrade() {
+    for (const p of this.panes) {
+      p.refreshOverlays();
+      p.layer.schedule();
+    }
+    this.flushShots();
+    this.renderSide();
+    this.renderBottom();
+    this.scheduleSave();
+  }
+
+  private flushShots() {
+    if (!this.pendingShots.length) return;
+    const shots = this.pendingShots.splice(0);
+    const pane = this.panes.find((p) => p.cfg.symbol === shots[shots.length - 1].symbol) ?? this.active;
+    try {
+      const url = pane.screenshot();
+      for (const t of shots) {
+        t.shot = `${this.session.id}-${t.id}`;
+        void saveShot(t.shot, url);
+      }
+    } catch {
+      /* screenshots are best-effort */
+    }
+  }
+
+  // ---- sizing & orders ----------------------------------------------------------
+
+  private sizeFor(sym: string, slDist: number, price: number): number {
+    const br = this.replay.broker;
+    const pr = this.prefs;
+    if (pr.sizeMode === 'lots') return round2(pr.sizeVal);
+    const risk = pr.sizeMode === 'risk%' ? (br.s.balance * pr.sizeVal) / 100 : pr.sizeVal;
+    if (!(slDist > 0)) return 0.01;
+    return br.lotsForRisk(sym, risk, slDist, price);
+  }
+
+  private ticketLevels(side: Side) {
+    const sym = this.active.cfg.symbol;
+    const br = this.replay.broker;
+    const pip = this.session.specs[sym]?.pipSize ?? 0.0001;
+    const dir = side === 'long' ? 1 : -1;
+    const entry = this.ticket.type === 'market' ? (side === 'long' ? br.ask(sym) : br.bid(sym)) : this.ticket.price;
+    const slP = this.prefs.slPips > 0 ? entry - dir * this.prefs.slPips * pip : null;
+    let tpP: number | null = null;
+    if (this.prefs.tpVal > 0) tpP = this.prefs.tpMode === 'rr' ? (slP != null ? entry + dir * Math.abs(entry - slP) * this.prefs.tpVal : null) : entry + dir * this.prefs.tpVal * pip;
+    const lots = this.sizeFor(sym, slP != null ? Math.abs(entry - slP) : 0, entry);
+    return { sym, entry, sl: slP, tp: tpP, lots };
+  }
+
+  private submit(side: Side) {
+    const lv = this.ticketLevels(side);
+    const dg = this.session.specs[lv.sym]?.digits ?? 5;
+    const r = this.replay.broker.place({
+      symbol: lv.sym, side, type: this.ticket.type, lots: lv.lots, price: lv.entry,
+      sl: lv.sl != null ? +lv.sl.toFixed(dg) : null, tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
+      tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), note: this.ticket.note,
+      trailPips: this.ticket.trail || null, beAtR: this.ticket.be || null,
+    });
+    if (!r.ok) return toast(r.error, 'err');
+    toast(`${side === 'long' ? 'BUY' : 'SELL'} ${this.ticket.type} ${lv.lots} ${lv.sym}`, 'ok');
+    this.afterTrade();
+  }
+
+  // ---- rendering -----------------------------------------------------------------
+
+  private renderAll() {
+    this.renderClock();
+    this.renderSide();
+    this.renderBottom();
+  }
+
+  private renderClock() {
+    const c = this.replay.clock - 1;
+    const off = offsetFn(this.tz);
+    this.clockEl.textContent = `${fmtLocal(c + off(c), true)} · ${this.tz}`;
+    let lo = Infinity, hi = -Infinity;
+    for (const s of this.session.symbols) {
+      const b = this.replay.data[s];
+      if (!b) continue;
+      lo = Math.min(lo, this.session.start);
+      hi = Math.max(hi, this.session.end ?? b.t[b.n - 1]);
+    }
+    this.progress.style.width = `${Math.max(0, Math.min(100, ((c - lo) / (hi - lo)) * 100))}%`;
+  }
+
+  private renderSide() {
+    if (!this.active) return;
+    const br = this.replay.broker;
+    const sym = this.active.cfg.symbol;
+    const sp = this.session.specs[sym];
+    const dg = sp?.digits ?? 5;
+    const bid = br.bid(sym), ask = br.ask(sym);
+    const pr = this.prefs;
+    const eq = br.equity();
+    const net = eq - this.session.balance;
+    const trades = br.s.trades;
+    const wr = trades.length ? trades.filter((t) => t.pnl > 0).length / trades.length : 0;
+    const focused = document.activeElement as HTMLElement | null;
+    const focusId = focused && this.right.contains(focused) ? focused.id : '';
+    if (focusId) {
+      // don't rebuild the ticket while the user is typing; refresh numbers only
+      this.right.querySelectorAll<HTMLElement>('[data-live]').forEach((el) => {
+        const k = el.dataset.live!;
+        if (k === 'bid') el.textContent = bid.toFixed(dg);
+        if (k === 'ask') el.textContent = ask.toFixed(dg);
+      });
+      this.renderTicketCalc();
+      return;
+    }
+    if (this.ticket.type !== 'market' && !this.ticket.price) this.ticket.price = +bid.toFixed(dg);
+
+    const inp = (id: string, val: number | string, onchange: (v: string) => void, attrs: Record<string, string | number> = {}) => {
+      const i = h('input', { id, value: val, ...attrs });
+      i.addEventListener('input', () => {
+        onchange(i.value);
+        this.renderTicketCalc();
+      });
+      i.addEventListener('change', () => this.savePrefs());
+      return i;
+    };
+    const typeSeg = h('div', { class: 'segs full' },
+      ...(['market', 'limit', 'stop'] as OrderType[]).map((t) =>
+        h('button', { class: `seg${this.ticket.type === t ? ' on' : ''}`, onclick: () => { this.ticket.type = t; this.ticket.price = +bid.toFixed(dg); this.renderSide(); } }, t[0].toUpperCase() + t.slice(1))),
+    );
+    const sizeSel = h('select', { id: 'sizeMode' },
+      h('option', { value: 'risk%', selected: pr.sizeMode === 'risk%' }, 'Risk %'),
+      h('option', { value: 'risk$', selected: pr.sizeMode === 'risk$' }, 'Risk $'),
+      h('option', { value: 'lots', selected: pr.sizeMode === 'lots' }, 'Lots'),
+    );
+    sizeSel.onchange = () => {
+      pr.sizeMode = sizeSel.value as Prefs['sizeMode'];
+      this.savePrefs();
+      this.renderSide();
+    };
+    const tpSel = h('select', { id: 'tpMode' },
+      h('option', { value: 'rr', selected: pr.tpMode === 'rr' }, 'TP in R'),
+      h('option', { value: 'pips', selected: pr.tpMode === 'pips' }, 'TP pips'),
+    );
+    tpSel.onchange = () => {
+      pr.tpMode = tpSel.value as Prefs['tpMode'];
+      this.savePrefs();
+      this.renderSide();
+    };
+    const favs = h('div', { class: 'favs' },
+      ...this.session.state.favTfs.map((t) => h('button', { class: `chip${t === this.active.cfg.tf ? ' on' : ''}`, onclick: () => this.active.setTf(t) }, t)),
+      h('button', { class: 'chip', title: 'Any timeframe…', onclick: () => this.tfPrompt(this.active, '') }, '+'),
+    );
+
+    this.right.innerHTML = '';
+    this.right.append(
+      h('section', { class: 'card' },
+        h('div', { class: 'card-title' }, h('span', {}, `${sym}`), h('small', { class: 'muted' }, `Active chart · ${this.active.cfg.tf}`)),
+        favs,
+      ),
+      h('section', { class: 'card ticket' },
+        h('div', { class: 'quote' },
+          h('button', { class: 'sell', onclick: () => this.submit('short'), title: 'Sell (Shift+S)' }, h('small', {}, 'SELL'), h('b', { 'data-live': 'bid' }, bid.toFixed(dg))),
+          h('span', { class: 'spread', title: 'Spread in pips' }, num((ask - bid) / (sp?.pipSize ?? 1), 1)),
+          h('button', { class: 'buy', onclick: () => this.submit('long'), title: 'Buy (Shift+B)' }, h('small', {}, 'BUY'), h('b', { 'data-live': 'ask' }, ask.toFixed(dg))),
+        ),
+        typeSeg,
+        this.ticket.type !== 'market' ? field('Entry price', inp('tPrice', this.ticket.price, (v) => (this.ticket.price = +v), { type: 'number', step: Math.pow(10, -dg) })) : null,
+        h('div', { class: 'row2' },
+          field('Size', h('div', { class: 'join' }, sizeSel, inp('tSize', pr.sizeVal, (v) => (pr.sizeVal = +v), { type: 'number', step: 0.01, min: 0 }))),
+          field('Stop loss (pips)', inp('tSl', pr.slPips, (v) => (pr.slPips = +v), { type: 'number', step: 0.1, min: 0 })),
+        ),
+        h('div', { class: 'row2' },
+          field('Take profit', h('div', { class: 'join' }, tpSel, inp('tTp', pr.tpVal, (v) => (pr.tpVal = +v), { type: 'number', step: 0.1, min: 0 }))),
+          field('Trail (pips)', inp('tTrail', this.ticket.trail || '', (v) => (this.ticket.trail = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
+        ),
+        h('div', { class: 'row2' },
+          field('Auto-BE at R', inp('tBe', this.ticket.be || '', (v) => (this.ticket.be = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
+          field('Tags / setup', inp('tTags', this.ticket.tags, (v) => (this.ticket.tags = v), { type: 'text', placeholder: 'breakout, A+' })),
+        ),
+        h('div', { class: 'calc', id: 'calc' }),
+      ),
+      h('section', { class: 'card acct' },
+        h('div', { class: 'card-title' }, h('span', {}, 'Account')),
+        kv('Balance', money(br.s.balance)),
+        kv('Equity', money(eq)),
+        kv('Floating P&L', money(eq - br.s.balance, true), cls(eq - br.s.balance)),
+        kv('Open risk', money(br.openRisk())),
+        kv('Net P&L', `${money(net, true)} (${num((net / this.session.balance) * 100, 2, true)}%)`, cls(net)),
+        kv('Trades · Win rate', `${trades.length} · ${(wr * 100).toFixed(1)}%`),
+      ),
+    );
+    this.renderTicketCalc();
+  }
+
+  private renderTicketCalc() {
+    const el = this.right.querySelector('#calc');
+    if (!el) return;
+    const br = this.replay.broker;
+    const L = this.ticketLevels('long'), S = this.ticketLevels('short');
+    const sym = L.sym;
+    const dg = this.session.specs[sym]?.digits ?? 5;
+    const risk = L.sl != null ? br.value(sym, Math.abs(L.entry - L.sl), L.lots, L.sl) : null;
+    const reward = L.tp != null ? br.value(sym, Math.abs(L.tp - L.entry), L.lots, L.tp) : null;
+    el.innerHTML = `
+      <div><span>Lots</span><b>${L.lots.toFixed(2)}</b></div>
+      <div><span>Risk</span><b class="dn">${risk != null ? money(risk) : 'no SL'}</b></div>
+      <div><span>Reward</span><b class="up">${reward != null ? money(reward) : '—'}</b></div>
+      <div><span>R:R</span><b>${risk && reward ? (reward / risk).toFixed(2) : '—'}</b></div>
+      <div class="lv"><span>Buy SL/TP</span><b>${L.sl?.toFixed(dg) ?? '—'} / ${L.tp?.toFixed(dg) ?? '—'}</b></div>
+      <div class="lv"><span>Sell SL/TP</span><b>${S.sl?.toFixed(dg) ?? '—'} / ${S.tp?.toFixed(dg) ?? '—'}</b></div>`;
+  }
+
+  private renderBottom() {
+    const br = this.replay.broker;
+    const tabs = h('div', { class: 'tabs' },
+      ...(['positions', 'orders', 'history'] as const).map((t) =>
+        h('button', { class: `tab${this.tab === t ? ' on' : ''}`, onclick: () => { this.tab = t; this.renderBottom(); } },
+          t === 'positions' ? `Positions (${br.s.positions.length})` : t === 'orders' ? `Orders (${br.s.orders.length})` : `History (${br.s.trades.length})`)),
+      h('div', { class: 'spacer' }),
+      br.s.positions.length ? h('button', { class: 'ghost sm', onclick: () => { br.closeAll(); this.afterTrade(); } }, 'Close all') : null,
+    );
+    const body = h('div', { class: 'table-wrap' });
+    const t = h('table', { class: 'tbl' });
+    body.append(t);
+    if (this.tab === 'positions') {
+      t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>SL</th><th>TP</th><th>Pips</th><th>R</th><th>P&L</th><th>Opened</th><th></th></tr></thead>`;
+      const tb = h('tbody');
+      for (const p of br.s.positions) {
+        const sp = this.session.specs[p.symbol];
+        const dg = sp?.digits ?? 5;
+        const px = p.side === 'long' ? br.bid(p.symbol) : br.ask(p.symbol);
+        const pips = ((p.side === 'long' ? 1 : -1) * (px - p.entry)) / (sp?.pipSize ?? 1);
+        const fl = br.floating(p);
+        const rNow = p.initialSl != null ? ((p.side === 'long' ? 1 : -1) * (px - p.entry)) / Math.abs(p.entry - p.initialSl) : null;
+        const off = offsetFn(this.tz);
+        const tr = h('tr', {},
+          h('td', {}, `${p.id}`), h('td', {}, p.symbol), h('td', { class: p.side === 'long' ? 'up' : 'dn' }, p.side.toUpperCase()), h('td', {}, p.lots.toFixed(2)),
+          h('td', {}, p.entry.toFixed(dg)),
+          h('td', {}, this.levelInput(p.id, 'sl', p.sl, dg)), h('td', {}, this.levelInput(p.id, 'tp', p.tp, dg)),
+          h('td', { class: cls(pips) }, num(pips, 1, true)), h('td', { class: cls(rNow ?? 0) }, rNow != null ? num(rNow, 2, true) : '—'),
+          h('td', { class: cls(fl) }, money(fl, true)), h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
+          h('td', { class: 'acts' },
+            h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { br.breakeven(p.id); this.afterTrade(); } }, 'BE'),
+            h('button', { class: 'mini', title: 'Close half', onclick: () => { br.close(p.id, 0.5); this.afterTrade(); } }, '½'),
+            h('button', { class: 'mini', title: 'Reverse position', onclick: () => { br.reverse(p.id); this.afterTrade(); } }, '⇄'),
+            h('button', { class: 'mini danger', title: 'Close', onclick: () => { br.close(p.id); this.afterTrade(); } }, '✕'),
+          ),
+        );
+        tb.append(tr);
+      }
+      if (!br.s.positions.length) tb.append(emptyRow(12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
+      t.append(tb);
+    } else if (this.tab === 'orders') {
+      t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Type</th><th>Side</th><th>Lots</th><th>Price</th><th>SL</th><th>TP</th><th>Placed</th><th></th></tr></thead>`;
+      const tb = h('tbody');
+      const off = offsetFn(this.tz);
+      for (const o of br.s.orders) {
+        const dg = this.session.specs[o.symbol]?.digits ?? 5;
+        tb.append(h('tr', {},
+          h('td', {}, `${o.id}`), h('td', {}, o.symbol), h('td', {}, o.type), h('td', { class: o.side === 'long' ? 'up' : 'dn' }, o.side.toUpperCase()), h('td', {}, o.lots.toFixed(2)),
+          h('td', {}, o.price.toFixed(dg)), h('td', {}, o.sl?.toFixed(dg) ?? '—'), h('td', {}, o.tp?.toFixed(dg) ?? '—'),
+          h('td', { class: 'muted' }, fmtLocal(o.createdAt + off(o.createdAt))),
+          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: () => { br.cancelOrder(o.id); this.afterTrade(); } }, 'Cancel')),
+        ));
+      }
+      if (!br.s.orders.length) tb.append(emptyRow(10, 'No pending orders. Drag order/SL/TP lines on the chart to adjust them.'));
+      t.append(tb);
+    } else {
+      t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Pips</th><th>R</th><th>P&L</th><th>Exit by</th><th>Held</th><th>Tags</th><th></th></tr></thead>`;
+      const tb = h('tbody');
+      for (const tr of [...br.s.trades].reverse().slice(0, 200)) {
+        const dg = this.session.specs[tr.symbol]?.digits ?? 5;
+        tb.append(h('tr', {},
+          h('td', {}, `${tr.id}`), h('td', {}, tr.symbol), h('td', { class: tr.side === 'long' ? 'up' : 'dn' }, tr.side.toUpperCase()), h('td', {}, tr.lots.toFixed(2)),
+          h('td', {}, tr.entry.toFixed(dg)), h('td', {}, tr.exit.toFixed(dg)), h('td', { class: cls(tr.pips) }, num(tr.pips, 1, true)),
+          h('td', { class: cls(tr.r ?? 0) }, tr.r != null ? num(tr.r, 2, true) : '—'), h('td', { class: cls(tr.pnl) }, money(tr.pnl, true)),
+          h('td', {}, tr.exitReason.toUpperCase()), h('td', {}, fmtDuration(tr.holdSec)), h('td', { class: 'muted' }, tr.tags.join(', ')),
+          h('td', { class: 'acts' }, h('button', { class: 'mini', onclick: () => this.journalModal(tr) }, 'Journal')),
+        ));
+      }
+      if (!br.s.trades.length) tb.append(emptyRow(13, 'Closed trades appear here. Every close is auto-screenshotted for your journal.'));
+      t.append(tb);
+    }
+    this.bottom.innerHTML = '';
+    this.bottom.append(tabs, body);
+  }
+
+  private levelInput(id: number, kind: 'sl' | 'tp', v: number | null, dg: number) {
+    const i = h('input', { class: 'lvl', type: 'number', step: Math.pow(10, -dg), value: v != null ? v.toFixed(dg) : '', placeholder: '—' });
+    i.onchange = () => {
+      const x = i.value === '' ? null : +i.value;
+      this.replay.broker.modifyPosition(id, { [kind]: x });
+      this.afterTrade();
+    };
+    return i;
+  }
+
+  journalModal(t: Trade) {
+    const img = h('img', { class: 'shot', alt: 'Chart at close' });
+    if (t.shot) void getShot(t.shot).then((u) => (u ? (img.src = u) : img.remove()));
+    else img.remove();
+    const tags = h('input', { value: t.tags.join(', '), placeholder: 'setup, mistake, A+ …' });
+    const note = h('textarea', { rows: 4, placeholder: 'What did you see? What would you do differently?' }, t.note);
+    const rating = h('select', {}, ...[0, 1, 2, 3, 4, 5].map((r) => h('option', { value: r, selected: (t.rating ?? 0) === r }, r ? '★'.repeat(r) : 'No rating')));
+    const off = offsetFn(this.tz);
+    const save = h('button', { class: 'primary' }, 'Save');
+    const close = modal(`Trade #${t.id} · ${t.symbol} ${t.side.toUpperCase()}`, h('div', { class: 'stack' },
+      h('div', { class: 'kv-grid' },
+        kv('P&L', money(t.pnl, true), cls(t.pnl)), kv('R', t.r != null ? num(t.r, 2, true) : '—', cls(t.r ?? 0)), kv('Pips', num(t.pips, 1, true)),
+        kv('Entry', `${fmtLocal(t.entryTime + off(t.entryTime))}`), kv('Exit', `${fmtLocal(t.exitTime + off(t.exitTime))}`), kv('Held', fmtDuration(t.holdSec)),
+        kv('MAE', `${num(t.maePips, 1)} pips${t.maeR != null ? ` (${num(t.maeR, 2)}R)` : ''}`), kv('MFE', `${num(t.mfePips, 1)} pips${t.mfeR != null ? ` (${num(t.mfeR, 2)}R)` : ''}`), kv('Exit by', t.exitReason.toUpperCase()),
+      ),
+      img,
+      field('Tags', tags), field('Notes', note), field('Rating', rating),
+      save,
+    ), { wide: true });
+    save.onclick = () => {
+      t.tags = tags.value.split(',').map((x) => x.trim()).filter(Boolean);
+      t.note = note.value;
+      t.rating = +rating.value || undefined;
+      this.scheduleSave();
+      this.renderBottom();
+      close();
+    };
+  }
+
+  // ---- modals ---------------------------------------------------------------------
+
+  private indicatorsModal() {
+    const pane = this.active;
+    const list = h('div', { class: 'stack' });
+    const render = () => {
+      list.innerHTML = '';
+      list.append(h('div', { class: 'muted' }, `Indicators on chart ${pane.index + 1} (${pane.cfg.symbol} ${pane.cfg.tf})`));
+      for (const cfg of pane.cfg.indicators) {
+        const def = indicatorDef(cfg.type)!;
+        const row = h('div', { class: 'ind-row' }, h('span', { class: 'dot', style: `background:${cfg.color}` }), h('b', {}, def.label));
+        for (const k of Object.keys(def.params)) {
+          const i = h('input', { type: 'number', value: cfg.params[k] ?? def.params[k], title: k, class: 'sm' });
+          i.onchange = () => {
+            cfg.params[k] = +i.value;
+            pane.rebuildIndicators();
+            this.scheduleSave();
+          };
+          row.append(h('label', { class: 'mini-field' }, h('small', {}, k), i));
+        }
+        row.append(h('button', { class: 'mini danger', onclick: () => { pane.cfg.indicators = pane.cfg.indicators.filter((x) => x !== cfg); pane.rebuildIndicators(); this.scheduleSave(); render(); } }, 'Remove'));
+        list.append(row);
+      }
+      list.append(h('div', { class: 'chips' }, ...INDICATORS.map((d) =>
+        h('button', { class: 'chip', onclick: () => {
+          pane.cfg.indicators.push({ id: Math.random().toString(36).slice(2, 8), type: d.type, params: { ...d.params }, color: IND_COLORS[pane.cfg.indicators.length % IND_COLORS.length] });
+          pane.rebuildIndicators();
+          this.scheduleSave();
+          render();
+        } }, `+ ${d.label}`))));
+    };
+    render();
+    modal('Indicators', list, { wide: true });
+  }
+
+  private settingsModal() {
+    const s = this.session;
+    const tz = h('select', {}, ...ZONES.concat(ZONES.includes(s.timezone) ? [] : [s.timezone]).map((z) => h('option', { value: z, selected: z === s.timezone }, z)));
+    const comm = h('input', { type: 'number', step: 0.01, value: s.commissionPerLot });
+    const slFirst = h('input', { type: 'checkbox', checked: s.slFirst });
+    const autoShot = h('input', { type: 'checkbox', checked: this.prefs.autoShot });
+    const pauseClose = h('input', { type: 'checkbox', checked: this.pauseOnClose });
+    const specRows = s.symbols.map((sym) => {
+      const sp = s.specs[sym];
+      const spread = h('input', { type: 'number', step: 0.1, value: s.spreadPips[sym] ?? s.spreadPips['*'] ?? 0, class: 'sm' });
+      const pip = h('input', { type: 'number', step: 'any', value: sp.pipSize, class: 'sm' });
+      const cs = h('input', { type: 'number', step: 'any', value: sp.contractSize, class: 'sm' });
+      const dg = h('input', { type: 'number', step: 1, value: sp.digits, class: 'sm' });
+      return { sym, spread, pip, cs, dg, row: h('tr', {}, h('td', {}, sym), h('td', {}, spread), h('td', {}, pip), h('td', {}, cs), h('td', {}, dg)) };
+    });
+    const tbl = h('table', { class: 'tbl' }, h('thead', { html: '<tr><th>Symbol</th><th>Spread (pips)</th><th>Pip size</th><th>Contract / lot</th><th>Digits</th></tr>' }), h('tbody', {}, ...specRows.map((r) => r.row)));
+    const save = h('button', { class: 'primary' }, 'Save settings');
+    const close = modal('Session settings', h('div', { class: 'stack' },
+      h('div', { class: 'row2' }, field('Chart timezone', tz), field('Commission per lot per side ($)', comm)),
+      h('label', { class: 'check' }, slFirst, ' If SL and TP are both touched inside one 1m bar, assume SL first (conservative)'),
+      h('label', { class: 'check' }, autoShot, ' Auto-screenshot the chart when a trade closes (journal)'),
+      h('label', { class: 'check' }, pauseClose, ' Pause playback when a trade closes'),
+      h('h4', {}, 'Instruments'), tbl,
+      save,
+    ), { wide: true });
+    save.onclick = () => {
+      s.timezone = tz.value;
+      s.commissionPerLot = +comm.value;
+      s.slFirst = slFirst.checked;
+      this.prefs.autoShot = autoShot.checked;
+      this.pauseOnClose = pauseClose.checked;
+      for (const r of specRows) {
+        s.spreadPips[r.sym] = +r.spread.value;
+        s.specs[r.sym] = { ...s.specs[r.sym], pipSize: +r.pip.value, contractSize: +r.cs.value, digits: +r.dg.value };
+      }
+      Object.assign(this.replay.broker.cfg, { commissionPerLot: s.commissionPerLot, slFirst: s.slFirst, spreadPips: s.spreadPips });
+      this.savePrefs();
+      this.panes.forEach((p) => p.load());
+      this.afterTrade();
+      close();
+    };
+  }
+
+  private helpModal() {
+    const rows: [string, string][] = [
+      ['Space', 'Play / pause'], ['→', 'Next candle on the active chart'], ['Shift + →', 'Next 1-minute tick'],
+      ['Shift + B / Shift + S', 'Market buy / sell with the ticket settings'], ['Shift + C', 'Close all positions'],
+      ['Type a number / "4h" / "d"', 'Change timeframe of the active chart'], ['Alt + T/H/V/R/F/L/S/M', 'Trend, H-line, V-line, Rect, Fib, Long, Short, Measure'],
+      ['Esc', 'Cursor tool / close dialog'], ['Delete / Backspace', 'Delete the selected drawing'], ['1 … 4 (with Alt)', 'Layout with 1–4 charts'],
+    ];
+    modal('Keyboard shortcuts', h('table', { class: 'tbl' }, h('tbody', {}, ...rows.map(([k, v]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, v))))));
+  }
+
+  // ---- keyboard ----------------------------------------------------------------------
+
+  private onKey = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (document.querySelector('.modal-back')) return;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    if (e.ctrlKey || e.metaKey) return;
+    const k = e.key;
+    if (e.altKey) {
+      const code = e.code.replace('Key', '').replace('Digit', '').toLowerCase();
+      const tool = TOOL_INFO.find((x) => x.key === code);
+      if (tool) return (e.preventDefault(), this.setTool(tool.type));
+      if (['1', '2', '3', '4'].includes(code)) return (e.preventDefault(), this.setLayout(+code));
+      return;
+    }
+    if (k === ' ') return (e.preventDefault(), this.togglePlay());
+    if (k === 'ArrowRight') return (e.preventDefault(), e.shiftKey ? this.stepBase() : this.stepCandle());
+    if (k === 'Escape') return this.setTool('cursor');
+    if (k === 'Delete' || k === 'Backspace') {
+      if (this.active.layer.deleteSelected()) e.preventDefault();
+      return;
+    }
+    if (e.shiftKey && (k === 'B' || k === 'b')) return this.submit('long');
+    if (e.shiftKey && (k === 'S' || k === 's')) return this.submit('short');
+    if (e.shiftKey && (k === 'C' || k === 'c')) return (this.replay.broker.closeAll(), this.afterTrade());
+    if (/^[0-9]$/.test(k) || (!e.shiftKey && /^[dwhm]$/i.test(k))) {
+      e.preventDefault();
+      this.tfPrompt(this.active, k);
+    }
+  };
+
+  // ---- persistence -------------------------------------------------------------------
+
+  private savePrefs() {
+    try {
+      localStorage.setItem(PREF_KEY, JSON.stringify(this.prefs));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  scheduleSave() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(this.flushSave, 800);
+  }
+
+  flushSave = () => {
+    clearTimeout(this.saveTimer);
+    this.session.state.updatedAt = Date.now();
+    void saveSession(this.session).catch((e) => toast('Could not save session: ' + e, 'err'));
+  };
+}
+
+function kv(k: string, v: string, c = '') {
+  return h('div', { class: 'kv' }, h('span', {}, k), h('b', { class: c }, v));
+}
+
+function emptyRow(span: number, text: string) {
+  return h('tr', {}, h('td', { colspan: span, class: 'empty', html: esc(text) }));
+}
+
+function nextUtcHour(clock: number, hour: number) {
+  const day = Math.floor(clock / 86400) * 86400;
+  let t = day + hour * 3600;
+  while (t <= clock) t += 86400;
+  const dow = new Date(t * 1000).getUTCDay();
+  if (dow === 6) t += 2 * 86400;
+  if (dow === 0) t += 86400;
+  return t;
+}
+
