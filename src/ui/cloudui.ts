@@ -1,4 +1,4 @@
-import { cloudState, configFromEnv, onCloudChange, resetPassword, setCloudConfig, signIn, signOut, signUp, syncNow, cloudConfig } from '../data/cloud';
+import { cloudState, configFromEnv, friendlyError, onCloudChange, resetPassword, setCloudConfig, signIn, signOut, signUp, syncNow, cloudConfig } from '../data/cloud';
 import { h, modal, field, toast } from './dom';
 
 /** Self-updating cloud status button for top bars. */
@@ -82,7 +82,7 @@ export function authModal(mode: 'in' | 'up' = 'in') {
       await resetPassword(email.value);
       msg.textContent = 'Password reset email sent.';
     } catch (e) {
-      msg.textContent = (e as Error).message;
+      msg.textContent = friendlyError(e);
     }
   };
   (go.closest('form') as HTMLFormElement).onsubmit = async (e) => {
@@ -102,7 +102,7 @@ export function authModal(mode: 'in' | 'up' = 'in') {
         } else msg.textContent = 'Check your inbox and confirm your email, then sign in here.';
       }
     } catch (err) {
-      msg.textContent = (err as Error).message ?? String(err);
+      msg.textContent = friendlyError(err);
     } finally {
       go.disabled = false;
     }

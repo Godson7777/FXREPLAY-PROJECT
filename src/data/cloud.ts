@@ -15,24 +15,55 @@ export interface CloudConfig {
 
 const CFG_KEY = 'overflowtrade.cloud';
 
+/**
+ * Supabase wants the bare project origin. People often paste the Data API URL
+ * (".../rest/v1/"), a dashboard link or just the project ref; accept all of them.
+ */
+export function normalizeProjectUrl(raw: string): string {
+  const s = raw.trim().replace(/^["']|["']$/g, '');
+  if (/^[a-z0-9]{15,30}$/.test(s)) return `https://${s}.supabase.co`;
+  const dash = /supabase\.com\/dashboard\/project\/([a-z0-9]+)/.exec(s);
+  if (dash) return `https://${dash[1]}.supabase.co`;
+  try {
+    return new URL(/^https?:\/\//.test(s) ? s : `https://${s}`).origin;
+  } catch {
+    return s.replace(/\/+$/, '');
+  }
+}
+
+const cleanKey = (k: string) => k.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, '');
+
 export function cloudConfig(): CloudConfig | null {
   const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-  if (envUrl && envKey) return { url: envUrl, key: envKey };
+  if (envUrl?.trim() && envKey?.trim()) return { url: normalizeProjectUrl(envUrl), key: cleanKey(envKey) };
   try {
     const c = JSON.parse(localStorage.getItem(CFG_KEY) || 'null') as CloudConfig | null;
-    return c?.url && c?.key ? c : null;
+    return c?.url && c?.key ? { url: normalizeProjectUrl(c.url), key: cleanKey(c.key) } : null;
   } catch {
     return null;
   }
 }
 
 export function configFromEnv() {
-  return !!import.meta.env.VITE_SUPABASE_URL;
+  return !!(import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
+}
+
+/** Turn raw Supabase/network errors into something a trader can act on. */
+export function friendlyError(e: unknown): string {
+  const m = (e as Error)?.message ?? String(e);
+  if (/Invalid path specified/i.test(m)) return 'The Supabase Project URL is wrong — it must look like https://xxxx.supabase.co (nothing after .co).';
+  if (/Invalid API key|No API key|invalid.*jwt/i.test(m)) return 'The Supabase key is not accepted — use the Publishable key (sb_publishable_…) or the legacy anon key, never the secret key.';
+  if (/Invalid login credentials/i.test(m)) return 'Wrong email or password. No account yet? Use "Create one".';
+  if (/Email not confirmed/i.test(m)) return 'Confirm your email first (check your inbox and spam folder), then sign in.';
+  if (/rate limit/i.test(m)) return 'Too many emails sent — Supabase\'s built-in mailer is limited. Wait a bit, or turn off "Confirm email" / add your own SMTP in Supabase.';
+  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Could not reach Supabase — check your internet connection and the Project URL.';
+  if (/relation .* does not exist|Could not find the table/i.test(m)) return 'Database tables are missing — run supabase/schema.sql in the Supabase SQL Editor.';
+  return m;
 }
 
 export function setCloudConfig(c: CloudConfig | null) {
-  if (c) localStorage.setItem(CFG_KEY, JSON.stringify({ url: c.url.trim().replace(/\/+$/, ''), key: c.key.trim() }));
+  if (c) localStorage.setItem(CFG_KEY, JSON.stringify({ url: normalizeProjectUrl(c.url), key: cleanKey(c.key) }));
   else localStorage.removeItem(CFG_KEY);
   client = null;
 }
@@ -191,7 +222,7 @@ export async function syncNow(): Promise<SyncResult | null> {
       return res;
     } catch (e) {
       status = 'error';
-      lastError = (e as Error).message ?? String(e);
+      lastError = friendlyError(e);
       return null;
     } finally {
       syncing = null;
