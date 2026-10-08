@@ -8,7 +8,7 @@ import { offsetFn, fmtLocal } from '../core/tz';
 import { indicatorDef, type Series } from '../core/indicators';
 import type { ChartType, PaneConfig, Replay } from '../engine/replay';
 import { DrawingLayer, type DragLine, type Drawing } from './drawings';
-import { h, money, theme } from './dom';
+import { h, money, theme, type Theme } from './dom';
 
 const MAX_DISPLAY = 60000;
 const IND_WINDOW = 3000;
@@ -25,7 +25,14 @@ export function getAgg(sym: string, b: Bars, tf: Timeframe, tz: string): Agg {
   return a;
 }
 
-export const IND_COLORS = ['#f0b90b', '#3987e5', '#e87ba4', '#1baf7a', '#9085e9', '#eb6834'];
+export const IND_COLORS = ['#d4a24c', '#5b93d6', '#cf6a49', '#1a9e93', '#9085e9', '#b07cc6'];
+
+const withAlpha = (hex: string, a: number) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
 
 export interface PaneHost {
   replay: Replay;
@@ -90,6 +97,8 @@ export class ChartPane {
   private header: HTMLDivElement;
   private lastC: { o: number; h: number; l: number; c: number; v: number; t: number } | null = null;
   private ro: ResizeObserver;
+  private th: Theme = theme();
+  private onTheme = () => this.applyTheme();
 
   constructor(
     public host: PaneHost,
@@ -101,19 +110,11 @@ export class ChartPane {
     this.chartEl = h('div', { class: 'pane-chart' });
     this.el = h('div', { class: 'pane' }, this.header, this.chartEl, this.legend);
     this.el.addEventListener('pointerdown', () => host.activate(this), true);
-    const th = theme();
     this.chart = createChart(this.chartEl, {
       autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: th.bg },
-        textColor: th.text,
-        fontSize: 11,
-        panes: { separatorColor: th.grid, separatorHoverColor: th.grid, enableResize: true },
-      },
-      grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
+      ...this.chartColors(),
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: th.grid },
-      timeScale: { borderColor: th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
+      timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
     });
     this.createMain();
@@ -158,6 +159,7 @@ export class ChartPane {
     });
     this.ro = new ResizeObserver(() => this.layer.schedule());
     this.ro.observe(this.chartEl);
+    window.addEventListener('themechange', this.onTheme);
     this.renderHeader();
     this.load();
   }
@@ -179,6 +181,40 @@ export class ChartPane {
     }
   }
 
+  private chartColors() {
+    const th = this.th;
+    return {
+      layout: {
+        background: { type: ColorType.Solid, color: th.bg },
+        textColor: th.text2,
+        fontSize: 11,
+        fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+        panes: { separatorColor: th.grid, separatorHoverColor: th.border, enableResize: true },
+      },
+      grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
+      rightPriceScale: { borderColor: th.grid },
+    };
+  }
+
+  private mainOptions() {
+    const th = this.th, t = this.chartType();
+    const up = th.up, dn = th.down;
+    if (t === 'line') return { color: th.accent, lineWidth: 2 as const };
+    if (t === 'area') return { lineColor: th.accent, topColor: withAlpha(th.accent, 0.32), bottomColor: withAlpha(th.accent, 0), lineWidth: 2 as const };
+    if (t === 'bars') return { upColor: up, downColor: dn, thinBars: false };
+    return { upColor: t === 'hollow' ? 'rgba(0,0,0,0)' : up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn };
+  }
+
+  /** Re-read the CSS theme and recolour everything in place (no reload, replay state kept). */
+  applyTheme() {
+    this.th = theme();
+    this.chart.applyOptions({ ...this.chartColors(), timeScale: { borderColor: this.th.grid } });
+    this.main.applyOptions(this.mainOptions());
+    this.rebuildIndicators();
+    this.refreshOverlays();
+    this.layer.schedule();
+  }
+
   chartType(): ChartType {
     return this.host.replay.session.state.chartType?.[this.index] ?? 'candles';
   }
@@ -191,14 +227,11 @@ export class ChartPane {
       this.priceLines.clear();
     }
     const t = this.chartType();
-    const up = '#26a69a', dn = '#ef5350';
-    if (t === 'line') this.main = this.chart.addSeries(LineSeries, { color: '#3987e5', lineWidth: 2 }, 0);
-    else if (t === 'area') this.main = this.chart.addSeries(AreaSeries, { lineColor: '#3987e5', topColor: 'rgba(57,135,229,0.35)', bottomColor: 'rgba(57,135,229,0)', lineWidth: 2 }, 0);
-    else if (t === 'bars') this.main = this.chart.addSeries(BarSeries, { upColor: up, downColor: dn, thinBars: false }, 0);
-    else
-      this.main = this.chart.addSeries(CandlestickSeries, {
-        upColor: t === 'hollow' ? 'rgba(0,0,0,0)' : up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn,
-      }, 0);
+    const o = this.mainOptions();
+    if (t === 'line') this.main = this.chart.addSeries(LineSeries, o, 0);
+    else if (t === 'area') this.main = this.chart.addSeries(AreaSeries, o, 0);
+    else if (t === 'bars') this.main = this.chart.addSeries(BarSeries, o, 0);
+    else this.main = this.chart.addSeries(CandlestickSeries, o, 0);
     this.markers = createSeriesMarkers(this.main, []);
   }
 
@@ -212,6 +245,7 @@ export class ChartPane {
   }
 
   destroy() {
+    window.removeEventListener('themechange', this.onTheme);
     this.ro.disconnect();
     this.layer.destroy();
     this.chart.remove();
@@ -356,19 +390,19 @@ export class ChartPane {
         const color = oi === 0 ? cfg.color : IND_COLORS[(IND_COLORS.indexOf(cfg.color) + oi) % IND_COLORS.length];
         const s =
           o.kind === 'hist'
-            ? this.chart.addSeries(HistogramSeries, { color: '#5d6675', priceLineVisible: false, lastValueVisible: false }, pane)
+            ? this.chart.addSeries(HistogramSeries, { color: this.th.muted, priceLineVisible: false, lastValueVisible: false }, pane)
             : this.chart.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false }, pane);
         const pts = [];
         for (let i = 0; i < data.n; i++) {
           const val = o.values[i];
           const t = data.time[i] as UTCTimestamp;
           if (isNaN(val)) pts.push({ time: t });
-          else pts.push(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? '#26a69a' : '#ef5350' } : { time: t, value: val });
+          else pts.push(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? this.th.up : this.th.down } : { time: t, value: val });
         }
         (s as ISeriesApi<'Line'>).setData(pts);
         created.push(s);
       });
-      if (def.levels && created[0]) for (const lv of def.levels) created[created.length - 1].createPriceLine({ price: lv, color: '#5d6675', lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
+      if (def.levels && created[0]) for (const lv of def.levels) created[created.length - 1].createPriceLine({ price: lv, color: this.th.muted, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
       if (pane > 0) this.chart.panes()[pane]?.setHeight(110);
       this.ind.push({ id: cfg.id, series: created, pane });
     });
@@ -389,7 +423,7 @@ export class ChartPane {
           const val = o.values[i];
           const t = data.time[i] as UTCTimestamp;
           if (isNaN(val)) (s as ISeriesApi<'Line'>).update({ time: t });
-          else (s as ISeriesApi<'Line'>).update(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? '#26a69a' : '#ef5350' } : { time: t, value: val });
+          else (s as ISeriesApi<'Line'>).update(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? this.th.up : this.th.down } : { time: t, value: val });
         }
       });
     });
@@ -412,15 +446,15 @@ export class ChartPane {
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
       const fl = br.floating(p);
-      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? '#3987e5' : '#e87ba4', title: `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} ${money(fl, true)}`, style: LineStyle.Solid, width: 2 });
-      if (p.sl != null) want.set(`s${p.id}`, { price: p.sl, color: '#ef5350', title: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`, style: LineStyle.Dashed, width: 1 });
-      if (p.tp != null) want.set(`t${p.id}`, { price: p.tp, color: '#26a69a', title: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`, style: LineStyle.Dashed, width: 1 });
+      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? this.th.series2 : this.th.accent, title: `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} ${money(fl, true)}`, style: LineStyle.Solid, width: 2 });
+      if (p.sl != null) want.set(`s${p.id}`, { price: p.sl, color: this.th.down, title: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`, style: LineStyle.Dashed, width: 1 });
+      if (p.tp != null) want.set(`t${p.id}`, { price: p.tp, color: this.th.up, title: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`, style: LineStyle.Dashed, width: 1 });
     }
     for (const o of br.s.orders) {
       if (o.symbol !== sym) continue;
-      want.set(`o${o.id}`, { price: o.price, color: '#f0b90b', title: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, style: LineStyle.Dotted, width: 1 });
-      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: '#ef5350', title: `SL`, style: LineStyle.Dotted, width: 1 });
-      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: '#26a69a', title: `TP`, style: LineStyle.Dotted, width: 1 });
+      want.set(`o${o.id}`, { price: o.price, color: '#d4a24c', title: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, style: LineStyle.Dotted, width: 1 });
+      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: this.th.down, title: `SL`, style: LineStyle.Dotted, width: 1 });
+      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: this.th.up, title: `TP`, style: LineStyle.Dotted, width: 1 });
     }
     for (const [key, pl] of this.priceLines) {
       if (!want.has(key)) {
@@ -439,13 +473,13 @@ export class ChartPane {
     const trades = br.s.trades.filter((t) => t.symbol === sym).slice(-300);
     for (const t of trades) {
       const te = this.candleTimeFor(t.entryTime), tx = this.candleTimeFor(t.exitTime);
-      if (te != null) ms.push({ time: te as UTCTimestamp, position: t.side === 'long' ? 'belowBar' : 'aboveBar', color: t.side === 'long' ? '#3987e5' : '#e87ba4', shape: t.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${t.id}` });
-      if (tx != null) ms.push({ time: tx as UTCTimestamp, position: t.side === 'long' ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? '#26a69a' : '#ef5350', shape: 'circle', text: `${money(t.pnl, true)}` });
+      if (te != null) ms.push({ time: te as UTCTimestamp, position: t.side === 'long' ? 'belowBar' : 'aboveBar', color: t.side === 'long' ? this.th.series2 : this.th.accent, shape: t.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${t.id}` });
+      if (tx != null) ms.push({ time: tx as UTCTimestamp, position: t.side === 'long' ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? this.th.up : this.th.down, shape: 'circle', text: `${money(t.pnl, true)}` });
     }
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
       const te = this.candleTimeFor(p.entryTime);
-      if (te != null) ms.push({ time: te as UTCTimestamp, position: p.side === 'long' ? 'belowBar' : 'aboveBar', color: p.side === 'long' ? '#3987e5' : '#e87ba4', shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${p.id}` });
+      if (te != null) ms.push({ time: te as UTCTimestamp, position: p.side === 'long' ? 'belowBar' : 'aboveBar', color: p.side === 'long' ? this.th.series2 : this.th.accent, shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${p.id}` });
     }
     ms.sort((a, b) => (a.time as number) - (b.time as number));
     this.markers.setMarkers(ms);

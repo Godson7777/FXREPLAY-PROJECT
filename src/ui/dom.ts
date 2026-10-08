@@ -38,10 +38,95 @@ export function num(x: number | null | undefined, digits = 2, signed = false) {
 }
 export const cls = (x: number) => (x > 0 ? 'up' : x < 0 ? 'dn' : '');
 
-export function theme() {
+export interface Theme {
+  dark: boolean;
+  bg: string;
+  surface: string;
+  text: string;
+  text2: string;
+  muted: string;
+  grid: string;
+  border: string;
+  accent: string;
+  up: string;
+  down: string;
+  series1: string;
+  series2: string;
+}
+
+/** Current resolved theme colours, read from the CSS custom properties. */
+export function theme(): Theme {
   const cs = getComputedStyle(document.documentElement);
-  const v = (n: string) => cs.getPropertyValue(n).trim();
-  return { bg: v('--chart-bg') || '#131722', text: v('--text-2') || '#b2b5be', grid: v('--grid') || '#1f2430' };
+  const v = (n: string, d: string) => cs.getPropertyValue(n).trim() || d;
+  return {
+    dark: cs.colorScheme.includes('dark'),
+    bg: v('--chart-bg', '#262624'),
+    surface: v('--surface', '#30302e'),
+    text: v('--text', '#faf9f5'),
+    text2: v('--text-2', '#c2c0b6'),
+    muted: v('--muted', '#9c9a92'),
+    grid: v('--grid', '#33332f'),
+    border: v('--border', '#3f3e3a'),
+    accent: v('--accent', '#d97757'),
+    up: v('--up', '#1a9e93'),
+    down: v('--down', '#e0605a'),
+    series1: v('--series-1', '#cf6a49'),
+    series2: v('--series-2', '#5b93d6'),
+  };
+}
+
+// ---- theme mode (system / light / dark) ------------------------------------------
+
+export type ThemeMode = 'system' | 'light' | 'dark';
+const THEME_KEY = 'overflowtrade.theme';
+
+export function getThemeMode(): ThemeMode {
+  try {
+    const m = localStorage.getItem(THEME_KEY);
+    return m === 'light' || m === 'dark' ? m : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+export function setThemeMode(mode: ThemeMode) {
+  const root = document.documentElement;
+  if (mode === 'system') delete root.dataset.theme;
+  else root.dataset.theme = mode;
+  try {
+    if (mode === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, mode);
+  } catch {
+    /* private mode */
+  }
+  window.dispatchEvent(new Event('themechange'));
+}
+
+// follow the OS while in system mode
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (getThemeMode() === 'system') window.dispatchEvent(new Event('themechange'));
+});
+
+const MODE_ICON: Record<ThemeMode, string> = { system: '◐', light: '☀', dark: '☾' };
+const MODE_LABEL: Record<ThemeMode, string> = { system: 'Theme: system', light: 'Theme: light', dark: 'Theme: dark' };
+
+/** Button that cycles System → Light → Dark. */
+export function themeButton(): HTMLButtonElement {
+  const b = h('button', { class: 'ghost theme-btn' });
+  const render = () => {
+    const m = getThemeMode();
+    b.textContent = MODE_ICON[m];
+    b.title = `${MODE_LABEL[m]} (click to change)`;
+    b.setAttribute('aria-label', MODE_LABEL[m]);
+  };
+  b.onclick = () => {
+    const order: ThemeMode[] = ['system', 'light', 'dark'];
+    setThemeMode(order[(order.indexOf(getThemeMode()) + 1) % 3]);
+  };
+  const onChange = () => (b.isConnected ? render() : window.removeEventListener('themechange', onChange));
+  window.addEventListener('themechange', onChange);
+  render();
+  return b;
 }
 
 // ---- toast ------------------------------------------------------------------

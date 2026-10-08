@@ -3,7 +3,7 @@ import type { Session } from '../engine/replay';
 import { computeStats, groupBy, monteCarlo, rHistogram, sessionOf, SESSIONS, DOW, holdBucket, HOLD_BUCKETS, type Group } from '../analytics/stats';
 import { offsetFn, fmtLocal, fmtDuration } from '../core/tz';
 import { lineChart, barChart, scatter, showTip, hideTip } from './charts';
-import { h, money, pct, num, cls, modal, field, download, esc } from './dom';
+import { h, money, pct, num, cls, modal, field, download, esc, themeButton } from './dom';
 import { getShot, saveSession } from '../data/sessions';
 import { cloudButton } from './cloudui';
 import { LOGO } from './home';
@@ -31,6 +31,8 @@ export class AnalyticsView {
     this.body = h('div', { class: 'an-body' });
     this.root = h('div', { class: 'an' }, this.header(), this.body);
     this.render();
+    const onTheme = () => (this.root.isConnected ? this.render() : window.removeEventListener('themechange', onTheme));
+    window.addEventListener('themechange', onTheme);
   }
 
   private get scope(): Session[] {
@@ -67,6 +69,7 @@ export class AnalyticsView {
       back,
       h('button', { class: 'ghost', onclick: () => this.exportCsv() }, '⭳ Export CSV'),
       cloudButton(),
+      themeButton(),
     );
   }
 
@@ -131,7 +134,7 @@ export class AnalyticsView {
       S('Avg MFE', st.avgMfeR != null ? `${num(st.avgMfeR)}R` : '—', '', 'How far trades went in your favour on average'),
       S('Edge ratio', st.edgeRatio != null ? num(st.edgeRatio) : '—', '', 'Avg MFE / avg MAE — above 1 means entries have an edge'),
       S('TP hit rate', pct(st.tpHitRate)), S('SL hit rate', pct(st.slHitRate)),
-      S('Best day', money(st.bestDay, true), 'up'), S('Worst day', money(st.worstDay, true), 'dn'),
+      S('Best day', money(st.bestDay, true), cls(st.bestDay)), S('Worst day', money(st.worstDay, true), cls(st.worstDay)),
       S('Profitable days', pct(st.profitableDaysPct)), S('Trades / active day', num(st.avgTradesPerDay, 1)),
     )));
 

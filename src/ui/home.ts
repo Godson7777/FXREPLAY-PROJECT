@@ -12,9 +12,9 @@ import { computeStats } from '../analytics/stats';
 import { newSession, type Session } from '../engine/replay';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
-import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download } from './dom';
+import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, themeButton } from './dom';
 
-export const LOGO = `<svg class="logo-svg" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="otg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1d4ed8"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#otg)"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#fff" opacity=".75"/><rect x="14" y="12" width="4" height="13" rx="1" fill="#fff" opacity=".88"/><rect x="21" y="7" width="4" height="18" rx="1" fill="#fff"/><path d="M5 12c3-4 6-4 9-1s6 3 9-2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;
+export const LOGO = `<svg class="logo-svg" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="otg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e08a68"/><stop offset="1" stop-color="#c15f3c"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#otg)"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#fff" opacity=".75"/><rect x="14" y="12" width="4" height="13" rx="1" fill="#fff" opacity=".88"/><rect x="21" y="7" width="4" height="18" rx="1" fill="#fff"/><path d="M5 12c3-4 6-4 9-1s6 3 9-2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;
 
 const fmtDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -33,7 +33,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
       ),
       h('div', { class: 'spacer' }),
       cloudButton(),
-      h('button', { class: 'ghost', title: 'Toggle light / dark', onclick: toggleTheme }, '◐'),
+      themeButton(),
     ),
   );
   const main = h('main', { class: 'home-main' });
@@ -106,18 +106,6 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
-function toggleTheme() {
-  const d = document.documentElement;
-  const next = d.dataset.theme === 'light' ? 'dark' : 'light';
-  d.dataset.theme = next;
-  try {
-    localStorage.setItem('overflowtrade.theme', next);
-  } catch {
-    /* ignore */
-  }
-  location.reload();
 }
 
 async function loadDemo() {

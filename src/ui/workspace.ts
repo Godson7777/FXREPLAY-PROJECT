@@ -8,7 +8,7 @@ import type { ChallengeState } from '../engine/rules';
 import { saveSession, saveShot, getShot } from '../data/sessions';
 import { ChartPane, IND_COLORS, type PaneHost } from './chartpane';
 import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
-import { h, money, num, cls, toast, modal, field, esc, parseDateInput } from './dom';
+import { h, money, num, cls, toast, modal, field, esc, parseDateInput, themeButton } from './dom';
 import { cloudButton } from './cloudui';
 import { LOGO } from './home';
 
@@ -119,6 +119,7 @@ export class Workspace implements PaneHost {
       h('button', { class: 'ghost', onclick: () => this.settingsModal() }, '⚙ Settings'),
       h('button', { class: 'ghost', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
       cloudButton(),
+      themeButton(),
       h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, '📊 Analytics'),
     );
   }
@@ -311,14 +312,14 @@ export class Workspace implements PaneHost {
         if (p.side === 'long') return kind === 'sl' ? !above : above;
         return kind === 'sl' ? above : !above;
       };
-      if (p.sl != null) out.push({ key: `s${p.id}`, price: p.sl, color: '#ef5350', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }, valid(px, 'sl')) });
-      if (p.tp != null) out.push({ key: `t${p.id}`, price: p.tp, color: '#26a69a', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }, valid(px, 'tp')) });
+      if (p.sl != null) out.push({ key: `s${p.id}`, price: p.sl, color: '#e0605a', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }, valid(px, 'sl')) });
+      if (p.tp != null) out.push({ key: `t${p.id}`, price: p.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }, valid(px, 'tp')) });
     }
     for (const o of br.s.orders) {
       if (o.symbol !== sym) continue;
-      out.push({ key: `o${o.id}`, price: o.price, color: '#f0b90b', label: 'Entry', onDrop: (px) => { br.modifyOrder(o.id, { price: +px.toFixed(dg) }); this.afterTrade(); } });
-      if (o.sl != null) out.push({ key: `os${o.id}`, price: o.sl, color: '#ef5350', label: 'SL', onDrop: (px) => { br.modifyOrder(o.id, { sl: +px.toFixed(dg) }); this.afterTrade(); } });
-      if (o.tp != null) out.push({ key: `ot${o.id}`, price: o.tp, color: '#26a69a', label: 'TP', onDrop: (px) => { br.modifyOrder(o.id, { tp: +px.toFixed(dg) }); this.afterTrade(); } });
+      out.push({ key: `o${o.id}`, price: o.price, color: '#d4a24c', label: 'Entry', onDrop: (px) => { br.modifyOrder(o.id, { price: +px.toFixed(dg) }); this.afterTrade(); } });
+      if (o.sl != null) out.push({ key: `os${o.id}`, price: o.sl, color: '#e0605a', label: 'SL', onDrop: (px) => { br.modifyOrder(o.id, { sl: +px.toFixed(dg) }); this.afterTrade(); } });
+      if (o.tp != null) out.push({ key: `ot${o.id}`, price: o.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => { br.modifyOrder(o.id, { tp: +px.toFixed(dg) }); this.afterTrade(); } });
     }
     return out;
   }
@@ -371,7 +372,7 @@ export class Workspace implements PaneHost {
       item('Market sell now', () => this.submit('short', { type: 'market', price: 0, sym })),
       h('div', { class: 'menu-sep' }),
       item('Horizontal line here', () => {
-        this.drawings(sym).push({ id: Math.random().toString(36).slice(2, 10), type: 'hline', pts: [{ t: pane.times[pane.times.length - 1] ?? 0, p: px }], color: '#f0b90b' });
+        this.drawings(sym).push({ id: Math.random().toString(36).slice(2, 10), type: 'hline', pts: [{ t: pane.times[pane.times.length - 1] ?? 0, p: px }], color: '#d4a24c' });
         this.drawingsChanged(sym);
       }),
       item('Remove all drawings', () => {
