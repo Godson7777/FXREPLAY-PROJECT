@@ -188,7 +188,7 @@ export class ChartPane {
         background: { type: ColorType.Solid, color: th.bg },
         textColor: th.text2,
         fontSize: 11,
-        fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+        fontFamily: "'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
         panes: { separatorColor: th.grid, separatorHoverColor: th.border, enableResize: true },
       },
       grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
@@ -199,8 +199,8 @@ export class ChartPane {
   private mainOptions() {
     const th = this.th, t = this.chartType();
     const up = th.up, dn = th.down;
-    if (t === 'line') return { color: th.accent, lineWidth: 2 as const };
-    if (t === 'area') return { lineColor: th.accent, topColor: withAlpha(th.accent, 0.32), bottomColor: withAlpha(th.accent, 0), lineWidth: 2 as const };
+    if (t === 'line') return { color: th.series1, lineWidth: 2 as const };
+    if (t === 'area') return { lineColor: th.series1, topColor: withAlpha(th.series1, 0.32), bottomColor: withAlpha(th.series1, 0), lineWidth: 2 as const };
     if (t === 'bars') return { upColor: up, downColor: dn, thinBars: false };
     return { upColor: t === 'hollow' ? 'rgba(0,0,0,0)' : up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn };
   }
@@ -446,7 +446,7 @@ export class ChartPane {
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
       const fl = br.floating(p);
-      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? this.th.series2 : this.th.accent, title: `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} ${money(fl, true)}`, style: LineStyle.Solid, width: 2 });
+      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? this.th.series2 : this.th.series3, title: `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} ${money(fl, true)}`, style: LineStyle.Solid, width: 2 });
       if (p.sl != null) want.set(`s${p.id}`, { price: p.sl, color: this.th.down, title: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`, style: LineStyle.Dashed, width: 1 });
       if (p.tp != null) want.set(`t${p.id}`, { price: p.tp, color: this.th.up, title: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`, style: LineStyle.Dashed, width: 1 });
     }
@@ -473,13 +473,13 @@ export class ChartPane {
     const trades = br.s.trades.filter((t) => t.symbol === sym).slice(-300);
     for (const t of trades) {
       const te = this.candleTimeFor(t.entryTime), tx = this.candleTimeFor(t.exitTime);
-      if (te != null) ms.push({ time: te as UTCTimestamp, position: t.side === 'long' ? 'belowBar' : 'aboveBar', color: t.side === 'long' ? this.th.series2 : this.th.accent, shape: t.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${t.id}` });
+      if (te != null) ms.push({ time: te as UTCTimestamp, position: t.side === 'long' ? 'belowBar' : 'aboveBar', color: t.side === 'long' ? this.th.series2 : this.th.series3, shape: t.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${t.id}` });
       if (tx != null) ms.push({ time: tx as UTCTimestamp, position: t.side === 'long' ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? this.th.up : this.th.down, shape: 'circle', text: `${money(t.pnl, true)}` });
     }
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
       const te = this.candleTimeFor(p.entryTime);
-      if (te != null) ms.push({ time: te as UTCTimestamp, position: p.side === 'long' ? 'belowBar' : 'aboveBar', color: p.side === 'long' ? this.th.series2 : this.th.accent, shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${p.id}` });
+      if (te != null) ms.push({ time: te as UTCTimestamp, position: p.side === 'long' ? 'belowBar' : 'aboveBar', color: p.side === 'long' ? this.th.series2 : this.th.series3, shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${p.id}` });
     }
     ms.sort((a, b) => (a.time as number) - (b.time as number));
     this.markers.setMarkers(ms);

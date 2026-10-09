@@ -17,6 +17,11 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
   return el;
 }
 
+/** Short unique id (time-ordered + random). */
+export function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
 export const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
 export function esc(s: string) {
@@ -52,6 +57,7 @@ export interface Theme {
   down: string;
   series1: string;
   series2: string;
+  series3: string;
 }
 
 /** Current resolved theme colours, read from the CSS custom properties. */
@@ -60,18 +66,19 @@ export function theme(): Theme {
   const v = (n: string, d: string) => cs.getPropertyValue(n).trim() || d;
   return {
     dark: cs.colorScheme.includes('dark'),
-    bg: v('--chart-bg', '#262624'),
-    surface: v('--surface', '#30302e'),
-    text: v('--text', '#faf9f5'),
-    text2: v('--text-2', '#c2c0b6'),
-    muted: v('--muted', '#9c9a92'),
-    grid: v('--grid', '#33332f'),
-    border: v('--border', '#3f3e3a'),
-    accent: v('--accent', '#d97757'),
-    up: v('--up', '#1a9e93'),
-    down: v('--down', '#e0605a'),
-    series1: v('--series-1', '#cf6a49'),
-    series2: v('--series-2', '#5b93d6'),
+    bg: v('--chart-bg', '#ffffff'),
+    surface: v('--surface', '#ffffff'),
+    text: v('--text', '#11181c'),
+    text2: v('--text-2', '#4d555c'),
+    muted: v('--muted', '#697177'),
+    grid: v('--grid', '#f0f2f4'),
+    border: v('--border', '#ebedef'),
+    accent: v('--accent', '#22c96a'),
+    up: v('--up', '#007a55'),
+    down: v('--down', '#ce2c31'),
+    series1: v('--series-1', '#0da54f'),
+    series2: v('--series-2', '#2a78d6'),
+    series3: v('--series-3', '#b45309'),
   };
 }
 
@@ -91,6 +98,9 @@ export function getThemeMode(): ThemeMode {
 
 export function setThemeMode(mode: ThemeMode) {
   const root = document.documentElement;
+  // switch instantly: suspend colour transitions for a frame so text and charts change together
+  root.classList.add('theme-switching');
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));
   if (mode === 'system') delete root.dataset.theme;
   else root.dataset.theme = mode;
   try {
@@ -104,7 +114,11 @@ export function setThemeMode(mode: ThemeMode) {
 
 // follow the OS while in system mode
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  if (getThemeMode() === 'system') window.dispatchEvent(new Event('themechange'));
+  if (getThemeMode() !== 'system') return;
+  const root = document.documentElement;
+  root.classList.add('theme-switching');
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));
+  window.dispatchEvent(new Event('themechange'));
 });
 
 const MODE_ICON: Record<ThemeMode, string> = { system: '◐', light: '☀', dark: '☾' };

@@ -219,7 +219,7 @@ export class DrawingLayer {
         return;
       }
       const type = this.tool;
-      const d: Drawing = { id: Math.random().toString(36).slice(2, 10), type, pts: [pt, { ...pt }], color: DEFAULT_COLOR[type] ?? '#d97757' };
+      const d: Drawing = { id: Math.random().toString(36).slice(2, 10), type, pts: [pt, { ...pt }], color: DEFAULT_COLOR[type] ?? '#22c96a' };
       if (ONE_POINT.includes(type)) {
         d.pts = [pt];
         if (type === 'text') {
@@ -613,7 +613,7 @@ export class DrawingLayer {
     const sig = d.id + d.color;
     if (tb.dataset.sig === sig) return;
     tb.dataset.sig = sig;
-    const colors = ['#d97757', '#5b93d6', '#1a9e93', '#e0605a', '#d4a24c', '#9085e9', '#8a8780'];
+    const colors = ['#22c96a', '#5b93d6', '#1a9e93', '#e0605a', '#d4a24c', '#9085e9', '#8a8780'];
     tb.innerHTML =
       colors.map((c) => `<button class="sw${c === d.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="Color"></button>`).join('') +
       (d.type === 'long' || d.type === 'short' ? `<button class="tb-btn" data-act="order" title="Place this as a real order">Place order</button>` : '') +
