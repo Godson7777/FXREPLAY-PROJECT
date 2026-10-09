@@ -1,4 +1,5 @@
 import type { InstrumentSpec } from '../core/types';
+import type { RegimeTag } from '../analytics/regime';
 
 export type Side = 'long' | 'short';
 export type OrderType = 'market' | 'limit' | 'stop';
@@ -80,6 +81,8 @@ export interface Trade {
   balanceAfter: number;
   shot?: string;
   rating?: number;
+  /** market regime at entry; undefined = not computed yet, null = not enough history */
+  regime?: RegimeTag | null;
 }
 
 export interface BrokerConfig {

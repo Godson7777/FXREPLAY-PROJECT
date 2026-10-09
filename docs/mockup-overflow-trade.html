@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Overflow Trade — Mockup Desain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300;1,9..144,400&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script>try { var t = localStorage.getItem('ot-mock-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<style>
+:root {
+  --serif: 'Fraunces', Georgia, serif;
+  --sans: 'Instrument Sans', -apple-system, 'Segoe UI', sans-serif;
+  --r: 4px;
+  --shadow: 0 16px 16px rgba(17,24,28,.05), 0 8px 8px rgba(17,24,28,.05), 0 4px 4px rgba(17,24,28,.05), 0 2px 2px rgba(17,24,28,.05);
+  color-scheme: light;
+  --bg: #ffffff; --bg-alt: #f9fafb; --card: #ffffff; --card-alt: #f9fafb;
+  --border: #ebedef; --border-card: #e6e8eb; --border-input: #e0e3e6;
+  --title: #11181c; --text: #4d555c; --label: #697177; --faint: #889096;
+  --brand: #22c96a; --brand-hover: #0da54f; --brand-text: #076932; --brand-tint: #e1f9ec;
+  --up: #30a46c; --down: #e5484d; --grid: #f0f2f4;
+  --dark-bg: #11181c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b1013; --bg-alt: #11181c; --card: #1c262c; --card-alt: #151d22;
+    --border: #232d33; --border-card: #2b353b; --border-input: #334047;
+    --title: #f9fafb; --text: #c1c8cd; --label: #889096; --faint: #697177;
+    --brand: #22c96a; --brand-hover: #39db7f; --brand-text: #39db7f; --brand-tint: rgba(57,219,127,.12);
+    --up: #3dd68c; --down: #ff6369; --grid: #1c262c;
+    --dark-bg: #020304;
+    --shadow: 0 16px 16px rgba(0,0,0,.25), 0 8px 8px rgba(0,0,0,.2), 0 4px 4px rgba(0,0,0,.15), 0 2px 2px rgba(0,0,0,.1);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1013; --bg-alt: #11181c; --card: #1c262c; --card-alt: #151d22;
+  --border: #232d33; --border-card: #2b353b; --border-input: #334047;
+  --title: #f9fafb; --text: #c1c8cd; --label: #889096; --faint: #697177;
+  --brand: #22c96a; --brand-hover: #39db7f; --brand-text: #39db7f; --brand-tint: rgba(57,219,127,.12);
+  --up: #3dd68c; --down: #ff6369; --grid: #1c262c;
+  --dark-bg: #020304;
+  --shadow: 0 16px 16px rgba(0,0,0,.25), 0 8px 8px rgba(0,0,0,.2), 0 4px 4px rgba(0,0,0,.15), 0 2px 2px rgba(0,0,0,.1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 16px/1.5 var(--sans); -webkit-font-smoothing: antialiased; transition: background-color .5s ease-in-out, color .5s ease-in-out; }
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: 85rem; margin: 0 auto; padding: 0 1.5rem; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 300; color: var(--title); line-height: 1; letter-spacing: .01em; margin: 0; font-variation-settings: 'opsz' 144; }
+h1 em, h2 em { font-style: italic; font-weight: 300; }
+h1 { font-size: clamp(2.75rem, 6vw, 5.25rem); margin-bottom: 1.75rem; }
+h2 { font-size: clamp(2.25rem, 4vw, 3.5rem); margin-bottom: 1.25rem; }
+h5 { font: 500 1.2rem/1.25 var(--sans); color: var(--title); margin: 0 0 .5rem; }
+.eyebrow { font: 500 .8rem/1 var(--sans); letter-spacing: .125em; text-transform: uppercase; color: var(--label); margin-bottom: 1rem; }
+p { margin: 0; }
+.muted { color: var(--label); }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; height: 3rem; min-width: 7.5rem; padding: .5rem 1.5rem; border-radius: var(--r); font: 500 12px/1 var(--sans); letter-spacing: .05rem; text-transform: uppercase; cursor: pointer; transition: color .3s ease-in-out, background .3s ease-in-out, border-color .3s ease-in-out; white-space: nowrap; }
+.btn-sm { height: 2.5rem; padding: .5rem 1rem; min-width: 0; }
+.btn-primary { background: var(--brand); color: #fff; border: 1px solid transparent; }
+.btn-primary:hover { background: var(--brand-hover); }
+.btn-secondary { background: transparent; color: var(--brand-text); border: 1px solid var(--brand); }
+.btn-secondary:hover { background: var(--brand); color: #fff; }
+.btn-tertiary { background: transparent; color: var(--title); border: 1px solid var(--title); }
+.btn-tertiary:hover { color: var(--label); border-color: var(--label); }
+
+/* utility bar + nav */
+.util { background: var(--bg-alt); border-bottom: 1px solid var(--border); font-size: .8rem; color: var(--label); }
+.util .wrap { display: flex; justify-content: flex-end; gap: 1.5rem; height: 2.25rem; align-items: center; }
+.util a:hover { color: var(--title); }
+nav.main { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+nav.main .wrap { display: flex; align-items: center; height: 4.5rem; gap: 2.5rem; }
+.logo { display: flex; align-items: center; gap: .6rem; font: 400 1.35rem/1 var(--serif); color: var(--title); letter-spacing: .01em; }
+.logo svg { width: 28px; height: 28px; }
+.menu { display: flex; gap: 2rem; font-weight: 500; font-size: .95rem; color: var(--title); }
+.menu a { opacity: .85; transition: opacity .3s; } .menu a:hover { opacity: 1; color: var(--brand-text); }
+.nav-right { margin-left: auto; display: flex; gap: .75rem; align-items: center; }
+.theme { height: 2.5rem; border: 1px solid var(--border-input); background: transparent; color: var(--title); border-radius: var(--r); padding: 0 .9rem; font: 500 12px var(--sans); letter-spacing: .05rem; text-transform: uppercase; cursor: pointer; }
+
+/* hero */
+.hero { text-align: center; padding: 6rem 0 4rem; }
+.pill { display: inline-flex; align-items: center; gap: .5rem; padding: .3rem 1rem; border: 1px solid var(--faint); background: rgba(0,0,51,.06); border-radius: var(--r); font-weight: 500; font-size: .85rem; color: var(--title); margin-bottom: 2rem; }
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); display: inline-block; }
+.hero p.lead { max-width: 40rem; margin: 0 auto 2.25rem; font-size: 1.15rem; color: var(--text); }
+.ctas { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+.badge-line { margin-top: 2rem; font-size: .85rem; color: var(--label); }
+.badge-line b { color: var(--brand-text); font-weight: 600; }
+
+/* app preview */
+.preview { margin: 0 auto 7.5rem; border: 1px solid var(--border-card); border-radius: 1rem; background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
+.pv-top { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border); font-size: .85rem; color: var(--label); }
+.chip { border: 1px solid var(--border-input); border-radius: var(--r); padding: .2rem .6rem; color: var(--title); font-weight: 500; font-size: .8rem; }
+.chip.on { background: var(--brand-tint); border-color: var(--brand); color: var(--brand-text); }
+.pv-body { display: grid; grid-template-columns: 1fr 300px; min-height: 420px; }
+.pv-chart { position: relative; border-right: 1px solid var(--border); }
+.pv-chart svg { display: block; width: 100%; height: 100%; }
+.legend { position: absolute; top: .75rem; left: 1rem; font-size: .8rem; color: var(--label); font-variant-numeric: tabular-nums; }
+.legend b { color: var(--title); font-weight: 600; }
+.pv-side { padding: 1rem; display: flex; flex-direction: column; gap: .9rem; background: var(--card-alt); }
+.quote { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.quote div { border-radius: var(--r); padding: .7rem; text-align: center; color: #fff; font-variant-numeric: tabular-nums; }
+.quote small { display: block; font-size: .7rem; letter-spacing: .1em; opacity: .9; }
+.quote b { font-size: 1.1rem; font-weight: 600; }
+.q-sell { background: var(--down); } .q-buy { background: var(--up); }
+.field { display: flex; flex-direction: column; gap: .35rem; font-size: .75rem; color: var(--label); }
+.input { height: 2.5rem; border: 1px solid var(--border-input); border-radius: var(--r); background: var(--card); color: var(--title); display: flex; align-items: center; padding: 0 .75rem; font-weight: 500; font-size: .9rem; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.calc { border-top: 1px solid var(--border); padding-top: .8rem; font-size: .85rem; display: grid; grid-template-columns: 1fr auto; row-gap: .3rem; font-variant-numeric: tabular-nums; }
+.calc span:nth-child(odd) { color: var(--label); } .calc span:nth-child(even) { color: var(--title); font-weight: 600; text-align: right; }
+.pv-bar { display: flex; align-items: center; gap: .6rem; padding: .7rem 1rem; border-top: 1px solid var(--border); font-size: .85rem; }
+.play { width: 2.5rem; height: 2.5rem; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: .8rem; }
+.progress { flex: 1; height: 2px; background: var(--border); position: relative; } .progress::after { content: ''; position: absolute; inset: 0 62% 0 0; background: var(--brand); }
+.clock { font-variant-numeric: tabular-nums; color: var(--title); font-weight: 500; }
+
+/* sections */
+section { padding: 7.5rem 0; }
+.alt { background: var(--bg-alt); }
+.center { text-align: center; max-width: 52rem; margin: 0 auto 4rem; }
+.center p { color: var(--text); font-size: 1.1rem; }
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3rem; }
+.point .num { font: 300 1rem var(--serif); color: var(--brand-text); margin-bottom: 1.25rem; display: block; font-style: italic; }
+.point { border-top: 1px solid var(--border-card); padding-top: 1.5rem; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.kpi { background: var(--card); border: 1px solid var(--border-card); border-radius: var(--r); padding: 1.5rem; box-shadow: var(--shadow); }
+.kpi .eyebrow { margin-bottom: .9rem; font-size: .72rem; }
+.kpi b { display: block; font: 300 2.6rem/1 var(--serif); color: var(--title); font-variant-numeric: tabular-nums; }
+.kpi small { display: block; margin-top: .6rem; font-size: .8rem; color: var(--label); }
+.up { color: var(--up) !important; } .dn { color: var(--down) !important; }
+.equity { background: var(--card); border: 1px solid var(--border-card); border-radius: var(--r); padding: 1.5rem; box-shadow: var(--shadow); }
+.equity .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; }
+.equity svg { width: 100%; height: 220px; display: block; }
+.darkband { background: var(--dark-bg); color: #c1c8cd; text-align: center; }
+.darkband h2 { color: #f9fafb; }
+.darkband p { max-width: 36rem; margin: 0 auto 2.25rem; }
+.darkband .btn-tertiary { color: #f9fafb; border-color: #f9fafb; }
+.darkband .btn-tertiary:hover { color: #889096; border-color: #889096; }
+footer { padding: 4rem 0 3rem; border-top: 1px solid var(--border); font-size: .85rem; color: var(--label); }
+footer .cols { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 2rem; margin-bottom: 3rem; }
+footer h6 { font: 500 .75rem var(--sans); letter-spacing: .125em; text-transform: uppercase; color: var(--title); margin: 0 0 1rem; }
+footer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
+footer .legal { font-size: .75rem; color: var(--faint); max-width: 60rem; }
+@media (max-width: 900px) {
+  .menu { display: none; } .pv-body { grid-template-columns: 1fr; } .pv-chart { height: 320px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .three, .kpis, footer .cols { grid-template-columns: 1fr 1fr; } section { padding: 4.5rem 0; } .hero { padding: 3.5rem 0 3rem; }
+}
+@media (max-width: 560px) { .three, .kpis, footer .cols { grid-template-columns: 1fr; } .nav-right .btn { display: none; } .wrap { padding: 0 1rem; } }
+</style>
+</head>
+<body>
+<div class="util"><div class="wrap"><a href="#">Docs</a><a href="#">Status</a><a href="#">Masuk</a></div></div>
+
+<nav class="main"><div class="wrap">
+  <a class="logo" href="#"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#22c96a"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#fff" opacity=".75"/><rect x="14" y="12" width="4" height="13" rx="1" fill="#fff" opacity=".88"/><rect x="21" y="7" width="4" height="18" rx="1" fill="#fff"/><path d="M5 12c3-4 6-4 9-1s6 3 9-2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>Overflow Trade</a>
+  <div class="menu"><a href="#">Replay</a><a href="#">Analytics</a><a href="#">Challenge</a><a href="#">Pricing</a></div>
+  <div class="nav-right"><button class="theme" id="themeBtn">☾ Dark</button><a class="btn btn-primary btn-sm" href="#">Mulai gratis</a></div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <span class="pill"><i></i> Baru: mode Prop Firm Challenge</span>
+  <h1>Latih trading Anda<br /><em>tanpa risiko</em>.</h1>
+  <p class="lead">Putar ulang pasar candle demi candle, eksekusi order dengan presisi 1 menit, lalu temukan edge Anda lewat analytics yang mendalam.</p>
+  <div class="ctas"><a class="btn btn-tertiary" href="#">Lihat demo</a><a class="btn btn-primary" href="#">Mulai replay</a></div>
+  <div class="badge-line">Timeframe apa pun · <b>7m, 2H, 3D, W</b> · Forex, emas &amp; crypto</div>
+</div></header>
+
+<div class="wrap">
+  <div class="preview">
+    <div class="pv-top"><span class="chip">EURUSD</span><span class="chip on">15m</span><span class="chip">1H</span><span class="chip">4H</span><span class="chip">D</span><span style="margin-left:auto">FTMO Phase 1 · <b style="color:var(--brand-text)">+2.4%</b> dari target 10%</span></div>
+    <div class="pv-body">
+      <div class="pv-chart"><div class="legend"><b>EURUSD</b> · 15m · O <b>1.09412</b> H <b>1.09455</b> L <b>1.09398</b> C <b>1.09431</b></div><svg id="candles" viewBox="0 0 900 420" preserveAspectRatio="none" aria-label="Contoh chart candlestick"></svg></div>
+      <div class="pv-side">
+        <div class="quote"><div class="q-sell"><small>SELL</small><b>1.09431</b></div><div class="q-buy"><small>BUY</small><b>1.09439</b></div></div>
+        <div class="row2"><label class="field">Size<span class="input">Risk 1%</span></label><label class="field">Stop loss<span class="input">20 pips</span></label></div>
+        <div class="row2"><label class="field">Take profit<span class="input">2.0 R</span></label><label class="field">Trailing<span class="input" style="color:var(--faint)">off</span></label></div>
+        <div class="calc"><span>Lots</span><span>0.50</span><span>Risk</span><span class="dn">$100.00</span><span>Reward</span><span class="up">$200.00</span><span>R:R</span><span>2.00</span></div>
+      </div>
+    </div>
+    <div class="pv-bar"><span class="play">▶</span><span class="chip">2×/s</span><span class="chip">per candle</span><div class="progress"></div><span class="clock">Rab 31 Jan 2024 · 19:29</span></div>
+  </div>
+</div>
+
+<section class="alt"><div class="wrap">
+  <div class="center"><div class="eyebrow">Kenapa Overflow Trade</div><h2>Backtest seperti <em>live trading</em>, tanpa menunggu pasar.</h2><p>Semua yang Anda perlukan untuk menguji strategi secara jujur — masa depan tersembunyi, eksekusi realistis, dan data yang bisa dipercaya.</p></div>
+  <div class="three">
+    <div class="point"><span class="num">01</span><h5>Timeframe tanpa batas</h5><p>Ketik timeframe apa pun — 7m, 13m, 2H, 3D — dan candle terbentuk langsung dari data 1 menit.</p></div>
+    <div class="point"><span class="num">02</span><h5>Eksekusi presisi 1 menit</h5><p>SL, TP, limit, dan stop dicek setiap menit lengkap dengan spread, komisi, dan gap harga.</p></div>
+    <div class="point"><span class="num">03</span><h5>Analytics yang mendalam</h5><p>30+ statistik, MAE/MFE, psikologi trading, kalender P&amp;L, dan simulasi Monte Carlo.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="center"><div class="eyebrow">Analytics</div><h2>Angka tidak <em>berbohong</em>.</h2></div>
+  <div class="kpis">
+    <div class="kpi"><div class="eyebrow">Win rate</div><b>58.3%</b><small>35W · 25L</small></div>
+    <div class="kpi"><div class="eyebrow">Profit factor</div><b class="up">1.92</b><small>Gross $8,420 / $4,385</small></div>
+    <div class="kpi"><div class="eyebrow">Expectancy</div><b class="up">+0.41R</b><small>+$67.25 per trade</small></div>
+    <div class="kpi"><div class="eyebrow">Max drawdown</div><b class="dn">−4.8%</b><small>3.2 hari underwater</small></div>
+  </div>
+  <div class="equity"><div class="head"><h5>Equity curve</h5><span class="muted" style="font-size:.85rem">$10,000 → <b class="up">$14,035</b></span></div><svg id="equity" viewBox="0 0 1000 220" preserveAspectRatio="none" aria-label="Contoh equity curve"></svg></div>
+</div></section>
+
+<section class="darkband"><div class="wrap">
+  <h2>Siap menemukan <em>edge</em> Anda?</h2>
+  <p>Mulai dengan data demo dalam hitungan detik, atau impor data Anda sendiri dari MT4/MT5, HistData, dan Binance.</p>
+  <div class="ctas"><a class="btn btn-tertiary" href="#">Pelajari lebih lanjut</a><a class="btn btn-primary" href="#">Mulai replay</a></div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="cols">
+    <div><a class="logo" href="#" style="margin-bottom:1rem">Overflow Trade</a><p style="max-width:22rem">Platform market replay &amp; backtesting untuk trader yang serius.</p></div>
+    <div><h6>Produk</h6><ul><li>Replay</li><li>Analytics</li><li>Challenge</li></ul></div>
+    <div><h6>Sumber daya</h6><ul><li>Docs</li><li>Panduan data</li><li>Status</li></ul></div>
+    <div><h6>Perusahaan</h6><ul><li>Tentang</li><li>Kontak</li><li>Privasi</li></ul></div>
+  </div>
+  <p class="legal">© 2026 Overflow Trade. Hasil backtest tidak menjamin hasil di masa depan. Trading mengandung risiko kehilangan modal. Mockup desain — data pada halaman ini adalah contoh.</p>
+</div></footer>
+
+<script>
+// deterministic sample data
+let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function drawCandles() {
+  const svg = document.getElementById('candles'); seed = 7;
+  const W = 900, H = 420, n = 64, bw = W / n; let p = 100, bars = [];
+  for (let i = 0; i < n; i++) { const o = p; const c = o + (rnd() - 0.47) * 3.2; const h = Math.max(o, c) + rnd() * 1.6; const l = Math.min(o, c) - rnd() * 1.6; bars.push({ o, h, l, c }); p = c; }
+  const hi = Math.max(...bars.map(b => b.h)) + 2, lo = Math.min(...bars.map(b => b.l)) - 2;
+  const y = (v) => 36 + (hi - v) / (hi - lo) * (H - 60);
+  let g = ''; for (let k = 1; k < 6; k++) g += `<line x1="0" x2="${W}" y1="${k * H / 6}" y2="${k * H / 6}" stroke="${css('--grid')}" stroke-width="1"/>`;
+  bars.forEach((b, i) => { const col = b.c >= b.o ? css('--up') : css('--down'); const x = i * bw + bw / 2;
+    g += `<line x1="${x}" x2="${x}" y1="${y(b.h)}" y2="${y(b.l)}" stroke="${col}" stroke-width="1.2"/>`;
+    g += `<rect x="${x - bw * 0.32}" y="${y(Math.max(b.o, b.c))}" width="${bw * 0.64}" height="${Math.max(1.5, Math.abs(y(b.o) - y(b.c)))}" fill="${col}" rx="1"/>`; });
+  const last = bars[n - 1].c, ly = y(last);
+  const e = bars[44].c, ey = y(e), sl = y(e - 2.2), tp = y(e + 4.4), x0 = 44 * bw, x1 = 60 * bw;
+  g += `<rect x="${x0}" y="${tp}" width="${x1 - x0}" height="${ey - tp}" fill="${css('--up')}" opacity=".12"/><rect x="${x0}" y="${ey}" width="${x1 - x0}" height="${sl - ey}" fill="${css('--down')}" opacity=".12"/>`;
+  g += `<line x1="0" x2="${W}" y1="${ly}" y2="${ly}" stroke="${css('--brand')}" stroke-dasharray="4 4" stroke-width="1"/>`;
+  svg.innerHTML = g;
+}
+function drawEquity() {
+  const svg = document.getElementById('equity'); seed = 21; const W = 1000, H = 220; let v = 10000, pts = [v];
+  for (let i = 0; i < 60; i++) { v += (rnd() < 0.58 ? 1 : -1) * (60 + rnd() * 140) + 12; pts.push(v); }
+  const hi = Math.max(...pts) * 1.01, lo = Math.min(...pts) * 0.99, x = (i) => i / (pts.length - 1) * W, y = (p) => 10 + (hi - p) / (hi - lo) * (H - 20);
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p).toFixed(1)}`).join('');
+  const brand = css('--brand');
+  svg.innerHTML = `<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${brand}" stop-opacity=".22"/><stop offset="1" stop-color="${brand}" stop-opacity="0"/></linearGradient></defs>
+    <line x1="0" x2="${W}" y1="${y(10000)}" y2="${y(10000)}" stroke="${css('--faint')}" stroke-dasharray="4 4"/>
+    <path d="${d}L${W},${H}L0,${H}Z" fill="url(#eg)"/><path d="${d}" fill="none" stroke="${brand}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+}
+const btn = document.getElementById('themeBtn');
+function isDark() { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+function paint() { btn.textContent = isDark() ? '☀ Light' : '☾ Dark'; drawCandles(); drawEquity(); }
+btn.onclick = () => { const next = isDark() ? 'light' : 'dark'; document.documentElement.dataset.theme = next; try { localStorage.setItem('ot-mock-theme', next); } catch (e) {} paint(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
+paint();
+</script>
+</body>
+</html>

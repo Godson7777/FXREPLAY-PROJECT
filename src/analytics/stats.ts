@@ -1,5 +1,4 @@
 import type { Trade } from '../engine/broker';
-import { rng } from '../data/synthetic';
 
 export interface Stats {
   trades: number;
@@ -248,7 +247,7 @@ export function holdBucket(sec: number): string {
 export const HOLD_BUCKETS = ['<15m', '15m–1h', '1–4h', '4–24h', '1–3d', '>3d'];
 
 /** R-multiple histogram with 0.5R bins, clamped to [-3, +6]. */
-export function rHistogram(trades: Trade[]) {
+export function rHistogram(trades: { r: number | null }[]) {
   const bins: { lo: number; hi: number; count: number }[] = [];
   for (let x = -3; x < 6; x += 0.5) bins.push({ lo: x, hi: x + 0.5, count: 0 });
   for (const t of trades) {
@@ -258,74 +257,4 @@ export function rHistogram(trades: Trade[]) {
     bins[i].count++;
   }
   return bins;
-}
-
-// ---- Monte Carlo ------------------------------------------------------------
-
-export interface MonteCarlo {
-  runs: number;
-  steps: number;
-  bands: { p5: number[]; p25: number[]; p50: number[]; p75: number[]; p95: number[] };
-  finalP5: number;
-  finalP50: number;
-  finalP95: number;
-  ddP50: number;
-  ddP95: number;
-  ruinProb: number; // P(drawdown >= ruinPct)
-  ruinPct: number;
-  profitProb: number;
-}
-
-/**
- * Resamples trade returns (as % of balance at the time) with replacement to
- * estimate the spread of outcomes for the next `steps` trades.
- */
-export function monteCarlo(trades: Trade[], startBalance: number, runs = 1000, steps = 0, ruinPct = 0.3, seed = 7): MonteCarlo | null {
-  const T = [...trades].sort((a, b) => a.exitTime - b.exitTime);
-  if (T.length < 5) return null;
-  const rets = T.map((t) => t.pnl / Math.max(1e-9, t.balanceAfter - t.pnl));
-  const N = steps || T.length;
-  const rand = rng(seed);
-  const paths: Float64Array[] = [];
-  const finals: number[] = [], dds: number[] = [];
-  let ruined = 0, profit = 0;
-  for (let r = 0; r < runs; r++) {
-    const p = new Float64Array(N + 1);
-    let b = startBalance, pk = b, mdd = 0;
-    p[0] = b;
-    for (let i = 1; i <= N; i++) {
-      b *= 1 + rets[Math.floor(rand() * rets.length)];
-      if (b < 0) b = 0;
-      p[i] = b;
-      if (b > pk) pk = b;
-      mdd = Math.max(mdd, pk ? (pk - b) / pk : 0);
-    }
-    paths.push(p);
-    finals.push(b);
-    dds.push(mdd);
-    if (mdd >= ruinPct) ruined++;
-    if (b > startBalance) profit++;
-  }
-  const q = (arr: number[], p: number) => {
-    const s = [...arr].sort((a, b) => a - b);
-    return s[Math.min(s.length - 1, Math.max(0, Math.round(p * (s.length - 1))))];
-  };
-  const bands = { p5: [] as number[], p25: [] as number[], p50: [] as number[], p75: [] as number[], p95: [] as number[] };
-  const col: number[] = new Array(runs);
-  for (let i = 0; i <= N; i++) {
-    for (let r = 0; r < runs; r++) col[r] = paths[r][i];
-    col.sort((a, b) => a - b);
-    const at = (p: number) => col[Math.round(p * (runs - 1))];
-    bands.p5.push(at(0.05));
-    bands.p25.push(at(0.25));
-    bands.p50.push(at(0.5));
-    bands.p75.push(at(0.75));
-    bands.p95.push(at(0.95));
-  }
-  return {
-    runs, steps: N, bands,
-    finalP5: q(finals, 0.05), finalP50: q(finals, 0.5), finalP95: q(finals, 0.95),
-    ddP50: q(dds, 0.5), ddP95: q(dds, 0.95),
-    ruinProb: ruined / runs, ruinPct, profitProb: profit / runs,
-  };
 }

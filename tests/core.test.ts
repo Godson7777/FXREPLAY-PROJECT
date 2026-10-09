@@ -4,7 +4,8 @@ import { barsFromRows } from '../src/core/types';
 import { offsetFn } from '../src/core/tz';
 import { parseCsv, parseStamp } from '../src/data/csv';
 import { Broker, newBrokerState } from '../src/engine/broker';
-import { computeStats, monteCarlo } from '../src/analytics/stats';
+import { computeStats } from '../src/analytics/stats';
+import { DEFAULT_PATH_OPTS, simulatePaths } from '../src/analytics/montecarlo';
 import { generateSynthetic } from '../src/data/synthetic';
 import { ema, sma } from '../src/core/indicators';
 
@@ -192,9 +193,11 @@ describe('stats', () => {
     expect(s.maxDD).toBe(200);
     expect(s.maxLossStreak).toBe(2);
     expect(s.totalR).toBeCloseTo(4);
-    const mc = monteCarlo(trades, 10400, 200, 50);
+    const rets = trades.map((t) => t.pnl / (t.balanceAfter - t.pnl));
+    const mc = simulatePaths(rets, rets.map(() => 0), { ...DEFAULT_PATH_OPTS, runs: 200, horizon: 50 });
     expect(mc).not.toBeNull();
     expect(mc!.bands.p50.length).toBe(51);
+    expect(mc!.profitProb).toBeGreaterThan(0.5);
   });
 });
 

@@ -1,0 +1,2 @@
+/** Brand mark: green tile with rising bars and a wave (no external assets). */
+export const LOGO = `<svg class="logo-svg" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#22c96a"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#11181c" opacity=".55"/><rect x="14" y="12" width="4" height="13" rx="1" fill="#11181c" opacity=".78"/><rect x="21" y="7" width="4" height="18" rx="1" fill="#11181c"/><path d="M5 12c3-4 6-4 9-1s6 3 9-2" stroke="#11181c" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;

@@ -31,7 +31,30 @@ async function tx<T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectS
   });
 }
 
+/**
+ * Read-modify-write inside one transaction, so a concurrent writer (another tab)
+ * can never be overwritten with stale data. `fn` must be synchronous; return
+ * undefined to leave the record unchanged.
+ */
+async function update<T>(store: string, key: string, fn: (cur: T | undefined) => T | undefined): Promise<T | undefined> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const t = d.transaction(store, 'readwrite');
+    const os = t.objectStore(store);
+    let out: T | undefined;
+    const g = os.get(key);
+    g.onsuccess = () => {
+      out = fn(g.result as T | undefined);
+      if (out !== undefined) os.put(out, key);
+    };
+    t.oncomplete = () => resolve(out);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
+}
+
 export const idb = {
+  update,
   get: <T>(store: string, key: string) => tx<T>(store, 'readonly', (s) => s.get(key) as IDBRequest<T>),
   put: (store: string, key: string, val: unknown) => tx(store, 'readwrite', (s) => s.put(val, key)),
   del: (store: string, key: string) => tx(store, 'readwrite', (s) => s.delete(key)),

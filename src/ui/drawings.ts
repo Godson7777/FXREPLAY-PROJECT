@@ -45,8 +45,8 @@ export const TOOL_INFO: { type: DrawingType | 'cursor'; icon: string; title: str
 const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.618];
 const ONE_POINT: DrawingType[] = ['hline', 'hray', 'vline', 'text', 'arrowUp', 'arrowDown'];
 const DEFAULT_COLOR: Partial<Record<DrawingType, string>> = {
-  hline: '#f0b90b', hray: '#f0b90b', vline: '#8a8f98', rect: '#7e57c2', fib: '#26a69a', measure: '#3987e5', text: '#d1d4dc',
-  arrowUp: '#26a69a', arrowDown: '#ef5350',
+  hline: '#d4a24c', hray: '#d4a24c', vline: '#8a8780', rect: '#9085e9', fib: '#1a9e93', measure: '#5b93d6', text: '#8a8780',
+  arrowUp: '#1a9e93', arrowDown: '#e0605a',
 };
 
 export interface LayerHost {
@@ -219,7 +219,7 @@ export class DrawingLayer {
         return;
       }
       const type = this.tool;
-      const d: Drawing = { id: Math.random().toString(36).slice(2, 10), type, pts: [pt, { ...pt }], color: DEFAULT_COLOR[type] ?? '#3987e5' };
+      const d: Drawing = { id: Math.random().toString(36).slice(2, 10), type, pts: [pt, { ...pt }], color: DEFAULT_COLOR[type] ?? '#22c96a' };
       if (ONE_POINT.includes(type)) {
         d.pts = [pt];
         if (type === 'text') {
@@ -240,7 +240,7 @@ export class DrawingLayer {
         const dir = type === 'long' ? 1 : -1;
         const t1 = pt.t + this.host.tfSec() * 25;
         d.pts = [pt, { t: t1, p: pt.p - dir * dist }, { t: t1, p: pt.p + dir * dist * 2 }];
-        d.color = type === 'long' ? '#26a69a' : '#ef5350';
+        d.color = type === 'long' ? '#1a9e93' : '#e0605a';
         this.host.drawings().push(d);
         this.selected = d;
         this.host.changed();
@@ -543,9 +543,9 @@ export class DrawingLayer {
         const [e, s, t] = P;
         const x1 = P[1].x;
         const w = x1 - e.x;
-        ctx.fillStyle = 'rgba(38,166,154,0.22)';
+        ctx.fillStyle = 'rgba(26,158,147,0.22)';
         ctx.fillRect(e.x, Math.min(e.y, t.y), w, Math.abs(t.y - e.y));
-        ctx.fillStyle = 'rgba(239,83,80,0.22)';
+        ctx.fillStyle = 'rgba(224,96,90,0.22)';
         ctx.fillRect(e.x, Math.min(e.y, s.y), w, Math.abs(s.y - e.y));
         ctx.strokeStyle = '#8a8f98';
         ctx.lineWidth = 1;
@@ -553,21 +553,21 @@ export class DrawingLayer {
         const risk = Math.abs(d.pts[0].p - d.pts[1].p), rew = Math.abs(d.pts[2].p - d.pts[0].p);
         const pip = this.host.pipSize();
         const rr = risk ? rew / risk : 0;
-        this.label(e.x + w / 2, t.y + (d.type === 'long' ? -4 : 18), `Target ${(rew / pip).toFixed(1)} pips`, '#1b806f', 'center');
-        this.label(e.x + w / 2, s.y + (d.type === 'long' ? 18 : -4), `Stop ${(risk / pip).toFixed(1)} pips`, '#b8403d', 'center');
-        this.label(e.x + w / 2, e.y - 3, `${d.type === 'long' ? 'Long' : 'Short'}  R:R ${rr.toFixed(2)}`, '#4a4f5a', 'center');
+        this.label(e.x + w / 2, t.y + (d.type === 'long' ? -4 : 18), `Target ${(rew / pip).toFixed(1)} pips`, '#13776f', 'center');
+        this.label(e.x + w / 2, s.y + (d.type === 'long' ? 18 : -4), `Stop ${(risk / pip).toFixed(1)} pips`, '#b8443b', 'center');
+        this.label(e.x + w / 2, e.y - 3, `${d.type === 'long' ? 'Long' : 'Short'}  R:R ${rr.toFixed(2)}`, '#57564f', 'center');
         break;
       }
       case 'measure': {
         const up = d.pts[1].p >= d.pts[0].p;
-        ctx.fillStyle = up ? 'rgba(57,135,229,0.18)' : 'rgba(239,83,80,0.18)';
+        ctx.fillStyle = up ? 'rgba(91,147,214,0.18)' : 'rgba(224,96,90,0.18)';
         ctx.fillRect(Math.min(P[0].x, P[1].x), Math.min(P[0].y, P[1].y), Math.abs(P[1].x - P[0].x), Math.abs(P[1].y - P[0].y));
-        ctx.strokeStyle = up ? '#3987e5' : '#ef5350';
+        ctx.strokeStyle = up ? '#5b93d6' : '#e0605a';
         line(ctx, P[0].x, P[0].y, P[1].x, P[1].y);
         const dp = d.pts[1].p - d.pts[0].p;
         const bars = Math.round(this.timeToLogical(d.pts[1].t) - this.timeToLogical(d.pts[0].t));
         const txt = `${dp.toFixed(dg)} (${((dp / d.pts[0].p) * 100).toFixed(2)}%) ${(dp / this.host.pipSize()).toFixed(1)} pips · ${bars} bars`;
-        this.label((P[0].x + P[1].x) / 2, Math.min(P[0].y, P[1].y) - 4, txt, up ? '#2a6fc2' : '#b8403d', 'center');
+        this.label((P[0].x + P[1].x) / 2, Math.min(P[0].y, P[1].y) - 4, txt, up ? '#3b6fae' : '#b8443b', 'center');
         break;
       }
       case 'text':
@@ -613,7 +613,7 @@ export class DrawingLayer {
     const sig = d.id + d.color;
     if (tb.dataset.sig === sig) return;
     tb.dataset.sig = sig;
-    const colors = ['#3987e5', '#26a69a', '#ef5350', '#f0b90b', '#7e57c2', '#d1d4dc', '#ff9800'];
+    const colors = ['#22c96a', '#5b93d6', '#1a9e93', '#e0605a', '#d4a24c', '#9085e9', '#8a8780'];
     tb.innerHTML =
       colors.map((c) => `<button class="sw${c === d.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="Color"></button>`).join('') +
       (d.type === 'long' || d.type === 'short' ? `<button class="tb-btn" data-act="order" title="Place this as a real order">Place order</button>` : '') +
