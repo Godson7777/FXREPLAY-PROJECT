@@ -2,11 +2,13 @@ import { parseTf } from '../core/timeframe';
 import { fmtLocal, fmtDuration, offsetFn, localToUtc, ZONES } from '../core/tz';
 import { INDICATORS, indicatorDef } from '../core/indicators';
 import type { Bars } from '../core/types';
-import { round2, type OrderType, type Side, type Trade } from '../engine/broker';
-import { Replay, type ChartType, type Session } from '../engine/replay';
+import { newBrokerState, round2, type OrderType, type Side, type Trade } from '../engine/broker';
+import { Replay, dataWindow, type ChartType, type Session } from '../engine/replay';
+import { LiveFeed, applyCandle, applyTick, hlCandles, HL_MAX_CANDLES, type FeedStatus } from '../data/hyperliquid';
+import { getDatasetMeta, saveDataset } from '../data/store';
 import type { ChallengeState } from '../engine/rules';
 import { saveSession, saveShot, getShot } from '../data/sessions';
-import { ChartPane, IND_COLORS, type PaneHost } from './chartpane';
+import { ChartPane, IND_COLORS, type LineAction, type PaneHost } from './chartpane';
 import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
 import { h, money, num, cls, toast, modal, field, esc, parseDateInput, themeButton } from './dom';
 import { cloudButton } from './cloudui';
@@ -24,11 +26,13 @@ interface Prefs {
   tpMode: 'rr' | 'pips';
   tpVal: number;
   confirmClose: boolean;
+  bottomH: number;
+  bottomCollapsed: boolean;
 }
 
 const PREF_KEY = 'overflowtrade.prefs';
 function loadPrefs(): Prefs {
-  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false };
+  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false };
   try {
     return { ...def, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') };
   } catch {
@@ -43,6 +47,7 @@ export class Workspace implements PaneHost {
   root: HTMLDivElement;
   private grid: HTMLDivElement;
   private right: HTMLDivElement;
+  private center: HTMLDivElement;
   private bottom: HTMLDivElement;
   private clockEl: HTMLSpanElement;
   private progress: HTMLDivElement;
@@ -55,13 +60,23 @@ export class Workspace implements PaneHost {
   private saveTimer = 0;
   private prefs = loadPrefs();
   private tab: 'positions' | 'orders' | 'history' = 'positions';
-  private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0 };
+  private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0, lev: 0 };
   private magnet = true;
   private stayInTool = false;
   private pendingShots: Trade[] = [];
   private challengeEvent: ChallengeState | null = null;
   private lastUi = 0;
   private menu: HTMLDivElement | null = null;
+  private feed: LiveFeed | null = null;
+  private liveStatus: FeedStatus = 'connecting';
+  private liveEl: HTMLSpanElement | null = null;
+  private liveTimer = 0;
+  private liveDirty = false;
+  private liveAppended = false;
+  private liveSaveTimer = 0;
+  private liveAgeTimer = 0;
+  private lastTickMin = 0;
+  private bannerEl: HTMLDivElement | null = null;
 
   constructor(
     public session: Session,
@@ -78,7 +93,9 @@ export class Workspace implements PaneHost {
     this.bottom = h('div', { class: 'bottom' });
     this.clockEl = h('span', { class: 'clock' });
     this.progress = h('div', { class: 'progress-fill' });
-    this.root = h('div', { class: 'ws' }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), h('div', { class: 'center' }, this.grid, this.controls(), this.bottom), this.right));
+    this.center = h('div', { class: 'center' }, this.grid, this.session.live ? this.liveControls() : this.controls(), this.bottom);
+    this.root = h('div', { class: `ws${this.session.live ? ' is-live' : ''}` }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right));
+    this.initBottomGestures();
     document.addEventListener('keydown', this.onKey);
     window.addEventListener('beforeunload', this.flushSave);
   }
@@ -91,10 +108,13 @@ export class Workspace implements PaneHost {
     parent.append(this.root);
     this.buildPanes();
     this.renderAll();
+    if (this.session.live) this.startLive();
+    else if (!this.replay.hasFuture()) this.showNoDataBanner();
   }
 
   destroy() {
     this.pause();
+    this.stopLive();
     this.flushSave();
     document.removeEventListener('keydown', this.onKey);
     window.removeEventListener('beforeunload', this.flushSave);
@@ -203,6 +223,261 @@ export class Workspace implements PaneHost {
       this.clockEl,
       h('div', { class: 'progress', title: 'Session progress' }, this.progress),
     );
+  }
+
+  // ---- live market (Hyperliquid) ---------------------------------------------------
+
+  private liveControls() {
+    this.liveEl = h('span', { class: 'live-badge connecting' }, '● CONNECTING');
+    // progress bar is unused in live mode but renderClock writes to it
+    return h('div', { class: 'controls live' },
+      this.liveEl,
+      h('span', { class: 'muted small' }, `Hyperliquid ${this.session.live!.coin}-PERP · real-time forward test · funding not simulated`),
+      h('div', { class: 'spacer' }),
+      this.clockEl,
+    );
+  }
+
+  private get liveSym() {
+    return this.session.symbols[0];
+  }
+
+  private setLiveStatus(st: FeedStatus) {
+    this.liveStatus = st;
+    this.renderLiveBadge();
+  }
+
+  private renderLiveBadge() {
+    const el = this.liveEl;
+    if (!el) return;
+    const age = this.feed?.lastMsg ? Math.round((Date.now() - this.feed.lastMsg) / 1000) : null;
+    const st = this.liveStatus;
+    el.className = `live-badge ${st}`;
+    el.textContent = st === 'live' ? `● LIVE${age != null && age > 5 ? ` · ${age}s since last update` : ''}` : st === 'connecting' ? '● CONNECTING' : st === 'reconnecting' ? '● RECONNECTING…' : '● OFFLINE — retrying';
+  }
+
+  private startLive() {
+    const coin = this.session.live!.coin;
+    this.lastTickMin = Math.floor((this.replay.clock - 1) / 60) * 60;
+    this.feed = new LiveFeed(coin, {
+      status: (st) => this.setLiveStatus(st),
+      opened: () => void this.backfill(),
+      candle: (row) => this.onLiveCandle(row),
+      trade: (t, px) => this.onLiveTrade(t, px),
+    });
+    this.liveAgeTimer = window.setInterval(() => this.renderLiveBadge(), 1000);
+    this.liveSaveTimer = window.setInterval(() => void this.saveLiveBars(), 60000);
+  }
+
+  private stopLive() {
+    if (!this.feed) return;
+    this.feed.close();
+    this.feed = null;
+    clearInterval(this.liveAgeTimer);
+    clearInterval(this.liveSaveTimer);
+    clearTimeout(this.liveTimer);
+    void this.saveLiveBars();
+  }
+
+  /** Fill the gap since the last bar, letting every missed bar resolve orders honestly. */
+  private async backfill() {
+    const sym = this.liveSym;
+    const b = this.replay.data[sym];
+    const coin = this.session.live!.coin;
+    const now = Math.floor(Date.now() / 1000);
+    const from = b.n ? b.t[b.n - 1] : now - HL_MAX_CANDLES * 60;
+    try {
+      const rows = await hlCandles(coin, '1m', Math.max(from, now - HL_MAX_CANDLES * 60), now);
+      if (!this.feed) return;
+      if (rows.length && rows[0][0] > from + 60) toast(`Data gap: Hyperliquid only serves the latest ${HL_MAX_CANDLES.toLocaleString('en-US')} one-minute candles, so ${Math.round((rows[0][0] - from) / 3600)}h of history is missing. Open orders were checked against the candles available.`, 'info');
+      const br = this.replay.broker;
+      for (const r of rows) {
+        const res = applyCandle(b, r);
+        if (res === 'old') continue;
+        if (res === 'append') this.liveAppended = true;
+        // bars fully after the last processed tick are fed to the broker; the bar
+        // holding that tick is not (its high/low may predate an open position)
+        if (r[0] > this.lastTickMin) {
+          br.onBar(sym, r[0], r[1], r[2], r[3], r[4]);
+          this.lastTickMin = r[0];
+          this.session.state.clock = Math.max(this.session.state.clock, r[0] + 1);
+        }
+      }
+      this.replay.checkRules();
+      this.liveDirty = true;
+      this.scheduleLiveRender(0);
+    } catch (e) {
+      toast(`Could not load recent ${coin} candles: ${(e as Error).message}`, 'err');
+    }
+  }
+
+  private onLiveCandle(row: number[]) {
+    const res = applyCandle(this.replay.data[this.liveSym], row);
+    if (res === 'old') return;
+    if (res === 'append') this.liveAppended = true;
+    this.scheduleLiveRender();
+  }
+
+  private onLiveTrade(t: number, px: number) {
+    const sym = this.liveSym;
+    const b = this.replay.data[sym];
+    if (applyTick(b, t, px) === 'append') this.liveAppended = true;
+    this.replay.broker.onBar(sym, t, px, px, px, px);
+    this.lastTickMin = Math.max(this.lastTickMin, Math.floor(t / 60) * 60);
+    this.session.state.clock = Math.max(this.session.state.clock, t + 1);
+    this.replay.checkRules();
+    this.liveDirty = true;
+    this.scheduleLiveRender();
+  }
+
+  private scheduleLiveRender(delay = 200) {
+    if (this.liveTimer) return;
+    this.liveTimer = window.setTimeout(() => {
+      this.liveTimer = 0;
+      const sym = this.liveSym;
+      const b = this.replay.data[sym];
+      this.replay.cursor[sym] = Math.max(0, b.n - 1);
+      for (const p of this.panes) p.liveRefresh(this.liveAppended);
+      this.liveAppended = false;
+      this.flushShots();
+      this.renderClock();
+      this.renderSide();
+      this.renderBottom();
+      this.handleChallenge();
+      if (this.liveDirty) this.scheduleSave();
+      this.liveDirty = false;
+    }, delay);
+  }
+
+  private async saveLiveBars() {
+    const sym = this.liveSym;
+    const b = this.replay.data[sym];
+    if (!b?.n) return;
+    try {
+      const meta = await getDatasetMeta(sym);
+      if (meta) await saveDataset({ ...meta, from: b.t[0], to: b.t[b.n - 1], count: b.n }, b);
+    } catch (e) {
+      console.warn('live bars not saved', e);
+    }
+  }
+
+  // ---- no data after the clock -------------------------------------------------------
+
+  private showNoDataBanner() {
+    this.bannerEl?.remove();
+    const s = this.session;
+    const off = offsetFn(this.tz);
+    const fmt = (t: number) => fmtLocal(t + off(t)).slice(0, 16);
+    const lastBar = this.replay.dataEnd();
+    const pastEnd = s.end != null && this.replay.clock > s.end;
+    const ends = s.symbols.map((sym) => { const b = this.replay.data[sym]; return b?.n ? `${sym} ends on ${fmt(b.t[b.n - 1])}` : `${sym} has no bars`; }).join(', ');
+    const empty = !s.state.broker.trades.length && !s.state.broker.positions.length && !s.state.broker.orders.length;
+    const win = dataWindow(s.symbols.map((sym) => { const b = this.replay.data[sym]; return { from: b?.t[0] ?? 0, to: b?.n ? b.t[b.n - 1] : 0 }; }));
+    const okWin = win.from < win.to;
+    const restartAt = okWin ? win.from + Math.min(30 * 86400, Math.floor((win.to - win.from) / 4)) : 0;
+    const startedAfter = s.start > lastBar;
+    const restart = h('button', { class: 'primary' }, `Restart from ${okWin ? fmt(restartAt) : '—'}`);
+    restart.onclick = async () => {
+      s.start = restartAt;
+      s.end = s.end != null && s.end <= restartAt ? null : s.end;
+      s.state.clock = restartAt;
+      s.state.finished = false;
+      s.state.broker = newBrokerState(s.balance);
+      s.state.challenge = undefined;
+      s.state.updatedAt = Date.now();
+      await saveSession(s);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    };
+    const body = h('div', { class: 'nodata-card' },
+      h('h3', {}, pastEnd ? 'This session has reached its end date' : startedAfter ? 'Nothing to replay after the start date' : 'You reached the end of the data'),
+      h('p', {}, startedAfter
+        ? `This session starts on ${fmt(s.start)}, but the market data stops before that: ${ends}. Play has no future candles to reveal.`
+        : pastEnd ? `The session end (${fmt(s.end!)}) has passed. Remove or move the end date in a new session to keep going.` : `The market data stops here: ${ends}. Import newer data with the same symbol name to continue.`),
+      h('div', { class: 'row-btns' },
+        empty && okWin && startedAfter ? restart : null,
+        h('button', { class: empty && startedAfter ? 'ghost' : 'primary', onclick: () => { this.flushSave(); this.nav('#/data'); } }, 'Import newer data'),
+        s.state.broker.trades.length ? h('button', { class: 'ghost', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, 'See analytics') : null,
+        h('button', { class: 'ghost', onclick: () => { this.bannerEl?.remove(); this.bannerEl = null; } }, 'Dismiss'),
+      ),
+      !empty && startedAfter ? h('p', { class: 'muted small' }, 'This session already has trades, so it can’t be restarted — create a new session inside the data range instead.') : null,
+    );
+    this.bannerEl = h('div', { class: 'nodata' }, body);
+    this.center.append(this.bannerEl);
+  }
+
+  // ---- bottom panel (swipe / drag to resize or close) ------------------------------
+
+  private applyBottom() {
+    const c = this.prefs.bottomCollapsed;
+    this.bottom.classList.toggle('collapsed', c);
+    this.bottom.style.height = c ? '' : `${Math.round(this.prefs.bottomH)}px`;
+    const t = this.bottom.querySelector<HTMLButtonElement>('.bottom-toggle');
+    if (t) {
+      t.textContent = c ? '▴' : '▾';
+      t.title = c ? 'Show the panel (swipe up or `)' : 'Hide the panel (swipe down or `)';
+    }
+  }
+
+  toggleBottom(open = this.prefs.bottomCollapsed) {
+    this.prefs.bottomCollapsed = !open;
+    this.applyBottom();
+    this.savePrefs();
+  }
+
+  private initBottomGestures() {
+    const el = this.bottom;
+    let start: { y: number; h: number; t: number; id: number } | null = null;
+    let dragging = false;
+    let lastH = 0;
+    const maxH = () => Math.max(120, Math.round(window.innerHeight * 0.6));
+    el.addEventListener('pointerdown', (e) => {
+      const tgt = e.target as HTMLElement;
+      if (e.button !== 0 || !tgt.closest('.bottom-handle, .tabs') || tgt.closest('.bottom-toggle, input, select')) return;
+      start = { y: e.clientY, h: el.getBoundingClientRect().height, t: performance.now(), id: e.pointerId };
+      dragging = false;
+      // track on window: the pointer leaves the panel as soon as it is dragged upwards
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+    });
+    const move = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      const dy = start.y - e.clientY;
+      if (!dragging) {
+        if (Math.abs(dy) < 6) return;
+        dragging = true;
+        el.classList.add('resizing');
+        el.classList.remove('collapsed');
+      }
+      lastH = Math.max(36, Math.min(maxH(), start.h + dy));
+      el.style.height = `${lastH}px`;
+    };
+    const end = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      const s0 = start;
+      start = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      if (!dragging) return;
+      dragging = false;
+      el.classList.remove('resizing');
+      const dy = s0.y - e.clientY;
+      const fast = performance.now() - s0.t < 300 && Math.abs(dy) > 30;
+      // swallow the click that follows a drag so a tab under the finger isn't toggled
+      const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault(); };
+      el.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => el.removeEventListener('click', swallow, { capture: true }), 0);
+      if ((fast && dy < 0) || lastH < 90) {
+        this.prefs.bottomCollapsed = true;
+        if (s0.h >= 90) this.prefs.bottomH = s0.h;
+      } else {
+        this.prefs.bottomCollapsed = false;
+        this.prefs.bottomH = fast && dy > 0 ? Math.max(lastH, this.prefs.bottomH, 210) : lastH;
+      }
+      this.applyBottom();
+      this.savePrefs();
+    };
   }
 
   private setLayout(n: number) {
@@ -324,6 +599,22 @@ export class Workspace implements PaneHost {
     return out;
   }
 
+  lineAction(kind: LineAction, id: number) {
+    const br = this.replay.broker;
+    if (kind === 'close') {
+      const p = br.s.positions.find((x) => x.id === id);
+      if (!p) return;
+      if (this.prefs.confirmClose && !confirm(`Close position #${id}?`)) return;
+      br.close(id);
+      toast(`Closed #${id} ${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} ${p.symbol}`, 'ok');
+    } else if (kind === 'cancel') br.cancelOrder(id);
+    else if (kind === 'clear-sl') br.modifyPosition(id, { sl: null });
+    else if (kind === 'clear-tp') br.modifyPosition(id, { tp: null });
+    else if (kind === 'clear-osl') br.modifyOrder(id, { sl: null });
+    else if (kind === 'clear-otp') br.modifyOrder(id, { tp: null });
+    this.afterTrade();
+  }
+
   private modifyPos(id: number, patch: { sl?: number | null; tp?: number | null }, valid = true) {
     if (!valid) return toast('That level is on the wrong side of the current price', 'err');
     this.replay.broker.modifyPosition(id, patch);
@@ -429,13 +720,18 @@ export class Workspace implements PaneHost {
 
   private endReached() {
     this.pause();
-    if (this.endNotified) return toast('End of data / session reached', 'info');
-    this.endNotified = true;
     const n = this.replay.broker.s.trades.length;
+    const s = this.session;
+    const off = offsetFn(this.tz);
+    const last = this.replay.dataEnd();
+    const why = s.end != null && this.replay.clock > s.end ? `the session end date (${fmtLocal(s.end + off(s.end)).slice(0, 16)})` : `the end of the market data (${fmtLocal(last + off(last)).slice(0, 16)})`;
+    if (this.endNotified) return toast(`Nothing more to play: you are at ${why}.`, 'info');
+    this.endNotified = true;
+    if (!n) return this.showNoDataBanner();
     const go = h('button', { class: 'primary' }, 'See your Overflow Score');
     const stay = h('button', { class: 'ghost' }, 'Keep reviewing');
     const close = modal('End of the replay', h('div', { class: 'stack' },
-      h('p', {}, 'You reached the end of the market data or of this session.'),
+      h('p', {}, `You reached ${why}. Import newer data with the same symbol name to continue this session.`),
       h('p', { class: 'muted' }, n
         ? `${n} closed trade${n === 1 ? '' : 's'}. See how the method scores: drawdowns, Sharpe, monthly consistency, market regimes, Monte Carlo and the final Overflow Score.`
         : 'No closed trades yet — the Overflow Score needs at least 10.'),
@@ -609,6 +905,13 @@ export class Workspace implements PaneHost {
     return { sym, entry, sl: slP, tp: tpP, lots, type };
   }
 
+  /** leverage the ticket opens with (undefined on unleveraged sessions) */
+  private ticketLev(sym: string) {
+    const br = this.replay.broker;
+    if (!br.leveraged) return undefined;
+    return br.levFor(sym, this.ticket.lev || this.session.leverage);
+  }
+
   private submit(side: Side, o?: { type: OrderType; price: number; sym: string }) {
     const lv = this.ticketLevels(side, o);
     const dg = this.session.specs[lv.sym]?.digits ?? 5;
@@ -617,6 +920,7 @@ export class Workspace implements PaneHost {
       sl: lv.sl != null ? +lv.sl.toFixed(dg) : null, tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
       tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), note: this.ticket.note,
       trailPips: this.ticket.trail || null, beAtR: this.ticket.be || null,
+      leverage: this.ticketLev(lv.sym),
     });
     if (!r.ok) return toast(r.error, 'err');
     toast(`${side === 'long' ? 'BUY' : 'SELL'} ${lv.type} ${lv.lots} ${lv.sym}`, 'ok');
@@ -730,6 +1034,7 @@ export class Workspace implements PaneHost {
           field('Take profit', h('div', { class: 'join' }, tpSel, inp('tTp', pr.tpVal, (v) => (pr.tpVal = +v), { type: 'number', step: 0.1, min: 0 }))),
           field('Trail (pips)', inp('tTrail', this.ticket.trail || '', (v) => (this.ticket.trail = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
         ),
+        this.replay.broker.leveraged ? field(`Leverage (max ${this.replay.broker.maxLev(sym) ?? '∞'}×, isolated)`, inp('tLev', this.ticketLev(sym)!, (v) => (this.ticket.lev = Math.max(1, +v || 1)), { type: 'number', step: 1, min: 1, ...(this.replay.broker.maxLev(sym) ? { max: this.replay.broker.maxLev(sym)! } : {}) })) : null,
         h('div', { class: 'row2' },
           field('Auto-BE at R', inp('tBe', this.ticket.be || '', (v) => (this.ticket.be = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
           field('Tags / setup', inp('tTags', this.ticket.tags, (v) => (this.ticket.tags = v), { type: 'text', placeholder: 'breakout, A+' })),
@@ -743,6 +1048,7 @@ export class Workspace implements PaneHost {
         kv('Equity', money(eq)),
         kv('Floating P&L', money(eq - br.s.balance, true), cls(eq - br.s.balance)),
         kv('Open risk', money(br.openRisk())),
+        br.leveraged ? kv('Used · free margin', `${money(br.usedMargin())} · ${money(br.freeMargin())}`) : null,
         kv('Net P&L', `${money(net, true)} (${num((net / this.session.balance) * 100, 2, true)}%)`, cls(net)),
         kv('Trades · Win rate', `${trades.length} · ${(wr * 100).toFixed(1)}%`),
       ),
@@ -792,22 +1098,32 @@ export class Workspace implements PaneHost {
       <div><span>R:R</span><b>${risk && reward ? (reward / risk).toFixed(2) : '—'}</b></div>
       <div class="lv"><span>Buy SL/TP</span><b>${L.sl?.toFixed(dg) ?? '—'} / ${L.tp?.toFixed(dg) ?? '—'}</b></div>
       <div class="lv"><span>Sell SL/TP</span><b>${S.sl?.toFixed(dg) ?? '—'} / ${S.tp?.toFixed(dg) ?? '—'}</b></div>`;
+    const lev = this.ticketLev(sym);
+    if (lev) {
+      const margin = br.marginFor(sym, L.lots, L.entry, lev);
+      el.insertAdjacentHTML('beforeend', `
+      <div><span>Margin</span><b>${money(margin)}</b></div>
+      <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>
+      <div class="lv"><span>Liq. buy / sell</span><b>${br.liqPrice(sym, 'long', L.entry, lev).toFixed(dg)} / ${br.liqPrice(sym, 'short', S.entry, lev).toFixed(dg)}</b></div>`);
+    }
   }
 
   private renderBottom() {
     const br = this.replay.broker;
     const tabs = h('div', { class: 'tabs' },
       ...(['positions', 'orders', 'history'] as const).map((t) =>
-        h('button', { class: `tab${this.tab === t ? ' on' : ''}`, onclick: () => { this.tab = t; this.renderBottom(); } },
+        h('button', { class: `tab${this.tab === t ? ' on' : ''}`, onclick: () => { this.tab = t; if (this.prefs.bottomCollapsed) this.toggleBottom(true); this.renderBottom(); } },
           t === 'positions' ? `Positions (${br.s.positions.length})` : t === 'orders' ? `Orders (${br.s.orders.length})` : `History (${br.s.trades.length})`)),
       h('div', { class: 'spacer' }),
       br.s.positions.length ? h('button', { class: 'ghost sm', onclick: () => { br.closeAll(); this.afterTrade(); } }, 'Close all') : null,
+      h('button', { class: 'ghost sm bottom-toggle', type: 'button', onclick: () => this.toggleBottom() }),
     );
     const body = h('div', { class: 'table-wrap' });
     const t = h('table', { class: 'tbl' });
     body.append(t);
     if (this.tab === 'positions') {
-      t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>SL</th><th>TP</th><th>Pips</th><th>R</th><th>P&L</th><th>Opened</th><th></th></tr></thead>`;
+      const levd = br.s.positions.some((p) => p.leverage);
+      t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th>${levd ? '<th>Lev</th><th>Margin</th><th>Liq</th>' : ''}<th>Entry</th><th>SL</th><th>TP</th><th>Pips</th><th>R</th><th>P&L</th><th>Opened</th><th></th></tr></thead>`;
       const tb = h('tbody');
       for (const p of br.s.positions) {
         const sp = this.session.specs[p.symbol];
@@ -819,6 +1135,7 @@ export class Workspace implements PaneHost {
         const off = offsetFn(this.tz);
         const tr = h('tr', {},
           h('td', {}, `${p.id}`), h('td', {}, p.symbol), h('td', { class: p.side === 'long' ? 'up' : 'dn' }, p.side.toUpperCase()), h('td', {}, p.lots.toFixed(2)),
+          ...(levd ? [h('td', {}, p.leverage ? `${p.leverage}×` : '—'), h('td', {}, p.margin != null ? money(p.margin) : '—'), h('td', { class: 'warn-ink' }, p.liq != null ? p.liq.toFixed(dg) : '—')] : []),
           h('td', {}, p.entry.toFixed(dg)),
           h('td', {}, this.levelInput(p.id, 'sl', p.sl, dg)), h('td', {}, this.levelInput(p.id, 'tp', p.tp, dg)),
           h('td', { class: cls(pips) }, num(pips, 1, true)), h('td', { class: cls(rNow ?? 0) }, rNow != null ? num(rNow, 2, true) : '—'),
@@ -832,7 +1149,7 @@ export class Workspace implements PaneHost {
         );
         tb.append(tr);
       }
-      if (!br.s.positions.length) tb.append(emptyRow(12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
+      if (!br.s.positions.length) tb.append(emptyRow(levd ? 15 : 12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
       t.append(tb);
     } else if (this.tab === 'orders') {
       t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Type</th><th>Side</th><th>Lots</th><th>Price</th><th>SL</th><th>TP</th><th>Placed</th><th></th></tr></thead>`;
@@ -866,7 +1183,8 @@ export class Workspace implements PaneHost {
       t.append(tb);
     }
     this.bottom.innerHTML = '';
-    this.bottom.append(tabs, body);
+    this.bottom.append(h('div', { class: 'bottom-handle', title: 'Drag or swipe to resize · swipe down to hide' }, h('i', {})), tabs, body);
+    this.applyBottom();
   }
 
   private levelInput(id: number, kind: 'sl' | 'tp', v: number | null, dg: number) {
@@ -1011,6 +1329,8 @@ export class Workspace implements PaneHost {
       if (['1', '2', '3', '4'].includes(code)) return (e.preventDefault(), this.setLayout(+code));
       return;
     }
+    if (k === '`') return (e.preventDefault(), this.toggleBottom());
+    if (this.session.live && (k === ' ' || k === 'ArrowRight')) return (e.preventDefault(), toast('Live market: time runs in real time — nothing to skip.', 'info'));
     if (k === ' ') return (e.preventDefault(), this.togglePlay());
     if (k === 'ArrowRight') return (e.preventDefault(), e.shiftKey ? this.stepBase() : this.stepCandle());
     if (k === 'Escape') return this.setTool('cursor');

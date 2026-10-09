@@ -33,6 +33,13 @@ export interface SessionConfig {
   createdAt: number;
   specs: Record<string, InstrumentSpec>;
   rules?: ChallengeRules | null;
+  /** account leverage; when set, positions use isolated margin and can be liquidated */
+  leverage?: number;
+  maxLeverage?: Record<string, number>;
+  /** fee in % of notional per side (crypto venues) */
+  feePct?: number;
+  /** forward-test on a live market feed instead of replaying history */
+  live?: { venue: 'hyperliquid'; coin: string } | null;
 }
 
 export interface SessionState {
@@ -77,6 +84,20 @@ export function newSession(cfg: SessionConfig): Session {
   };
 }
 
+/** Common time window [from, to] covered by every selected dataset (from > to = no overlap). */
+export function dataWindow(metas: { from: number; to: number }[]): { from: number; to: number } {
+  return { from: Math.max(...metas.map((m) => m.from)), to: Math.min(...metas.map((m) => m.to)) };
+}
+
+/** Error text for a start/end outside the data, or null when the range can be replayed. */
+export function checkRange(win: { from: number; to: number }, start: number, end: number | null, fmt: (t: number) => string): string | null {
+  if (win.from >= win.to) return 'The selected symbols have no overlapping dates — pick symbols that cover the same period.';
+  if (!isFinite(start)) return 'Invalid start date';
+  if (start < win.from || start >= win.to) return `Start must be between ${fmt(win.from)} and ${fmt(win.to)} — that is where your data is. After the last bar there is nothing to replay.`;
+  if (end != null && (!isFinite(end) || end <= start)) return 'End must be after the start';
+  return null;
+}
+
 /**
  * The replay clock. Every symbol has its own base-bar cursor; the clock always
  * advances to the earliest next bar across all symbols so multi-symbol sessions
@@ -96,7 +117,7 @@ export class Replay {
   ) {
     const s = session;
     this.broker = new Broker(
-      { initialBalance: s.balance, commissionPerLot: s.commissionPerLot, spreadPips: s.spreadPips, slFirst: s.slFirst },
+      { initialBalance: s.balance, commissionPerLot: s.commissionPerLot, spreadPips: s.spreadPips, slFirst: s.slFirst, leverage: s.leverage, maxLeverage: s.maxLeverage, feePct: s.feePct },
       s.specs,
       s.state.broker,
     );
@@ -143,6 +164,21 @@ export class Replay {
     const end = this.session.end;
     if (end != null && nt > end) return Infinity;
     return nt;
+  }
+
+  /** Last bar time across the session's symbols (respects the session end). */
+  dataEnd(): number {
+    let t = -Infinity;
+    for (const sym in this.cursor) {
+      const b = this.data[sym];
+      if (b?.n) t = Math.max(t, b.t[b.n - 1]);
+    }
+    return this.session.end != null ? Math.min(t, this.session.end) : t;
+  }
+
+  /** True when at least one more bar can be revealed. */
+  hasFuture() {
+    return isFinite(this.nextTime());
   }
 
   /** Reveal the next base bar(s). Returns false at the end of data/session. */

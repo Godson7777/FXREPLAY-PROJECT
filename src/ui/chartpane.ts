@@ -47,6 +47,20 @@ export interface PaneHost {
   crosshairMoved(pane: ChartPane, time: number | null): void;
   contextMenu(pane: ChartPane, price: number, x: number, y: number): void;
   setChartType(pane: ChartPane, t: ChartType): void;
+  /** ✕ on an on-chart line tag: close a position, cancel an order, or remove a level */
+  lineAction(kind: LineAction, id: number): void;
+}
+
+export type LineAction = 'close' | 'cancel' | 'clear-sl' | 'clear-tp' | 'clear-osl' | 'clear-otp';
+
+interface LineWant {
+  price: number;
+  color: string;
+  title: string;
+  style: LineStyle;
+  width: 1 | 2;
+  /** HTML tag shown next to the price scale, with an optional ✕ action */
+  tag?: { text: string; action?: LineAction; id: number; tip: string };
 }
 
 export const CHART_TYPES: { type: ChartType; label: string }[] = [
@@ -93,6 +107,9 @@ export class ChartPane {
   private ind: IndSeries[] = [];
   private markers!: ISeriesMarkersPluginApi<Time>;
   private priceLines = new Map<string, IPriceLine>();
+  private tagLayer: HTMLDivElement;
+  private tags = new Map<string, { el: HTMLDivElement; text: HTMLSpanElement; price: number; y: number | null | undefined }>();
+  private tagRaf = 0;
   private legend: HTMLDivElement;
   private header: HTMLDivElement;
   private lastC: { o: number; h: number; l: number; c: number; v: number; t: number } | null = null;
@@ -108,6 +125,7 @@ export class ChartPane {
     this.header = h('div', { class: 'pane-head' });
     this.legend = h('div', { class: 'pane-legend' });
     this.chartEl = h('div', { class: 'pane-chart' });
+    this.tagLayer = h('div', { class: 'line-tags' });
     this.el = h('div', { class: 'pane' }, this.header, this.chartEl, this.legend);
     this.el.addEventListener('pointerdown', () => host.activate(this), true);
     this.chart = createChart(this.chartEl, {
@@ -118,6 +136,7 @@ export class ChartPane {
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
     });
     this.createMain();
+    this.chartEl.append(this.tagLayer);
     const self = this;
     this.layer = new DrawingLayer({
       chart: this.chart,
@@ -245,6 +264,7 @@ export class ChartPane {
   }
 
   destroy() {
+    cancelAnimationFrame(this.tagRaf);
     window.removeEventListener('themechange', this.onTheme);
     this.ro.disconnect();
     this.layer.destroy();
@@ -297,6 +317,33 @@ export class ChartPane {
     this.sync(true);
     this.chart.timeScale().scrollToRealTime();
     this.renderHeader();
+  }
+
+  /**
+   * Live feed: new base bars may have been appended or the last one changed in place.
+   * Re-aggregates when the bar count changed, refreshes the forming candle otherwise,
+   * then syncs incrementally so the user's scroll/zoom is kept.
+   */
+  liveRefresh(appended: boolean) {
+    const b = this.host.replay.data[this.cfg.symbol];
+    if (appended || this.agg.baseToAgg.length < b.n) {
+      this.bars = b;
+      this.agg = getAgg(this.cfg.symbol, b, this.tf, this.host.tz);
+    } else {
+      const a = this.agg, k = a.n - 1, s0 = a.start[k];
+      let hi = -Infinity, lo = Infinity, v = 0;
+      for (let i = s0; i < b.n; i++) {
+        if (b.h[i] > hi) hi = b.h[i];
+        if (b.l[i] < lo) lo = b.l[i];
+        v += b.v[i];
+      }
+      a.o[k] = b.o[s0];
+      a.h[k] = hi;
+      a.l[k] = lo;
+      a.c[k] = b.c[b.n - 1];
+      a.v[k] = v;
+    }
+    this.sync();
   }
 
   /** Raw OHLC of candle j as seen at `cursor`. */
@@ -431,6 +478,65 @@ export class ChartPane {
 
   // ---- positions / orders / trade markers ---------------------------------------
 
+  /** HTML line tags (label + ✕) aligned to their price line, next to the price scale. */
+  private syncTags(want: Map<string, LineWant>) {
+    for (const [key, t] of this.tags) {
+      if (!want.get(key)?.tag) {
+        t.el.remove();
+        this.tags.delete(key);
+      }
+    }
+    for (const [key, w] of want) {
+      if (!w.tag) continue;
+      let t = this.tags.get(key);
+      if (!t) {
+        const text = h('span', {});
+        const el = h('div', { class: 'line-tag', 'data-key': key }, text);
+        const tag = w.tag;
+        if (tag.action) {
+          const x = h('button', { type: 'button', class: 'line-x', title: tag.tip, 'aria-label': tag.tip }, '✕');
+          x.addEventListener('pointerdown', (e) => e.stopPropagation());
+          x.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.host.lineAction(tag.action!, tag.id);
+          });
+          el.append(x);
+        } else el.title = tag.tip;
+        this.tagLayer.append(el);
+        t = { el, text, price: w.price, y: undefined };
+        this.tags.set(key, t);
+      }
+      if (t.text.textContent !== w.tag.text) t.text.textContent = w.tag.text;
+      t.el.style.setProperty('--c', w.color);
+      t.price = w.price;
+    }
+    this.placeTags();
+    if (this.tags.size && !this.tagRaf) this.tagLoop();
+  }
+
+  private tagLoop = () => {
+    this.tagRaf = 0;
+    if (!this.tags.size || !this.el.isConnected) return;
+    this.placeTags();
+    this.tagRaf = requestAnimationFrame(this.tagLoop);
+  };
+
+  private placeTags() {
+    if (!this.tags.size) return;
+    const right = this.chart.priceScale('right').width() + 4;
+    const hgt = this.chart.panes()[0]?.getHeight() ?? this.chartEl.clientHeight;
+    this.tagLayer.style.right = `${right}px`;
+    for (const t of this.tags.values()) {
+      const y = this.main.priceToCoordinate(t.price);
+      const vis = y != null && y >= 0 && y <= hgt;
+      const ry = vis ? Math.round(y) : null;
+      if (ry === t.y) continue;
+      t.y = ry;
+      t.el.style.display = vis ? '' : 'none';
+      if (vis) t.el.style.transform = `translateY(${ry}px) translateY(-50%)`;
+    }
+  }
+
   private candleTimeFor(utc: number): number | null {
     const i = indexAtOrBefore(this.bars.t, this.bars.n, utc);
     if (i < 0) return null;
@@ -442,20 +548,30 @@ export class ChartPane {
   refreshOverlays() {
     const br = this.host.replay.broker;
     const sym = this.cfg.symbol;
-    const want = new Map<string, { price: number; color: string; title: string; style: LineStyle; width: 1 | 2 }>();
+    const want = new Map<string, LineWant>();
+    const dg = this.spec().digits;
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
       const fl = br.floating(p);
-      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? this.th.series2 : this.th.series3, title: `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} ${money(fl, true)}`, style: LineStyle.Solid, width: 2 });
-      if (p.sl != null) want.set(`s${p.id}`, { price: p.sl, color: this.th.down, title: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`, style: LineStyle.Dashed, width: 1 });
-      if (p.tp != null) want.set(`t${p.id}`, { price: p.tp, color: this.th.up, title: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`, style: LineStyle.Dashed, width: 1 });
+      const side = p.side === 'long' ? 'BUY' : 'SELL';
+      const lev = p.leverage ? ` ${p.leverage}×` : '';
+      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? this.th.series2 : this.th.series3, title: '', style: LineStyle.Solid, width: 2,
+        tag: { text: `${side} ${p.lots}${lev} ${money(fl, true)}`, action: 'close', id: p.id, tip: `Close position #${p.id} at market` } });
+      if (p.sl != null) want.set(`s${p.id}`, { price: p.sl, color: this.th.down, title: '', style: LineStyle.Dashed, width: 1,
+        tag: { text: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`, action: 'clear-sl', id: p.id, tip: 'Remove the stop loss' } });
+      if (p.tp != null) want.set(`t${p.id}`, { price: p.tp, color: this.th.up, title: '', style: LineStyle.Dashed, width: 1,
+        tag: { text: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`, action: 'clear-tp', id: p.id, tip: 'Remove the take profit' } });
+      if (p.liq != null) want.set(`l${p.id}`, { price: p.liq, color: '#e8890c', title: '', style: LineStyle.SparseDotted, width: 1,
+        tag: { text: `LIQ ${p.liq.toFixed(dg)}`, id: p.id, tip: `Liquidation price — the position loses its ${money(p.margin ?? 0)} margin here` } });
     }
     for (const o of br.s.orders) {
       if (o.symbol !== sym) continue;
-      want.set(`o${o.id}`, { price: o.price, color: '#d4a24c', title: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, style: LineStyle.Dotted, width: 1 });
-      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: this.th.down, title: `SL`, style: LineStyle.Dotted, width: 1 });
-      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: this.th.up, title: `TP`, style: LineStyle.Dotted, width: 1 });
+      want.set(`o${o.id}`, { price: o.price, color: '#d4a24c', title: '', style: LineStyle.Dotted, width: 1,
+        tag: { text: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, action: 'cancel', id: o.id, tip: `Cancel order #${o.id}` } });
+      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: this.th.down, title: '', style: LineStyle.Dotted, width: 1, tag: { text: 'SL', action: 'clear-osl', id: o.id, tip: 'Remove the order stop loss' } });
+      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: this.th.up, title: '', style: LineStyle.Dotted, width: 1, tag: { text: 'TP', action: 'clear-otp', id: o.id, tip: 'Remove the order take profit' } });
     }
+    this.syncTags(want);
     for (const [key, pl] of this.priceLines) {
       if (!want.has(key)) {
         this.main.removePriceLine(pl);
