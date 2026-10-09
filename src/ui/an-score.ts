@@ -1,7 +1,7 @@
 import type { Report } from '../analytics/report';
 import { PILLARS } from '../analytics/score';
 import { badges } from '../analytics/service';
-import { h, money } from './dom';
+import { h } from './dom';
 import { howButton } from './layout';
 
 const pillarColor = (p: number) => (p >= 70 ? 'var(--band-good)' : p >= 50 ? 'var(--band-warn)' : 'var(--band-bad)');
@@ -81,7 +81,7 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
 
   const notes: string[] = [];
   notes.push(r.unit === 'R' ? 'Results are in R — multiples of the amount risked at the initial stop.' : 'Most trades have no stop loss, so results are in average-loss units (ALU) instead of R.');
-  if (o.combined && o.combined > 1) notes.push(`${o.combined} sessions combined on a ${money(r.initial)} reference account; returns compound by % of equity.`);
+  if (o.combined && o.combined > 1) notes.push(`${o.combined} sessions combined on a $${Math.round(r.initial).toLocaleString('en-US')} reference account; returns compound by % of equity.`);
   const untagged = r.trades.filter((t) => t.trend == null || t.vol == null).length;
   if (untagged) notes.push(`Market regime known for ${r.n - untagged} of ${r.n} trades (see Market regimes).`);
   if (r.synthetic === 'all') notes.push('Synthetic practice data: scored, but never ranked on the leaderboard.');

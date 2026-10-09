@@ -327,7 +327,7 @@ export function scoreReport(r: R): ScoreResult {
     .slice(0, 3)
     .map((p) => {
       const best = [...p.metrics].filter((m) => m.points != null).sort((a, b) => b.points! - a.points!)[0];
-      return `${p.label} (${Math.round(p.points!)}/100) — ${best.label.toLowerCase()}: ${best.display}`;
+      return `${p.label} (${Math.round(p.points!)}/100) — ${best.label}: ${best.display}`;
     });
   return {
     score, raw, tier: tier.id, grade: tier.grade, label: tier.label, verdict: verdicts[tier.id] + capTxt, worthIt: worth[tier.id], allWeather,
