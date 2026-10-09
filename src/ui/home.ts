@@ -9,7 +9,9 @@ import { cloudState, uploadDataset, listCloudDatasets, downloadDataset, deleteCl
 import { authModal } from './cloudui';
 import { listSessions, saveSession, deleteSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
-import { newSession, type Session } from '../engine/replay';
+import { newSession, dataWindow, checkRange, type Session } from '../engine/replay';
+import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
+import { barsFromRows, type InstrumentSpec } from '../core/types';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
 import { listStrategies, mergeStrategies } from '../data/strategies';
@@ -46,8 +48,8 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
         h('span', { class: 'pill' }, h('i', {}), 'New: Overflow Score for every backtest'),
         h('h1', { html: 'Replay any market, <em>bar by bar</em>.' }),
         h('p', {}, 'Backtest manually as if it were live: the future stays hidden, any timeframe you can type (7m, 2H, 3D…), multi-chart sync, a real order engine with SL/TP at 1-minute precision — and a quant-grade report that tells you whether your edge is real.'),
-        h('div', { class: 'hero-actions' }, h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import your data'), demo),
-        h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser) and never ranked. For real history, import CSVs from HistData, Dukascopy or MT4/MT5, or download crypto from Binance on the Data tab.'))),
+        h('div', { class: 'hero-actions' }, h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import your data'), h('button', { class: 'ghost lg', title: 'Forward-test on the live Hyperliquid market', onclick: () => liveSessionModal(async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '● Live market'), demo),
+        h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser) and never ranked. For real history, import CSVs from HistData, Dukascopy or MT4/MT5, or download crypto from Binance or Hyperliquid on the Data tab. Live market paper-trades Hyperliquid perps in real time.'))),
       h('section', { class: 'sec alt' }, h('div', { class: 'wrap' },
         h('div', { class: 'sec-head center' }, h('span', { class: 'eyebrow' }, 'Why Overflow Trade'), h('h2', { html: 'Find out if your edge is <em>real</em>.' })),
         h('div', { class: 'points' },
@@ -59,12 +61,15 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
     return;
   }
 
-  const newBtn = h('button', { class: 'primary', onclick: () => (datasets.length ? newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) : nav('#/data')) }, '+ New session');
+  const start = async (s: Session) => { await saveSession(s); nav(`#/replay/${s.id}`); };
+  const newBtn = h('button', { class: 'primary', onclick: () => (datasets.length ? newSessionModal(datasets, start) : nav('#/data')) }, '+ New session');
+  const liveBtn = h('button', { class: 'ghost', title: 'Forward-test on the live Hyperliquid market', onclick: () => liveSessionModal(start) }, '● Live market');
   main.append(pageHead({
     eyebrow: 'Sessions', titleHtml: 'Your backtesting <em>sessions</em>.', compact: true,
     lead: 'Each session replays the market from a start date with the future hidden. Every closed trade feeds its analytics and Overflow Score; group sessions into a strategy to compete on the leaderboard.',
     actions: [
       newBtn,
+      liveBtn,
       h('button', { class: 'ghost', title: 'Download all sessions, strategies, trades, drawings & journal screenshots as one JSON file', onclick: () => exportBackup(sessions) }, 'Backup'),
       h('button', { class: 'ghost', title: 'Restore sessions and strategies from a backup file', onclick: () => importBackup(() => renderHome(root, nav, 'sessions')) }, 'Restore'),
     ],
@@ -87,7 +92,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
       ? h('span', { class: `badge ${s.state.challenge.status}` }, s.state.challenge.status === 'active' ? `Challenge · ${s.rules?.name ?? 'active'}` : s.state.challenge.status === 'passed' ? 'Challenge passed' : 'Challenge failed')
       : s.state.finished ? h('span', { class: 'badge' }, 'Finished') : null;
     const card = h('article', { class: 'scard' },
-      h('div', { class: 'scard-head' }, h('div', {}, h('h3', {}, s.name), h('div', { class: 'by' }, `${s.symbols.join(' · ')} · started ${fmtDate(s.start).slice(0, 10)}`)), scoreSlot),
+      h('div', { class: 'scard-head' }, h('div', {}, h('h3', {}, s.name, s.live ? h('span', { class: 'live-badge live', style: 'margin-left:.5rem;vertical-align:middle' }, '● LIVE') : null), h('div', { class: 'by' }, `${s.symbols.join(' · ')} · ${s.live ? 'live since' : 'started'} ${fmtDate(s.start).slice(0, 10)}${s.leverage ? ` · ${s.leverage}×` : ''}`)), scoreSlot),
       status ? h('div', { class: 'badges' }, status) : null,
       h('div', { class: 'muted small' }, `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
       h('div', { class: 'scard-stats' },
@@ -145,7 +150,7 @@ async function loadDemo() {
   toast('Demo data ready — create a session!', 'ok');
 }
 
-async function storeBars(symbol: string, bars: Bars, source: DatasetMeta['source'], merge = false): Promise<DatasetMeta> {
+async function storeBars(symbol: string, bars: Bars, source: DatasetMeta['source'], merge = false, spec?: InstrumentSpec): Promise<DatasetMeta> {
   const id = symbol.toUpperCase();
   if (merge) {
     const old = await loadBars(id);
@@ -158,7 +163,7 @@ async function storeBars(symbol: string, bars: Bars, source: DatasetMeta['source
   }
   const meta: DatasetMeta = {
     id, symbol: id, source, resolution: detectResolution(bars), from: bars.t[0], to: bars.t[bars.n - 1], count: bars.n,
-    spec: guessSpec(id, bars.c[bars.n - 1]), createdAt: Date.now(),
+    spec: spec ?? guessSpec(id, bars.c[bars.n - 1]), createdAt: Date.now(),
   };
   await saveDataset(meta, bars);
   return meta;
@@ -175,6 +180,22 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
   const defStart = d0.from + Math.min(30 * 86400, (d0.to - d0.from) / 4);
   const start = h('input', { type: 'datetime-local', value: dateInputValue(defStart) });
   const end = h('input', { type: 'datetime-local' });
+  const winNote = h('small', { class: 'muted' });
+  const picked = () => boxes.filter((b) => b.cb.checked).map((b) => b.d);
+  const updateWindow = () => {
+    const syms = picked();
+    if (!syms.length) return void (winNote.textContent = 'Pick at least one symbol.');
+    const w = dataWindow(syms);
+    if (w.from >= w.to) return void (winNote.textContent = 'These symbols have no overlapping dates.');
+    winNote.textContent = `Data available: ${fmtDate(w.from).slice(0, 16)} → ${fmtDate(w.to).slice(0, 16)} UTC`;
+    start.min = end.min = dateInputValue(w.from);
+    start.max = end.max = dateInputValue(w.to);
+    const s0 = parseDateInput(start.value);
+    if (!isFinite(s0) || s0 < w.from || s0 >= w.to) start.value = dateInputValue(w.from + Math.min(30 * 86400, (w.to - w.from) / 4));
+  };
+  for (const b of boxes) b.cb.addEventListener('change', updateWindow);
+  updateWindow();
+  const lev = h('select', {}, h('option', { value: '' }, 'Off — no margin limit'), ...[1, 2, 3, 5, 10, 20, 30, 50, 100, 200, 500].map((x) => h('option', { value: x }, `${x}×`)));
   const bal = h('input', { type: 'number', value: 10000, min: 1, step: 100 });
   const risk = h('input', { type: 'number', value: 1, min: 0.01, step: 0.25 });
   const comm = h('input', { type: 'number', value: 3.5, min: 0, step: 0.1 });
@@ -211,18 +232,21 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     field('Session name', name),
     field('Symbols (all stay time-synchronised)', symList),
     h('div', { class: 'row2' }, field('Start (UTC) — history before this is visible', start), field('End (optional, UTC)', end)),
+    winNote,
     h('div', { class: 'row2' }, field('Starting balance ($)', bal), field('Default risk per trade (%)', risk)),
     h('div', { class: 'row2' }, field('Commission / lot / side ($)', comm), field('Spread (pips, editable per symbol later)', spread)),
-    field('Chart timezone', tz),
+    h('div', { class: 'row2' }, field('Chart timezone', tz), field('Leverage', lev, 'Isolated margin per position: a position is liquidated (losing its margin) if price moves ~1/leverage against it.')),
     field('Prop firm challenge mode', preset, 'Simulate a funded-account evaluation: profit target, daily & max loss (on equity), minimum trading days.'),
     ruleBox,
     go,
   ), { wide: true });
   go.onclick = () => {
-    const syms = boxes.filter((b) => b.cb.checked).map((b) => b.d);
+    const syms = picked();
     if (!syms.length) return toast('Pick at least one symbol', 'err');
     const s0 = parseDateInput(start.value);
-    if (!isFinite(s0)) return toast('Invalid start date', 'err');
+    const e0 = end.value ? parseDateInput(end.value) : null;
+    const bad = checkRange(dataWindow(syms), s0, e0, (t) => fmtDate(t).slice(0, 16));
+    if (bad) return toast(bad, 'err');
     const rules: ChallengeRules | null = preset.value
       ? {
           name: preset.value === 'custom' ? 'Custom challenge' : PRESETS[+preset.value].name,
@@ -233,7 +257,7 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     const s = newSession({
       rules,
       id: uid(), name: name.value || 'Session', description: '', symbols: syms.map((d) => d.id), start: s0,
-      end: end.value ? parseDateInput(end.value) : null, balance: +bal.value, commissionPerLot: +comm.value,
+      end: e0, balance: +bal.value, commissionPerLot: +comm.value, ...(lev.value ? { leverage: +lev.value } : {}),
       spreadPips: { '*': +spread.value }, slFirst: true, timezone: tz.value, riskPct: +risk.value, createdAt: Date.now(),
       specs: Object.fromEntries(syms.map((d) => [d.id, d.spec])),
     });
@@ -248,15 +272,176 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
   };
 }
 
+// ---- live (Hyperliquid) session -----------------------------------------------
+
+function coinPicker(onPick: (c: HlCoin | null) => void) {
+  const search = h('input', { placeholder: 'Search coin (BTC, ETH, SOL…)', autocomplete: 'off' });
+  const sel = h('select', { size: 6, class: 'coin-list' }) as HTMLSelectElement;
+  const status = h('small', { class: 'muted' }, 'Loading Hyperliquid markets…');
+  let coins: HlCoin[] = [];
+  const fill = () => {
+    const q = search.value.trim().toUpperCase();
+    const list = coins.filter((c) => c.name.toUpperCase().includes(q)).slice(0, 300);
+    const cur = sel.value;
+    sel.replaceChildren(...list.map((c) => h('option', { value: c.name }, `${c.name}  ·  up to ${c.maxLeverage}×`)));
+    sel.value = list.some((c) => c.name === cur) ? cur : list[0]?.name ?? '';
+    onPick(coins.find((c) => c.name === sel.value) ?? null);
+  };
+  search.oninput = fill;
+  sel.onchange = () => onPick(coins.find((c) => c.name === sel.value) ?? null);
+  const load = () => hlCoins().then((c) => {
+    coins = c;
+    status.textContent = `${c.length} perpetual markets`;
+    fill();
+    if (coins.some((x) => x.name === 'BTC')) { sel.value = 'BTC'; onPick(coins.find((x) => x.name === 'BTC')!); }
+  }).catch((e) => {
+    status.replaceChildren(`Could not load markets: ${(e as Error).message}. `, h('button', { class: 'ghost sm', type: 'button', onclick: () => { status.textContent = 'Retrying…'; load(); } }, 'Retry'));
+    onPick(null);
+  });
+  load();
+  return h('div', { class: 'stack coin-picker' }, search, sel, status);
+}
+
+/** "Liquidation ≈ x% against you" for isolated margin (maintenance = half the margin at max leverage). */
+function levText(c: HlCoin, want: number) {
+  const l = Math.min(Math.max(1, Math.round(want) || 1), c.maxLeverage);
+  return `${c.name}: 1× to ${c.maxLeverage}×, isolated margin. At ${l}× a ${((1 / l - 1 / (2 * c.maxLeverage)) * 100).toFixed(2)}% move against you liquidates the position (you lose its margin).`;
+}
+
+function liveSessionModal(done: (s: Session) => void) {
+  let coin: HlCoin | null = null;
+  const name = h('input', { value: `Live ${new Date().toISOString().slice(0, 10)}` });
+  const lev = h('input', { type: 'number', value: 10, min: 1, step: 1 });
+  const levNote = h('small', { class: 'muted' });
+  const picker = coinPicker((c) => {
+    coin = c;
+    if (c) {
+      lev.max = String(c.maxLeverage);
+      if (+lev.value > c.maxLeverage) lev.value = String(c.maxLeverage);
+      levNote.textContent = levText(c, +lev.value);
+      if (!name.dataset.touched) name.value = `${c.name} live ${new Date().toISOString().slice(0, 10)}`;
+    }
+  });
+  name.oninput = () => (name.dataset.touched = '1');
+  lev.oninput = () => coin && (levNote.textContent = levText(coin, +lev.value));
+  const bal = h('input', { type: 'number', value: 10000, min: 1, step: 100 });
+  const risk = h('input', { type: 'number', value: 1, min: 0.01, step: 0.25 });
+  const fee = h('input', { type: 'number', value: HL_TAKER_FEE, min: 0, step: 0.005 });
+  const tz = h('select', {}, ...ZONES.map((z) => h('option', { value: z, selected: z === 'Asia/Jakarta' }, z)));
+  const status = h('div', { class: 'muted small' });
+  const go = h('button', { class: 'primary' }, 'Start live session');
+  const close = modal('Live market — Hyperliquid', h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, 'Paper-trade the live Hyperliquid perpetuals market in real time: prices stream in tick by tick, nothing can be skipped or replayed, and every trade counts as real-data forward testing. No wallet or key needed — orders are simulated in your browser.'),
+    field('Market', picker),
+    field('Session name', name),
+    h('div', { class: 'row2' }, field('Starting balance ($)', bal), field('Leverage (×)', lev)),
+    levNote,
+    h('div', { class: 'row2' }, field('Fee per side (% of notional)', fee, 'Hyperliquid base taker fee is 0.045%. Funding payments are not simulated.'), field('Default risk per trade (%)', risk)),
+    field('Chart timezone', tz),
+    status, go,
+  ), { wide: true });
+  go.onclick = async () => {
+    if (!coin) return toast('Pick a market first', 'err');
+    const c = coin;
+    const leverage = Math.max(1, Math.min(c.maxLeverage, Math.round(+lev.value || 1)));
+    go.disabled = true;
+    status.textContent = `Loading recent ${c.name} candles…`;
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const rows = await hlCandles(c.name, '1m', now - HL_MAX_CANDLES * 60, now);
+      if (!rows.length) throw new Error(`No candles returned for ${c.name}`);
+      const bars = barsFromRows(rows);
+      const id = hlSymbol(c.name);
+      const spec = hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]);
+      await storeBars(id, bars, 'hyperliquid', true, spec);
+      const s = newSession({
+        id: uid(), name: name.value || `${c.name} live`, description: '', symbols: [id], start: now, end: null,
+        balance: +bal.value, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz.value, riskPct: +risk.value,
+        createdAt: Date.now(), specs: { [id]: spec }, leverage, maxLeverage: { [id]: c.maxLeverage }, feePct: Math.max(0, +fee.value || 0),
+        live: { venue: 'hyperliquid', coin: c.name },
+      });
+      s.state.panes = s.state.panes.map((p, i) => ({ ...p, tf: ['1m', '5m', '15m', '1H'][i] }));
+      try {
+        const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
+        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value }));
+      } catch {
+        /* ignore */
+      }
+      close();
+      done(s);
+    } catch (e) {
+      status.textContent = String((e as Error).message ?? e);
+      toast(status.textContent, 'err');
+      go.disabled = false;
+    }
+  };
+}
+
+function hyperliquidModal(refresh: () => void) {
+  let coin: HlCoin | null = null;
+  const now = Math.floor(Date.now() / 1000);
+  const from = h('input', { type: 'date', value: new Date((now - 30 * 86400) * 1000).toISOString().slice(0, 10) });
+  const note = h('small', { class: 'muted' });
+  const upd = () => {
+    const f = Date.parse(from.value) / 1000;
+    if (!isFinite(f)) return void (note.textContent = '');
+    const iv = pickInterval(f, now);
+    note.textContent = `Hyperliquid only serves the latest ${HL_MAX_CANDLES.toLocaleString('en-US')} candles per interval, so this range downloads as ${iv.id} bars${iv.id === '1m' ? '' : ' (pick a later start for 1-minute data)'}.`;
+  };
+  from.oninput = upd;
+  upd();
+  const picker = coinPicker((c) => (coin = c));
+  const bar = h('div', { class: 'progress' }, h('div', { class: 'progress-fill' }));
+  const status = h('div', { class: 'muted small' });
+  const go = h('button', { class: 'primary' }, 'Download');
+  const ctrl = new AbortController();
+  const close = modal('Download from Hyperliquid', h('div', { class: 'stack' },
+    field('Market (perpetuals)', picker),
+    field('From (UTC) — up to now', from), note,
+    bar, status, go,
+  ), { onClose: () => ctrl.abort() });
+  go.onclick = async () => {
+    if (!coin) return toast('Pick a market first', 'err');
+    const c = coin;
+    const f = Date.parse(from.value) / 1000;
+    if (!isFinite(f) || f >= now) return toast('Pick a start date in the past', 'err');
+    go.disabled = true;
+    try {
+      const iv = pickInterval(f, now);
+      const rows = await hlCandles(c.name, iv.id, f, now, {
+        signal: ctrl.signal,
+        onProgress: (p, n) => {
+          (bar.firstChild as HTMLElement).style.width = `${p * 100}%`;
+          status.textContent = `${n.toLocaleString('en-US')} bars…`;
+        },
+      });
+      if (!rows.length) throw new Error(`No candles returned for ${c.name}`);
+      const bars = barsFromRows(rows);
+      const id = hlSymbol(c.name);
+      const old = await getDatasetMeta(id);
+      if (old && old.resolution !== iv.sec) throw new Error(`${id} is already stored as ${tfSeconds(old.resolution).label} bars — delete it first to download ${iv.id} bars.`);
+      const meta = await storeBars(id, bars, 'hyperliquid', true, hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]));
+      toast(`${meta.symbol}: ${meta.count.toLocaleString('en-US')} bars saved`, 'ok');
+      close();
+      refresh();
+    } catch (e) {
+      toast(String((e as Error).message ?? e), 'err');
+      status.textContent = String((e as Error).message ?? e);
+      go.disabled = false;
+    }
+  };
+}
+
 // ---- data manager ------------------------------------------------------------
 
 function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => void) {
   page.append(pageHead({
     eyebrow: 'Market data', titleHtml: 'Your market <em>data</em>.', compact: true,
-    lead: 'Everything is stored in this browser. One-minute data gives exact fills and lets you replay any timeframe. Only real market data (CSV or Binance) can be ranked on the leaderboard; synthetic data is for practice.',
+    lead: 'Everything is stored in this browser. One-minute data gives exact fills and lets you replay any timeframe. Only real market data (CSV, Binance or Hyperliquid) can be ranked on the leaderboard; synthetic data is for practice.',
     actions: [
       h('button', { class: 'primary', onclick: () => importCsvModal(refresh) }, 'Import CSV'),
       h('button', { class: 'ghost', onclick: () => binanceModal(refresh) }, 'Binance (crypto)'),
+      h('button', { class: 'ghost', onclick: () => hyperliquidModal(refresh) }, 'Hyperliquid (perps)'),
       h('button', { class: 'ghost', onclick: () => syntheticModal(refresh) }, 'Generate synthetic'),
     ],
   }));

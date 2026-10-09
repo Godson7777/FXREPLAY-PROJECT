@@ -18,6 +18,15 @@ Aplikasinya berjalan **100% di browser** (IndexedDB), jadi bisa dipakai tanpa se
 - **Crosshair tersinkron** di semua chart, walaupun beda timeframe.
 - **Klik-kanan di chart** untuk Buy/Sell Limit/Stop di harga itu (tipe order dipilih otomatis), market order, atau horizontal line.
 - **Timezone chart:** UTC, Jakarta, New York (DST otomatis), London, dll. Candle harian ikut timezone.
+- **Tanggal mulai divalidasi.** Form New session menampilkan rentang data yang tersedia dan menolak start di luar rentang itu. Session lama yang start-nya melewati data terakhir akan menampilkan banner penjelasan, plus tombol **Restart** (kalau belum ada trade) atau **Import newer data**.
+
+### Live market (Hyperliquid)
+- Tombol **● Live market** membuat session *forward test* di pasar perpetual Hyperliquid secara real time. Harga masuk tick demi tick lewat WebSocket publik, tanpa wallet atau API key; semua order disimulasikan di browser.
+- **Leverage 1× sampai max leverage koin** (misalnya BTC 40×) dengan **isolated margin**. Setiap posisi punya margin = notional / leverage. Posisi dilikuidasi kalau harga bergerak sekitar 1/leverage melawanmu (maintenance = setengah margin di max leverage), dan seluruh margin posisi itu hilang. Kalau SL lebih dekat dari harga likuidasi, SL yang kena duluan.
+- Fee taker 0.045% dari notional per sisi (bisa diubah). Funding tidak disimulasikan.
+- Saat tab dibuka lagi atau koneksi tersambung ulang, candle yang terlewat diambil dari REST API dan diproses ke order engine, jadi SL/TP/likuidasi yang terjadi selama offline tetap tercatat jujur. Batasnya: Hyperliquid hanya menyimpan 5000 candle 1 menit terakhir (sekitar 3,5 hari).
+- Data Hyperliquid dihitung sebagai data asli, jadi strategy dari session live bisa masuk leaderboard.
+- Session biasa juga bisa memakai leverage (opsi di form New session; defaultnya off).
 
 ### Prop Firm Challenge mode
 Simulasi evaluasi akun funded: preset **FTMO Phase 1/2, The5ers, Funding Pips, trailing drawdown**, atau aturan custom. Aturannya: profit target, max daily loss, max total loss (bisa trailing), dan minimal hari trading. Aturan dicek terhadap **equity** (floating ikut dihitung) di setiap bar 1 menit. Kalau batas tembus, semua posisi ditutup dan trading dikunci. Progres tampil live di panel samping, lalu hasil LULUS/GAGAL tercatat di analytics.
@@ -29,6 +38,8 @@ Simulasi evaluasi akun funded: preset **FTMO Phase 1/2, The5ers, Funding Pips, t
 - Position sizing: Risk %, Risk $, atau Lots; TP dalam R atau pips.
 - Trailing stop, auto-breakeven di X R, partial close (½), reverse, BE satu klik, close all.
 - **Drag garis SL/TP/entry langsung di chart**, atau edit angkanya di tabel posisi.
+- **Tombol ✕ di samping label entry/SL/TP di chart:** tutup posisi, batalkan order, atau hapus SL/TP tanpa membuka tab bawah.
+- **Panel Positions/Orders/History bisa digeser:** swipe/drag ke bawah untuk menutup, ke atas untuk membuka atau memperbesar. Bisa juga lewat tombol ▾ atau tombol `` ` ``.
 - Spread dan komisi per lot. Konversi P&L untuk pair USD-quote, USD-base (USDJPY), emas, dan crypto.
 - **MAE/MFE** dicatat untuk setiap trade.
 
@@ -139,6 +150,7 @@ Buka aplikasinya, klik **Load demo data** (EURUSD, GBPUSD, XAUUSD sintetis 1 tah
 | **Dukascopy** | Export CSV 1-minute (UTC), bisa lewat `npx dukascopy-node`. |
 | **MT4 / MT5** | History Center → Export. Offset = timezone server broker (biasanya +2/+3). |
 | **Crypto** | Tombol **Binance** di tab Data, download 1m langsung dari API publik. |
+| **Hyperliquid perps** | Tombol **Hyperliquid** di tab Data. Interval dipilih otomatis (1m untuk ~3,5 hari terakhir, lalu 5m/15m/1h…) karena API hanya menyimpan 5000 candle terakhir per interval. |
 
 Parser CSV mendeteksi format secara otomatis. Import symbol yang sama berkali-kali akan **menggabungkan** datanya. Pip size, contract size, dan digits bisa diedit per symbol.
 
@@ -150,6 +162,7 @@ Parser CSV mendeteksi format secara otomatis. Import symbol yang sama berkali-ka
 | `→` / `Shift+→` | Candle berikutnya / tick 1m berikutnya |
 | `Shift+B` / `Shift+S` | Market buy / sell |
 | `Shift+C` | Close all |
+| `` ` `` | Tampilkan / sembunyikan panel posisi |
 | ketik `15`, `4h`, `d`… | Ganti timeframe |
 | `Alt+T/H/V/R/F/L/S/M` | Trend, H-line, V-line, Rect, Fib, Long, Short, Measure |
 | `Alt+1…4` | Layout 1–4 chart |
