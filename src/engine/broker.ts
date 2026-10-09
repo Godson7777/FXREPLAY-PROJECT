@@ -3,7 +3,7 @@ import type { RegimeTag } from '../analytics/regime';
 
 export type Side = 'long' | 'short';
 export type OrderType = 'market' | 'limit' | 'stop';
-export type ExitReason = 'sl' | 'tp' | 'manual' | 'be' | 'trail' | 'end';
+export type ExitReason = 'sl' | 'tp' | 'manual' | 'be' | 'trail' | 'end' | 'liq';
 
 export interface Order {
   id: number;
@@ -19,6 +19,8 @@ export interface Order {
   note: string;
   trailPips: number | null;
   beAtR: number | null;
+  /** leverage the order will open with (leveraged sessions only) */
+  leverage?: number;
 }
 
 export interface PartialClose {
@@ -52,6 +54,10 @@ export interface Position {
   partials: PartialClose[];
   openedBar: number; // bar time on which it opened (no exit checks on that bar)
   slMoved: 'be' | 'trail' | null;
+  /** isolated-margin fields; absent on unleveraged sessions */
+  leverage?: number;
+  margin?: number;
+  liq?: number | null;
 }
 
 export interface Trade {
@@ -90,6 +96,12 @@ export interface BrokerConfig {
   commissionPerLot: number; // USD per lot, per side
   spreadPips: Record<string, number>; // per symbol; '*' default
   slFirst: boolean; // if SL and TP inside the same bar, assume SL was hit first
+  /** default leverage; when set, every position uses isolated margin and can be liquidated */
+  leverage?: number;
+  /** max leverage per symbol ('*' default); maintenance margin = 1 / (2 × max leverage) */
+  maxLeverage?: Record<string, number>;
+  /** fee in % of notional, charged per side (e.g. 0.045 for a 0.045% taker fee) */
+  feePct?: number;
 }
 
 export interface EquityPoint {
@@ -120,6 +132,7 @@ export interface OrderRequest {
   note?: string;
   trailPips?: number | null;
   beAtR?: number | null;
+  leverage?: number;
 }
 
 export function quoteToUsd(symbol: string, price: number): number {
@@ -197,6 +210,50 @@ export class Broker {
     return -r;
   }
 
+  // ---- leverage & isolated margin ------------------------------------------------
+
+  get leveraged() {
+    return this.cfg.leverage != null && this.cfg.leverage > 0;
+  }
+  maxLev(sym: string) {
+    return this.cfg.maxLeverage?.[sym] ?? this.cfg.maxLeverage?.['*'] ?? null;
+  }
+  /** leverage clamped to 1…max for the symbol */
+  levFor(sym: string, want?: number) {
+    const max = this.maxLev(sym);
+    const l = want ?? this.cfg.leverage ?? 1;
+    return Math.max(1, Math.min(max ?? Infinity, isFinite(l) && l > 0 ? l : 1));
+  }
+  notional(sym: string, lots: number, px: number) {
+    return Math.abs(this.value(sym, px, lots, px));
+  }
+  marginFor(sym: string, lots: number, px: number, lev: number) {
+    return this.notional(sym, lots, px) / lev;
+  }
+  /** maintenance margin rate: half the initial margin at max leverage (50% stop-out without a max) */
+  mmr(sym: string, lev: number) {
+    return 1 / (2 * (this.maxLev(sym) ?? lev));
+  }
+  /** isolated-margin liquidation trigger price */
+  liqPrice(sym: string, side: Side, entry: number, lev: number) {
+    const d = 1 / lev - this.mmr(sym, lev);
+    return side === 'long' ? entry * (1 - d) : entry * (1 + d);
+  }
+  usedMargin() {
+    return this.s.positions.reduce((a, p) => a + (p.margin ?? 0), 0);
+  }
+  reservedMargin() {
+    if (!this.leveraged) return 0;
+    return this.s.orders.reduce((a, o) => a + this.marginFor(o.symbol, o.lots, o.price, this.levFor(o.symbol, o.leverage)), 0);
+  }
+  freeMargin() {
+    return this.equity() - this.usedMargin() - this.reservedMargin();
+  }
+  private fee(sym: string, lots: number, px: number) {
+    const pct = this.cfg.feePct ?? 0;
+    return this.cfg.commissionPerLot * lots + (pct > 0 ? (pct / 100) * this.notional(sym, lots, px) : 0);
+  }
+
   private id() {
     return this.s.nextId++;
   }
@@ -226,10 +283,19 @@ export class Broker {
       if (req.side === 'long' && px <= ask) return { ok: false, error: 'Buy stop must be above the current ask (use a limit order)' };
       if (req.side === 'short' && px >= bid) return { ok: false, error: 'Sell stop must be below the current bid (use a limit order)' };
     }
+    const lev = this.leveraged ? this.levFor(sym, req.leverage) : undefined;
     const common = {
       symbol: sym, side: req.side, lots: round2(req.lots), sl, tp,
       tags: req.tags ?? [], note: req.note ?? '', trailPips: req.trailPips ?? null, beAtR: req.beAtR ?? null,
+      ...(lev ? { leverage: lev } : {}),
     };
+    if (lev) {
+      const need = this.marginFor(sym, common.lots, px, lev);
+      const free = this.freeMargin();
+      if (need > free) return { ok: false, error: `Not enough margin: needs $${need.toFixed(2)}, free $${Math.max(0, free).toFixed(2)} at ${lev}×` };
+      const liq = this.liqPrice(sym, req.side, px, lev);
+      if (sl != null && (req.side === 'long' ? sl <= liq : sl >= liq)) return { ok: false, error: `Stop loss is past the liquidation price (${liq.toFixed(this.spec(sym).digits)}) — lower the leverage or tighten the stop` };
+    }
     if (req.type === 'market') {
       const p = this.open({ ...common, entry: px, time: this.now(sym), orderType: 'market' });
       return { ok: true, id: p.id };
@@ -241,14 +307,19 @@ export class Broker {
 
   private open(a: {
     symbol: string; side: Side; lots: number; entry: number; time: number; sl: number | null; tp: number | null;
-    tags: string[]; note: string; trailPips: number | null; beAtR: number | null; orderType: OrderType;
+    tags: string[]; note: string; trailPips: number | null; beAtR: number | null; orderType: OrderType; leverage?: number;
   }): Position {
-    const commission = this.cfg.commissionPerLot * a.lots;
+    const commission = this.fee(a.symbol, a.lots, a.entry);
     const p: Position = {
       id: this.id(), symbol: a.symbol, side: a.side, lots: a.lots, initialLots: a.lots, entry: a.entry, entryTime: a.time,
       sl: a.sl, tp: a.tp, initialSl: a.sl, commission, realized: 0, mae: 0, mfe: 0, tags: a.tags, note: a.note,
       trailPips: a.trailPips, beAtR: a.beAtR, beDone: false, orderType: a.orderType, partials: [], openedBar: a.time, slMoved: null,
     };
+    if (a.leverage) {
+      p.leverage = a.leverage;
+      p.margin = this.marginFor(a.symbol, a.lots, a.entry, a.leverage);
+      p.liq = this.liqPrice(a.symbol, a.side, a.entry, a.leverage);
+    }
     this.s.balance -= commission;
     this.s.positions.push(p);
     this.onFill?.(p);
@@ -287,9 +358,9 @@ export class Broker {
   reverse(id: number) {
     const p = this.s.positions.find((x) => x.id === id);
     if (!p) return;
-    const { symbol, lots, side } = p;
+    const { symbol, lots, side, leverage } = p;
     this.close(id, 1, 'manual');
-    this.place({ symbol, side: side === 'long' ? 'short' : 'long', type: 'market', lots });
+    this.place({ symbol, side: side === 'long' ? 'short' : 'long', type: 'market', lots, leverage });
   }
 
   /** Close a fraction (0..1] of a position at market. */
@@ -302,8 +373,9 @@ export class Broker {
     if (lots <= 0) return null;
     if (lots >= p.lots - 1e-9) lots = p.lots;
     const gross = this.value(p.symbol, (p.side === 'long' ? 1 : -1) * (px - p.entry), lots, px);
-    const comm = this.cfg.commissionPerLot * lots;
+    const comm = this.fee(p.symbol, lots, px);
     this.s.balance += gross - comm;
+    if (p.margin) p.margin *= (p.lots - lots) / p.lots;
     p.commission += comm;
     p.realized += gross;
     p.partials.push({ time: t, lots, price: px, pnl: gross });
@@ -337,6 +409,13 @@ export class Broker {
     return tr;
   }
 
+  /** Isolated liquidation: the whole position margin is lost (fill at the bankruptcy price). */
+  private liquidate(p: Position, t: number) {
+    const lev = p.leverage ?? 1;
+    const px = p.side === 'long' ? p.entry * (1 - 1 / lev) : p.entry * (1 + 1 / lev);
+    this.close(p.id, 1, 'liq', px, t);
+  }
+
   closeAll(reason: ExitReason = 'manual') {
     for (const p of [...this.s.positions]) this.close(p.id, 1, reason);
   }
@@ -352,19 +431,28 @@ export class Broker {
    */
   onBar(sym: string, t: number, o: number, h: number, l: number, c: number) {
     const spr = this.spread(sym);
-    // 1) exits
+    // 1) exits — a liquidation price acts as a stop; whichever stop is nearer to entry fires
     for (const p of [...this.s.positions]) {
       if (p.symbol !== sym || p.openedBar === t) continue;
+      const liq = p.liq ?? null;
       if (p.side === 'long') {
-        const hitSl = p.sl != null && l <= p.sl;
+        const liqFirst = liq != null && (p.sl == null || liq >= p.sl);
+        const stop = liqFirst ? liq : p.sl;
+        const hitSl = stop != null && l <= stop;
         const hitTp = p.tp != null && h >= p.tp;
-        if (hitSl && (!hitTp || this.cfg.slFirst || o <= p.sl!)) this.close(p.id, 1, 'sl', Math.min(p.sl!, o), t);
-        else if (hitTp) this.close(p.id, 1, 'tp', Math.max(p.tp!, o), t);
+        if (hitSl && (!hitTp || this.cfg.slFirst || o <= stop!)) {
+          if (liqFirst) this.liquidate(p, t);
+          else this.close(p.id, 1, 'sl', Math.min(stop!, o), t);
+        } else if (hitTp) this.close(p.id, 1, 'tp', Math.max(p.tp!, o), t);
       } else {
-        const hitSl = p.sl != null && h + spr >= p.sl;
+        const liqFirst = liq != null && (p.sl == null || liq <= p.sl);
+        const stop = liqFirst ? liq : p.sl;
+        const hitSl = stop != null && h + spr >= stop;
         const hitTp = p.tp != null && l + spr <= p.tp;
-        if (hitSl && (!hitTp || this.cfg.slFirst || o + spr >= p.sl!)) this.close(p.id, 1, 'sl', Math.max(p.sl!, o + spr), t);
-        else if (hitTp) this.close(p.id, 1, 'tp', Math.min(p.tp!, o + spr), t);
+        if (hitSl && (!hitTp || this.cfg.slFirst || o + spr >= stop!)) {
+          if (liqFirst) this.liquidate(p, t);
+          else this.close(p.id, 1, 'sl', Math.max(stop!, o + spr), t);
+        } else if (hitTp) this.close(p.id, 1, 'tp', Math.min(p.tp!, o + spr), t);
       }
     }
     // 2) pending orders
@@ -381,6 +469,7 @@ export class Broker {
       }
       if (fill != null) {
         this.s.orders = this.s.orders.filter((x) => x !== od);
+        if (od.leverage && this.marginFor(sym, od.lots, fill, od.leverage) > this.equity() - this.usedMargin()) continue; // not enough margin left: order dropped
         this.open({ ...od, entry: fill, time: t, orderType: od.type });
       }
     }
