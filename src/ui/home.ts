@@ -497,6 +497,7 @@ function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => v
   t.append(tb);
   main.append(h('div', { class: 'card' }, h('div', { class: 'table-wrap' }, t)));
   if (cloudState().user) main.append(cloudDataCard(datasets, refresh));
+  main.append(importGuide(refresh));
   main.append(h('section', { class: 'card help' },
     h('div', { class: 'card-title' }, h('span', {}, 'Where to get free historical data')),
     h('ul', {},
@@ -722,6 +723,30 @@ function importBackup(done: () => void) {
     }
   };
   input.click();
+}
+
+/** Step-by-step: how to bring price data in, with a sample file in the accepted layout. */
+function importGuide(refresh: () => void) {
+  const sample = () => {
+    const today = Math.floor(Date.now() / 86400000) * 86400;
+    const b = generateSynthetic({ start: today - 2 * 86400, days: 1, price: 1.1, annualVol: 0.08, seed: 7 });
+    const lines = ['time,open,high,low,close,volume'];
+    for (let i = 0; i < b.n; i++) lines.push(`${new Date(b.t[i] * 1000).toISOString().slice(0, 19).replace('T', ' ')},${b.o[i].toFixed(5)},${b.h[i].toFixed(5)},${b.l[i].toFixed(5)},${b.c[i].toFixed(5)},${Math.round(b.v[i])}`);
+    download('SAMPLE_1m.csv', lines.join('\n'));
+  };
+  const step = (n: string, title: string, body: HTMLElement | string) => h('div', { class: 'point' }, h('span', { class: 'n' }, n), h('h5', {}, title), typeof body === 'string' ? h('p', {}, body) : body);
+  return h('section', { class: 'card stack import-guide' },
+    h('div', { class: 'card-title' }, h('span', {}, 'How to import price data')),
+    h('div', { class: 'points' },
+      step('01', 'Get candles', h('p', { html: 'Download 1-minute bars as CSV — HistData, Dukascopy (<code>npx dukascopy-node</code>), or MT4/MT5 History Center → Export. For crypto, forex, gold and stocks you can skip files: use <b>Connect exchange / API</b> above.' })),
+      step('02', 'Import CSV', h('p', { html: 'Click <b>Import CSV</b>, pick one or more files, type the symbol (e.g. <code>XAUUSD</code>) and the timezone offset of the timestamps: HistData <code>-5</code>, MT4/MT5 usually <code>2</code> or <code>3</code>, Dukascopy/Binance <code>0</code>. Importing the same symbol again merges the files.' })),
+      step('03', 'Check & replay', h('p', { html: 'The table shows each symbol with its first and last bar. Create a session with a start date inside that range — the New session form shows the exact window.' })),
+    ),
+    h('p', { class: 'muted small', html: 'Accepted columns (auto-detected, header optional): <code>time,open,high,low,close[,volume]</code> · <code>2024.01.02,00:00,o,h,l,c,v</code> (MT4/MT5) · <code>20240102 170000;o;h;l;c;v</code> (HistData) · <code>02.01.2024 00:00:00.000,o,h,l,c,v</code> (Dukascopy) · Unix seconds/ms timestamps (Binance).' }),
+    h('div', { class: 'row-btns' },
+      h('button', { class: 'ghost', onclick: sample }, 'Download sample CSV'),
+      h('button', { class: 'primary', onclick: () => importCsvModal(refresh) }, 'Import CSV')),
+  );
 }
 
 async function exportDataset(d: DatasetMeta) {

@@ -9,9 +9,12 @@ import { getDatasetMeta, saveDataset } from '../data/store';
 import { canRefresh, refreshDataset } from '../data/ingest';
 import type { ChallengeState } from '../engine/rules';
 import { saveSession, saveShot, getShot } from '../data/sessions';
-import { ChartPane, IND_COLORS, type LineAction, type PaneHost } from './chartpane';
-import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
-import { h, money, num, cls, toast, modal, field, esc, parseDateInput, themeButton } from './dom';
+import { ChartPane, IND_COLORS, type CrosshairInfo, type LineAction, type PaneHost } from './chartpane';
+import { TOOL_INFO, flipDrawing, isPosTool, posLevels, type DragLine, type Drawing, type DrawingType, type Zone } from './drawings';
+import { autoType, lotsFor, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
+import { listDatasets, loadBars } from '../data/store';
+import { indexAtOrBefore } from '../core/types';
+import { h, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton } from './dom';
 import { cloudButton } from './cloudui';
 import { LOGO } from './logo';
 
@@ -29,11 +32,23 @@ interface Prefs {
   confirmClose: boolean;
   bottomH: number;
   bottomCollapsed: boolean;
+  panel: Panel;
+  sideCollapsed: boolean;
+  preview: boolean;
 }
+
+type Panel = 'order' | 'goto' | 'watch' | 'tree' | 'data';
+const PANELS: { id: Panel; icon: string; label: string; title: string }[] = [
+  { id: 'order', icon: '⊕', label: 'Order', title: 'Order ticket & account' },
+  { id: 'goto', icon: '↷', label: 'Go To', title: 'Jump forward to a date or session open' },
+  { id: 'watch', icon: '☰', label: 'Watch', title: 'Watchlist — symbols in this session' },
+  { id: 'tree', icon: '⧉', label: 'Objects', title: 'Object tree — drawings, indicators, orders' },
+  { id: 'data', icon: '▦', label: 'Data', title: 'Data window — OHLC and indicator values under the cursor' },
+];
 
 const PREF_KEY = 'overflowtrade.prefs';
 function loadPrefs(): Prefs {
-  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false };
+  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false, panel: 'order', sideCollapsed: false, preview: true };
   try {
     return { ...def, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') };
   } catch {
@@ -61,7 +76,12 @@ export class Workspace implements PaneHost {
   private saveTimer = 0;
   private prefs = loadPrefs();
   private tab: 'positions' | 'orders' | 'history' = 'positions';
-  private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0, lev: 0 };
+  private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0, lev: 0, side: 'long' as Side, link: null as string | null };
+  /** the order ticket drawn on the chart as a long/short box (never saved) */
+  private pv: Drawing = { id: 'ticket-preview', type: 'long', pts: [{ t: 0, p: 0 }, { t: 0, p: 0 }, { t: 0, p: 0 }], color: '#1a9e93', preview: true };
+  private pvDragging = false;
+  private rail!: HTMLDivElement;
+  private dataInfo: CrosshairInfo | null = null;
   private magnet = true;
   private stayInTool = false;
   private pendingShots: Trade[] = [];
@@ -95,7 +115,8 @@ export class Workspace implements PaneHost {
     this.clockEl = h('span', { class: 'clock' });
     this.progress = h('div', { class: 'progress-fill' });
     this.center = h('div', { class: 'center' }, this.grid, this.session.live ? this.liveControls() : this.controls(), this.bottom);
-    this.root = h('div', { class: `ws${this.session.live ? ' is-live' : ''}` }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right));
+    this.rail = this.buildRail();
+    this.root = h('div', { class: `ws${this.session.live ? ' is-live' : ''}` }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail));
     this.initBottomGestures();
     document.addEventListener('keydown', this.onKey);
     window.addEventListener('beforeunload', this.flushSave);
@@ -664,16 +685,39 @@ export class Workspace implements PaneHost {
     this.afterTrade();
   }
 
-  placeFromTool(d: Drawing, sym: string) {
-    const side: Side = d.type === 'long' ? 'long' : 'short';
+  /** Buy/Sell switch: flips the preview (or the linked tool) around the entry. */
+  private setTicketSide(sd: Side) {
+    if (this.ticket.side === sd) return;
+    this.ticket.side = sd;
+    const sym = this.active.cfg.symbol;
     const br = this.replay.broker;
-    const entry = d.pts[0].p, sl = d.pts[1].p, tp = d.pts[2].p;
-    const cur = side === 'long' ? br.ask(sym) : br.bid(sym);
-    const type: OrderType = Math.abs(entry - cur) < (this.session.specs[sym]?.pipSize ?? 0.0001) ? 'market' : (side === 'long') === entry < cur ? 'limit' : 'stop';
-    const lots = this.sizeFor(sym, Math.abs((type === 'market' ? cur : entry) - sl), type === 'market' ? cur : entry);
-    const r = br.place({ symbol: sym, side, type, lots, price: entry, sl, tp });
+    if (this.ticket.type !== 'market') {
+      const t = autoType(sd, this.ticket.price, br.bid(sym), br.ask(sym), (this.session.specs[sym]?.pipSize ?? 0.0001) / 2);
+      this.ticket.type = t === 'market' ? 'limit' : t;
+    }
+    const d = this.linked();
+    if (d && (d.type === 'long') !== (sd === 'long')) {
+      flipDrawing(d);
+      this.drawingsChanged(sym);
+    }
+    this.renderSide();
+    this.panes.forEach((p) => p.redraw());
+  }
+
+  placeFromTool(d: Drawing, sym: string) {
+    const lv = posLevels(d);
+    const br = this.replay.broker;
+    const dg = this.session.specs[sym]?.digits ?? 5;
+    const pip = this.session.specs[sym]?.pipSize ?? 0.0001;
+    const type = autoType(lv.side, lv.entry, br.bid(sym), br.ask(sym), pip);
+    const entry = type === 'market' ? (lv.side === 'long' ? br.ask(sym) : br.bid(sym)) : lv.entry;
+    const lots = lotsFor({ ...lv, entry }, d.pos ?? this.posDefaults(), this.posEnv(sym));
+    const r = br.place({
+      symbol: sym, side: lv.side, type, lots, price: +entry.toFixed(dg), sl: +lv.sl.toFixed(dg), tp: +lv.tp.toFixed(dg),
+      tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), leverage: this.ticketLev(sym),
+    });
     if (!r.ok) return toast(r.error, 'err');
-    toast(`${side === 'long' ? 'Buy' : 'Sell'} ${type} ${lots} lots placed from R:R tool`, 'ok');
+    toast(`${lv.side === 'long' ? 'Buy' : 'Sell'} ${type} ${lots} lots placed from the R:R tool`, 'ok');
     this.afterTrade();
   }
 
@@ -992,8 +1036,415 @@ export class Workspace implements PaneHost {
     this.progress.style.width = `${Math.max(0, Math.min(100, ((c - lo) / (hi - lo)) * 100))}%`;
   }
 
+  // ---- right rail & side panels ---------------------------------------------------
+
+  private buildRail() {
+    const rail = h('div', { class: 'rail', role: 'toolbar', 'aria-label': 'Panels' });
+    for (const p of PANELS) {
+      const b = h('button', { class: 'rail-btn', 'data-panel': p.id, title: p.title, 'aria-label': p.title }, h('span', { class: 'ri' }, p.icon), h('small', {}, p.label));
+      b.onclick = () => this.openPanel(p.id, true);
+      rail.append(b);
+    }
+    return rail;
+  }
+
+  /** Show a side panel; clicking the active one again collapses the side area. */
+  openPanel(id: Panel, toggle = false) {
+    const pr = this.prefs;
+    if (toggle && pr.panel === id && !pr.sideCollapsed) pr.sideCollapsed = true;
+    else {
+      pr.panel = id;
+      pr.sideCollapsed = false;
+    }
+    this.savePrefs();
+    this.renderSide();
+    this.panes.forEach((p) => p.redraw());
+  }
+
   private renderSide() {
     if (!this.active) return;
+    const pr = this.prefs;
+    this.rail?.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => {
+      const on = b.dataset.panel === pr.panel && !pr.sideCollapsed;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    this.right.classList.toggle('hidden', pr.sideCollapsed);
+    if (pr.sideCollapsed) return;
+    if (pr.panel === 'goto') return this.renderGoto();
+    if (pr.panel === 'watch') return this.renderWatch();
+    if (pr.panel === 'tree') return this.renderTree();
+    if (pr.panel === 'data') return this.renderData();
+    this.renderOrder();
+  }
+
+  private panelHead(title: string, sub?: string) {
+    return h('div', { class: 'card-title' }, h('span', {}, title), sub ? h('small', { class: 'muted' }, sub) : null);
+  }
+
+  private renderGoto() {
+    if (this.right.contains(document.activeElement)) return;
+    const off = offsetFn(this.tz);
+    const now = this.replay.clock;
+    const input = h('input', { type: 'datetime-local', class: 'jump', id: 'gotoAt', value: dateInputValue(now - 1 + off(now - 1)) });
+    const go = h('button', { class: 'primary', onclick: () => {
+      if (!input.value) return;
+      const utc = localToUtc(parseDateInput(input.value), off);
+      if (utc <= this.replay.clock) return toast('You can only move forward in time — no peeking at the past outcome.', 'err');
+      this.jump(utc);
+    } }, 'Go');
+    const q = (label: string, title: string, fn: () => void) => h('button', { class: 'ghost sm', title, onclick: fn }, label);
+    const tfSec = this.active.tf.sec;
+    const nextMonday = () => {
+      let t = Math.floor(now / 86400) * 86400 + 86400;
+      while (new Date(t * 1000).getUTCDay() !== 1) t += 86400;
+      return t;
+    };
+    const end = this.replay.dataEnd();
+    this.right.innerHTML = '';
+    this.right.append(
+      h('section', { class: 'card stack' }, this.panelHead('Go to', `Now ${fmtLocal(now - 1 + off(now - 1), true)}`),
+        h('p', { class: 'muted small' }, 'Jump forward only. Every bar on the way is processed, so orders, stops and targets fill exactly as they would have.'),
+        field(`Date & time (${this.tz})`, h('div', { class: 'join' }, input, go)),
+        h('small', { class: 'muted' }, `Data ends ${fmtLocal(end + off(end)).slice(0, 16)}`)),
+      h('section', { class: 'card stack' }, this.panelHead('Skip ahead'),
+        h('div', { class: 'chips' },
+          q(`+10 bars`, `Skip 10 ${this.active.tf.label} candles`, () => this.jump(now + 10 * tfSec)),
+          q(`+50 bars`, `Skip 50 ${this.active.tf.label} candles`, () => this.jump(now + 50 * tfSec)),
+          q('+1H', 'Skip 1 hour', () => this.jump(now + 3600)),
+          q('+4H', 'Skip 4 hours', () => this.jump(now + 4 * 3600)),
+          q('+1D', 'Skip 1 day', () => this.jump(now + 86400)),
+          q('+1W', 'Skip 1 week', () => this.jump(now + 7 * 86400)))),
+      h('section', { class: 'card stack' }, this.panelHead('Next session open'),
+        h('div', { class: 'chips' },
+          q('Tokyo', 'Next Tokyo open (00:00 UTC)', () => this.jump(nextUtcHour(now, 0))),
+          q('London', 'Next London open (07:00 UTC)', () => this.jump(nextUtcHour(now, 7))),
+          q('New York', 'Next New York open (13:30 UTC)', () => this.jump(nextUtcHour(now, 13.5))),
+          q('Next week', 'Next Monday 00:00 UTC', () => this.jump(nextMonday())))),
+    );
+  }
+
+  private renderWatch() {
+    if (this.right.contains(document.activeElement)) return;
+    const br = this.replay.broker;
+    const off = offsetFn(this.tz);
+    const rows = this.session.symbols.map((sym) => {
+      const b = this.replay.data[sym];
+      const sp = this.session.specs[sym];
+      const dg = sp?.digits ?? 5;
+      const bid = br.bid(sym);
+      const c = this.replay.clock - 1;
+      const dayStart = Math.floor((c + off(c)) / 86400) * 86400 - off(c);
+      const i0 = b ? Math.max(0, indexAtOrBefore(b.t, b.n, dayStart - 1) + 1) : -1;
+      const open = b && i0 >= 0 && i0 < b.n ? b.o[i0] : NaN;
+      const ch = isFinite(open) && open ? ((bid - open) / open) * 100 : NaN;
+      const active = this.active.cfg.symbol === sym;
+      return h('button', { class: `watch-row${active ? ' on' : ''}`, title: `Show ${sym} on the active chart`, onclick: () => { this.active.setSymbol(sym); this.renderSide(); } },
+        h('b', {}, sym),
+        h('span', { class: 'num' }, isFinite(bid) ? bid.toFixed(dg) : '—'),
+        h('span', { class: `num ${isFinite(ch) ? (ch >= 0 ? 'up' : 'dn') : 'muted'}` }, isFinite(ch) ? `${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(2)}%` : '—'),
+        h('small', { class: 'muted' }, `spread ${num((br.ask(sym) - bid) / (sp?.pipSize ?? 1), 1)}`));
+    });
+    const addSel = h('select', { id: 'watchAdd' }, h('option', { value: '' }, 'Loading datasets…')) as HTMLSelectElement;
+    const add = h('button', { class: 'ghost', disabled: true }, 'Add') as HTMLButtonElement;
+    void listDatasets().then((ds) => {
+      const c = this.replay.clock;
+      const ok = ds.filter((d) => !this.session.symbols.includes(d.id) && d.from < c && d.to > c);
+      addSel.replaceChildren(h('option', { value: '' }, ok.length ? 'Add a symbol…' : 'No other dataset covers this date'), ...ok.map((d) => h('option', { value: d.id }, `${d.symbol} · ${d.source}`)));
+      add.disabled = !ok.length;
+      add.onclick = async () => {
+        const meta = ok.find((d) => d.id === addSel.value);
+        if (!meta) return;
+        add.disabled = true;
+        const bars = await loadBars(meta.id);
+        if (!bars) return toast(`Could not load ${meta.id}`, 'err');
+        this.replay.addSymbol(meta.id, bars, meta.spec);
+        this.panes.forEach((p) => p.renderHeader());
+        this.active.setSymbol(meta.id);
+        this.scheduleSave();
+        toast(`${meta.id} added — it replays in sync from ${fmtLocal(c - 1 + offsetFn(this.tz)(c - 1)).slice(0, 16)}`, 'ok');
+        this.renderSide();
+      };
+    });
+    this.right.innerHTML = '';
+    this.right.append(
+      h('section', { class: 'card stack' }, this.panelHead('Watchlist', `${this.session.symbols.length} symbol${this.session.symbols.length === 1 ? '' : 's'}`),
+        h('div', { class: 'watch' }, h('div', { class: 'watch-head' }, h('span', {}, 'Symbol'), h('span', {}, 'Bid'), h('span', {}, 'Day'), h('span', {}, '')), ...rows)),
+      h('section', { class: 'card stack' }, this.panelHead('Add to this session'),
+        h('p', { class: 'muted small' }, 'Any stored dataset that covers the current replay date. It joins the replay clock, so every symbol stays time-synchronised.'),
+        h('div', { class: 'join' }, addSel, add)),
+    );
+  }
+
+  private renderTree() {
+    if (this.right.contains(document.activeElement)) return;
+    const sym = this.active.cfg.symbol;
+    const dg = this.session.specs[sym]?.digits ?? 5;
+    const ds = this.drawings(sym);
+    const br = this.replay.broker;
+    const icon = (t: DrawingType) => TOOL_INFO.find((x) => x.type === t)?.icon ?? '•';
+    const name = (t: DrawingType) => (TOOL_INFO.find((x) => x.type === t)?.title ?? t).replace(/\s*\(.*$/, '');
+    const btn = (label: string, title: string, fn: () => void, extra = '') => h('button', { class: `mini${extra}`, title, 'aria-label': title, onclick: fn }, label);
+    const drawRows = ds.map((d) => h('div', { class: `tree-row${this.active.layer.selected === d ? ' on' : ''}${d.hidden ? ' off' : ''}` },
+      h('span', { class: 'dot', style: `background:${d.color}` }),
+      h('button', { class: 'tree-name', title: 'Select on the chart', onclick: () => { if (d.hidden) d.hidden = false; this.active.layer.selected = d; this.drawingsChanged(sym); this.renderSide(); } },
+        `${icon(d.type)} ${name(d.type)}`, h('small', { class: 'muted' }, ` ${isPosTool(d) ? `@ ${d.pts[0].p.toFixed(dg)}` : d.pts.length ? d.pts[0].p.toFixed(dg) : ''}`)),
+      btn(d.hidden ? '◌' : '◉', d.hidden ? 'Show' : 'Hide', () => { d.hidden = !d.hidden; if (d.hidden && this.active.layer.selected === d) this.active.layer.selected = null; this.drawingsChanged(sym); this.renderSide(); }),
+      btn(d.locked ? '🔒' : '🔓', d.locked ? 'Unlock' : 'Lock', () => { d.locked = !d.locked; this.drawingsChanged(sym); this.renderSide(); }),
+      btn('✕', 'Delete', () => { ds.splice(ds.indexOf(d), 1); if (this.active.layer.selected === d) this.active.layer.selected = null; this.drawingsChanged(sym); this.renderSide(); }, ' danger'),
+    ));
+    const indRows = this.active.cfg.indicators.map((cfg) => h('div', { class: 'tree-row' },
+      h('span', { class: 'dot', style: `background:${cfg.color}` }),
+      h('span', { class: 'tree-name' }, `ƒ ${indicatorDef(cfg.type)?.label ?? cfg.type}`, h('small', { class: 'muted' }, ` ${Object.values(cfg.params).join(', ')}`)),
+      btn('✕', 'Remove indicator', () => { this.active.cfg.indicators = this.active.cfg.indicators.filter((x) => x !== cfg); this.active.rebuildIndicators(); this.scheduleSave(); this.renderSide(); }, ' danger'),
+    ));
+    const tradeRows = [
+      ...br.s.positions.filter((p) => p.symbol === sym).map((p) => h('div', { class: 'tree-row' },
+        h('span', { class: `dot ${p.side === 'long' ? 'bg-up' : 'bg-dn'}` }),
+        h('span', { class: 'tree-name' }, `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} @ ${p.entry.toFixed(dg)}`, h('small', { class: `${cls(br.floating(p))}` }, ` ${money(br.floating(p), true)}`)),
+        btn('✕', `Close position #${p.id}`, () => this.lineAction('close', p.id), ' danger'))),
+      ...br.s.orders.filter((o) => o.symbol === sym).map((o) => h('div', { class: 'tree-row' },
+        h('span', { class: 'dot', style: 'background:#d4a24c' }),
+        h('span', { class: 'tree-name' }, `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots} @ ${o.price.toFixed(dg)}`),
+        btn('✕', `Cancel order #${o.id}`, () => this.lineAction('cancel', o.id), ' danger'))),
+    ];
+    const empty = (t: string) => h('p', { class: 'muted small' }, t);
+    this.right.innerHTML = '';
+    this.right.append(
+      h('section', { class: 'card stack' }, this.panelHead('Drawings', `${sym} · all timeframes`), ...(drawRows.length ? drawRows : [empty('No drawings on this symbol yet — pick a tool on the left.')]),
+        ds.length ? h('div', { class: 'row-btns' },
+          h('button', { class: 'ghost sm', onclick: () => { ds.forEach((d) => (d.hidden = false)); this.drawingsChanged(sym); this.renderSide(); } }, 'Show all'),
+          h('button', { class: 'ghost sm', onclick: () => { ds.forEach((d) => (d.hidden = true)); this.active.layer.selected = null; this.drawingsChanged(sym); this.renderSide(); } }, 'Hide all')) : null),
+      h('section', { class: 'card stack' }, this.panelHead('Indicators', `Chart ${this.active.index + 1} · ${this.active.cfg.tf}`), ...(indRows.length ? indRows : [empty('No indicators — add them with ƒx Indicators.')])),
+      h('section', { class: 'card stack' }, this.panelHead('Orders & positions', sym), ...(tradeRows.length ? tradeRows : [empty('Nothing open on this symbol.')])),
+    );
+  }
+
+  private renderData() {
+    const p = this.active;
+    const info = this.dataInfo ?? p.lastInfo();
+    const dg = this.session.specs[p.cfg.symbol]?.digits ?? 5;
+    const row = (k: string, v: string, c = '') => h('div', { class: 'kv' }, h('span', {}, k), h('b', { class: c }, v));
+    const fx = (v: number) => (isFinite(v) ? (Math.abs(v) >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : v.toFixed(Math.max(2, Math.min(dg, 6)))) : '—');
+    this.right.innerHTML = '';
+    if (!info) {
+      this.right.append(h('section', { class: 'card' }, this.panelHead('Data window'), h('p', { class: 'muted small' }, 'No candle yet.')));
+      return;
+    }
+    const ch = info.c - info.o;
+    this.right.append(
+      h('section', { class: 'card stack' }, this.panelHead('Data window', this.dataInfo ? 'Under the cursor' : 'Latest candle'),
+        row('Symbol', `${p.cfg.symbol} · ${p.tf.label}`),
+        row('Time', fmtLocal(info.t, true)),
+        row('Open', info.o.toFixed(dg)), row('High', info.h.toFixed(dg)), row('Low', info.l.toFixed(dg)), row('Close', info.c.toFixed(dg), ch >= 0 ? 'up' : 'dn'),
+        row('Change', `${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(dg)} (${((ch / info.o) * 100).toFixed(2)}%)`, ch >= 0 ? 'up' : 'dn'),
+        row('Range', `${(info.h - info.l).toFixed(dg)} · ${((info.h - info.l) / (this.session.specs[p.cfg.symbol]?.pipSize ?? 1)).toFixed(1)} pips`),
+        info.v ? row('Volume', info.v.toLocaleString('en-US', { maximumFractionDigits: 2 })) : null),
+      info.ind.length ? h('section', { class: 'card stack' }, this.panelHead('Indicators'),
+        ...info.ind.map((x) => h('div', { class: 'kv' }, h('span', {}, h('i', { class: 'dot', style: `background:${x.color}` }), ` ${x.label}`), h('b', {}, x.values.map(fx).join(' · '))))) : '',
+    );
+  }
+
+  crosshairData(pane: ChartPane, info: CrosshairInfo | null) {
+    if (pane !== this.active) return;
+    this.dataInfo = info;
+    if (this.prefs.panel === 'data' && !this.prefs.sideCollapsed) this.renderData();
+  }
+
+  // ---- order ticket ↔ chart preview -------------------------------------------------
+
+  posEnv(sym: string): PosEnv {
+    const br = this.replay.broker;
+    return { pipSize: this.session.specs[sym]?.pipSize ?? 0.0001, value: (d, l, p) => br.value(sym, d, l, p), balance: br.s.balance };
+  }
+
+  posDefaults(): PosSettings {
+    const pr = this.prefs;
+    return { riskMode: pr.sizeMode === 'risk%' ? 'pct' : pr.sizeMode === 'risk$' ? 'usd' : 'lots', risk: pr.sizeVal };
+  }
+
+  zones(sym: string): Zone[] {
+    const br = this.replay.broker;
+    const out: Zone[] = [];
+    for (const p of br.s.positions) if (p.symbol === sym && (p.sl != null || p.tp != null)) out.push({ t: p.entryTime, entry: p.entry, sl: p.sl, tp: p.tp });
+    for (const o of br.s.orders) if (o.symbol === sym && (o.sl != null || o.tp != null)) out.push({ t: o.createdAt, entry: o.price, sl: o.sl, tp: o.tp });
+    return out;
+  }
+
+  private linked(): Drawing | null {
+    if (!this.ticket.link) return null;
+    return this.drawings(this.active.cfg.symbol).find((d) => d.id === this.ticket.link) ?? null;
+  }
+
+  previewDrawings(pane: ChartPane): Drawing[] {
+    const pr = this.prefs;
+    if (pane !== this.active || !pr.preview || pr.sideCollapsed || pr.panel !== 'order' || this.ticket.link) return [];
+    if (!this.pvDragging && !this.fillPreview()) return [];
+    return [this.pv];
+  }
+
+  /** Lay the ticket's levels out as the preview box, just right of the last candle. */
+  private fillPreview(): boolean {
+    const side = this.ticket.side;
+    const lv = this.ticketLevels(side);
+    if (lv.sl == null || !isFinite(lv.entry)) return false;
+    const pane = this.active;
+    const T = pane.times;
+    if (!T.length) return false;
+    const tf = pane.tf.sec;
+    // over the last candles, like FX Replay's order zones, so it is always on screen
+    const t0 = T[Math.max(0, T.length - 14)];
+    const dir = side === 'long' ? 1 : -1;
+    const tp = lv.tp ?? lv.entry + dir * Math.abs(lv.entry - lv.sl) * 2;
+    this.pv.type = side;
+    this.pv.color = side === 'long' ? '#1a9e93' : '#e0605a';
+    this.pv.text = lv.tp == null ? 'no-tp' : undefined;
+    this.pv.pos = this.posDefaults();
+    const t1 = T[T.length - 1] + tf * 3;
+    this.pv.pts = [{ t: t0, p: lv.entry }, { t: t1, p: lv.sl }, { t: t1, p: tp }];
+    return true;
+  }
+
+  /** Copy a box's entry/SL/TP into the ticket (order type picked from the entry). */
+  private ticketFromLevels(lv: PosLevels, sym: string) {
+    const br = this.replay.broker;
+    const sp = this.session.specs[sym];
+    const pip = sp?.pipSize ?? 0.0001, dg = sp?.digits ?? 5;
+    const dir = lv.side === 'long' ? 1 : -1;
+    this.ticket.side = lv.side;
+    const type = autoType(lv.side, lv.entry, br.bid(sym), br.ask(sym), pip / 2);
+    this.ticket.type = type;
+    if (type !== 'market') this.ticket.price = +lv.entry.toFixed(dg);
+    const entry = type === 'market' ? (lv.side === 'long' ? br.ask(sym) : br.bid(sym)) : lv.entry;
+    const slD = dir * (entry - lv.sl);
+    if (slD > 0) this.prefs.slPips = Math.round((slD / pip) * 10) / 10;
+    const tpD = dir * (lv.tp - entry);
+    if (tpD > 0 && slD > 0) {
+      if (this.prefs.tpMode === 'rr') this.prefs.tpVal = Math.round((tpD / slD) * 100) / 100;
+      else this.prefs.tpVal = Math.round((tpD / pip) * 10) / 10;
+    }
+  }
+
+  drawingEdited(pane: ChartPane, d: Drawing, final: boolean) {
+    const sym = pane.cfg.symbol;
+    // the chart swallows pointerdown, so a ticket input could keep focus and show a stale value
+    const fe = document.activeElement as HTMLElement | null;
+    if (fe && this.right.contains(fe)) fe.blur();
+    if (d === this.pv) {
+      this.pvDragging = !final;
+      this.ticketFromLevels(posLevels(d), sym);
+    } else if (isPosTool(d) && this.ticket.link === d.id) {
+      this.ticketFromLevels(posLevels(d), sym);
+    } else return;
+    if (final) {
+      this.savePrefs();
+      this.renderSide();
+    } else this.refreshTicketInputs();
+  }
+
+  drawingSelected(pane: ChartPane, d: Drawing | null) {
+    if (d && isPosTool(d)) {
+      this.ticket.link = d.id;
+      if (d.pos) {
+        this.prefs.sizeMode = d.pos.riskMode === 'pct' ? 'risk%' : d.pos.riskMode === 'usd' ? 'risk$' : 'lots';
+        this.prefs.sizeVal = d.pos.risk;
+      }
+      this.ticketFromLevels(posLevels(d), pane.cfg.symbol);
+    } else if (this.ticket.link) this.ticket.link = null;
+    else return;
+    this.renderSide();
+    this.panes.forEach((p) => p.redraw());
+  }
+
+  /** Ticket edits move the linked long/short drawing too. */
+  private syncLinked() {
+    const d = this.linked();
+    if (!d) return;
+    const lv = this.ticketLevels(this.ticket.side);
+    if (lv.sl == null) return;
+    if ((d.type === 'long') !== (this.ticket.side === 'long')) flipDrawing(d);
+    const dir = this.ticket.side === 'long' ? 1 : -1;
+    d.pts[0].p = lv.entry;
+    d.pts[1].p = lv.sl;
+    d.pts[2].p = lv.tp ?? lv.entry + dir * Math.abs(lv.entry - lv.sl) * 2;
+    d.pos = this.posDefaults();
+    this.drawingsChanged(this.active.cfg.symbol);
+  }
+
+  /** Update ticket inputs in place while a box is dragged (no rebuild, keeps focus). */
+  private refreshTicketInputs() {
+    const set = (id: string, v: number | string) => {
+      const el = this.right.querySelector<HTMLInputElement>(`#${id}`);
+      if (el && document.activeElement !== el) el.value = String(v);
+    };
+    set('tSl', this.prefs.slPips);
+    set('tTp', this.prefs.tpVal);
+    if (this.ticket.type !== 'market') set('tPrice', this.ticket.price);
+    this.right.querySelectorAll<HTMLButtonElement>('[data-otype]').forEach((b) => b.classList.toggle('on', b.dataset.otype === this.ticket.type));
+    this.renderTicketCalc();
+  }
+
+  drawingSettings(pane: ChartPane, d: Drawing) {
+    const sym = pane.cfg.symbol;
+    const sp = this.session.specs[sym];
+    const dg = sp?.digits ?? 5, pip = sp?.pipSize ?? 0.0001;
+    const env = this.posEnv(sym);
+    const pos: PosSettings = { ...(d.pos ?? this.posDefaults()) };
+    const lv = posLevels(d);
+    const num = (v: number, step: number) => h('input', { type: 'number', value: +v.toFixed(8), step }) as HTMLInputElement;
+    const account = num(pos.account ?? this.replay.broker.s.balance, 100);
+    const mode = h('select', {}, h('option', { value: 'pct', selected: pos.riskMode === 'pct' }, 'Risk % of account'), h('option', { value: 'usd', selected: pos.riskMode === 'usd' }, 'Risk amount ($)'), h('option', { value: 'lots', selected: pos.riskMode === 'lots' }, 'Fixed lots')) as HTMLSelectElement;
+    const risk = num(pos.risk, 0.1);
+    const entry = num(lv.entry, Math.pow(10, -dg));
+    const slP = num(lv.sl, Math.pow(10, -dg)), slPips = num(Math.abs(lv.entry - lv.sl) / pip, 0.1);
+    const tpP = num(lv.tp, Math.pow(10, -dg)), tpPips = num(Math.abs(lv.tp - lv.entry) / pip, 0.1);
+    const out = h('div', { class: 'calc' });
+    const dir = () => (d.type === 'long' ? 1 : -1);
+    const levels = (): PosLevels => ({ side: d.type === 'short' ? 'short' : 'long', entry: +entry.value, sl: +slP.value, tp: +tpP.value });
+    const settings = (): PosSettings => ({ riskMode: mode.value as PosSettings['riskMode'], risk: +risk.value, account: +account.value || undefined });
+    const show = () => {
+      const c = posCalc(levels(), settings(), env);
+      out.innerHTML = `<div><span>Qty</span><b>${c.lots.toFixed(2)} lots</b></div><div><span>R:R</span><b>${c.rr.toFixed(2)}</b></div>
+        <div><span>Risk</span><b class="dn">${money(c.riskUsd)}</b></div><div><span>Reward</span><b class="up">${money(c.rewardUsd)}</b></div>
+        ${c.invalid ? '<div class="lv"><span>Check</span><b class="dn">Stop or target is on the wrong side of the entry</b></div>' : ''}`;
+    };
+    // price ↔ pips stay in sync
+    const fromSlPips = () => { slP.value = String(+(+entry.value - dir() * +slPips.value * pip).toFixed(dg)); show(); };
+    const fromTpPips = () => { tpP.value = String(+(+entry.value + dir() * +tpPips.value * pip).toFixed(dg)); show(); };
+    slPips.oninput = fromSlPips;
+    tpPips.oninput = fromTpPips;
+    slP.oninput = () => { slPips.value = String(+(Math.abs(+entry.value - +slP.value) / pip).toFixed(1)); show(); };
+    tpP.oninput = () => { tpPips.value = String(+(Math.abs(+tpP.value - +entry.value) / pip).toFixed(1)); show(); };
+    entry.oninput = () => { fromSlPips(); fromTpPips(); };
+    account.oninput = mode.onchange = risk.oninput = show;
+    show();
+    const save = h('button', { class: 'primary' }, 'Save');
+    const close = modal(`${d.type === 'long' ? 'Long' : 'Short'} position`, h('div', { class: 'stack' },
+      h('h4', {}, 'Risk'),
+      h('div', { class: 'row2' }, field('Account size ($)', account, 'Defaults to the current balance'), field('Risk', h('div', { class: 'join' }, mode, risk))),
+      h('h4', {}, 'Levels'),
+      field('Entry price', entry),
+      h('div', { class: 'row2' }, field('Profit level (price)', tpP), field('Profit level (pips)', tpPips)),
+      h('div', { class: 'row2' }, field('Stop level (price)', slP), field('Stop level (pips)', slPips)),
+      out,
+      h('div', { class: 'row-btns' }, save, h('button', { class: 'ghost', onclick: () => { flipDrawing(d); this.drawingsChanged(sym); close(); this.drawingSettings(pane, d); } }, '⇅ Flip to ' + (d.type === 'long' ? 'short' : 'long'))),
+    ));
+    save.onclick = () => {
+      const l = levels();
+      if (posCalc(l, settings(), env).invalid) return toast('The stop and target must be on opposite sides of the entry', 'err');
+      d.pts[0].p = l.entry;
+      d.pts[1].p = l.sl;
+      d.pts[2].p = l.tp;
+      d.pos = settings();
+      this.drawingsChanged(sym);
+      if (this.ticket.link === d.id) {
+        this.drawingSelected(pane, d);
+      }
+      close();
+    };
+  }
+
+  private renderOrder() {
     const br = this.replay.broker;
     const sym = this.active.cfg.symbol;
     const sp = this.session.specs[sym];
@@ -1022,15 +1473,29 @@ export class Workspace implements PaneHost {
       const i = h('input', { id, value: val, ...attrs });
       i.addEventListener('input', () => {
         onchange(i.value);
+        this.syncLinked();
         this.renderTicketCalc();
+        this.panes.forEach((p) => p.redraw());
       });
       i.addEventListener('change', () => this.savePrefs());
       return i;
     };
     const typeSeg = h('div', { class: 'segs full' },
       ...(['market', 'limit', 'stop'] as OrderType[]).map((t) =>
-        h('button', { class: `seg${this.ticket.type === t ? ' on' : ''}`, onclick: () => { this.ticket.type = t; this.ticket.price = +bid.toFixed(dg); this.renderSide(); } }, t[0].toUpperCase() + t.slice(1))),
+        h('button', { class: `seg${this.ticket.type === t ? ' on' : ''}`, 'data-otype': t, onclick: () => { this.ticket.type = t; this.ticket.price = +bid.toFixed(dg); this.syncLinked(); this.renderSide(); this.panes.forEach((p) => p.redraw()); } }, t[0].toUpperCase() + t.slice(1))),
     );
+    const linked = this.linked();
+    const sideSeg = h('div', { class: 'segs full side-seg', role: 'group', 'aria-label': 'Order side' },
+      ...(['long', 'short'] as Side[]).map((sd) =>
+        h('button', { class: `seg ${sd === 'long' ? 'buy-seg' : 'sell-seg'}${this.ticket.side === sd ? ' on' : ''}`, 'aria-pressed': String(this.ticket.side === sd), onclick: () => this.setTicketSide(sd) }, sd === 'long' ? 'Buy / Long' : 'Sell / Short')),
+    );
+    const pvToggle = h('label', { class: 'check small', title: 'Draw this order on the chart as a long/short box you can drag' }, h('input', { type: 'checkbox', checked: pr.preview, onchange: (e: Event) => { pr.preview = (e.target as HTMLInputElement).checked; this.savePrefs(); this.panes.forEach((p) => p.redraw()); } }), ' Show on chart');
+    const plv = this.ticketLevels(this.ticket.side);
+    const placeLabel = `Place ${this.ticket.side === 'long' ? 'BUY' : 'SELL'} ${plv.type.toUpperCase()} ${plv.lots.toFixed(2)}${plv.type === 'market' ? '' : ` @ ${plv.entry.toFixed(dg)}`}`;
+    const place = h('button', { class: `place-btn ${this.ticket.side === 'long' ? 'buy' : 'sell'}`, id: 'placeBtn', onclick: () => (linked ? this.placeFromTool(linked, sym) : this.submit(this.ticket.side)) }, linked ? `${linked.type === 'long' ? 'Buy' : 'Sell'} from the R:R tool` : placeLabel);
+    const linkNote = linked
+      ? h('div', { class: 'callout small' }, h('span', {}, `Linked to the ${linked.type} position tool — the ticket and the box move together.`), h('button', { class: 'ghost sm', onclick: () => { this.active.layer.selected = null; } }, 'Unlink'))
+      : null;
     const sizeSel = h('select', { id: 'sizeMode' },
       h('option', { value: 'risk%', selected: pr.sizeMode === 'risk%' }, 'Risk %'),
       h('option', { value: 'risk$', selected: pr.sizeMode === 'risk$' }, 'Risk $'),
@@ -1067,6 +1532,8 @@ export class Workspace implements PaneHost {
           h('span', { class: 'spread', title: 'Spread in pips' }, num((ask - bid) / (sp?.pipSize ?? 1), 1)),
           h('button', { class: 'buy', onclick: () => this.submit('long'), title: 'Buy (Shift+B)' }, h('small', {}, 'BUY'), h('b', { 'data-live': 'ask' }, ask.toFixed(dg))),
         ),
+        sideSeg,
+        linkNote,
         typeSeg,
         this.ticket.type !== 'market' ? field('Entry price', inp('tPrice', this.ticket.price, (v) => (this.ticket.price = +v), { type: 'number', step: Math.pow(10, -dg) })) : null,
         h('div', { class: 'row2' },
@@ -1083,6 +1550,8 @@ export class Workspace implements PaneHost {
           field('Tags / setup', inp('tTags', this.ticket.tags, (v) => (this.ticket.tags = v), { type: 'text', placeholder: 'breakout, A+' })),
         ),
         h('div', { class: 'calc', id: 'calc' }),
+        place,
+        pvToggle,
       ),
       this.challengeCard() ?? '',
       h('section', { class: 'card acct' },

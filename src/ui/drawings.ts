@@ -1,4 +1,5 @@
 import type { IChartApi, ISeriesApi, Logical, SeriesType } from 'lightweight-charts';
+import { firstHit, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
 
 export type DrawingType =
   | 'trend' | 'ray' | 'extended' | 'hline' | 'hray' | 'vline' | 'rect' | 'fib' | 'long' | 'short' | 'text' | 'measure' | 'arrowUp' | 'arrowDown';
@@ -14,6 +15,35 @@ export interface Drawing {
   pts: Pt[];
   color: string;
   text?: string;
+  /** long/short tool: risk sizing (TradingView "Inputs") */
+  pos?: PosSettings;
+  hidden?: boolean;
+  locked?: boolean;
+  /** transient order-ticket preview (never saved) */
+  preview?: boolean;
+}
+
+export const isPosTool = (d: Drawing) => d.type === 'long' || d.type === 'short';
+
+/** Entry / stop / target of a long/short drawing. */
+export function posLevels(d: Drawing): PosLevels {
+  return { side: d.type === 'short' ? 'short' : 'long', entry: d.pts[0].p, sl: d.pts[1].p, tp: d.pts[2].p };
+}
+
+export interface ThemeColors {
+  up: string;
+  down: string;
+  text: string;
+  surface: string;
+  muted: string;
+}
+
+/** Translucent TP/SL zones behind a live order or position. */
+export interface Zone {
+  t: number; // display time it starts
+  entry: number;
+  sl: number | null;
+  tp: number | null;
 }
 
 export interface DragLine {
@@ -64,6 +94,16 @@ export interface LayerHost {
   changed(): void;
   dragLines(): DragLine[];
   onPlaceFromTool?(d: Drawing): void;
+  /** drawings rendered and editable but not persisted (the ticket preview) */
+  extraDrawings?(): Drawing[];
+  posEnv?(): PosEnv;
+  posDefaults?(): PosSettings;
+  colors?(): ThemeColors;
+  zones?(): Zone[];
+  onSelect?(d: Drawing | null): void;
+  /** a drawing was dragged (final = pointer released) */
+  onEdit?(d: Drawing, final: boolean): void;
+  onSettings?(d: Drawing): void;
 }
 
 type Hit = { d: Drawing; handle: number | -1 } | { line: DragLine };
@@ -73,7 +113,15 @@ export class DrawingLayer {
   ctx: CanvasRenderingContext2D;
   tool: DrawingType | 'cursor' = 'cursor';
   magnet = true;
-  selected: Drawing | null = null;
+  private _sel: Drawing | null = null;
+  get selected() {
+    return this._sel;
+  }
+  set selected(d: Drawing | null) {
+    if (d === this._sel) return;
+    this._sel = d;
+    this.host.onSelect?.(d);
+  }
   private placing: Drawing | null = null;
   private drag: { hit: Hit; start: Pt; orig: Pt[]; price?: number; moved: boolean } | null = null;
   private raf = 0;
@@ -241,6 +289,8 @@ export class DrawingLayer {
         const t1 = pt.t + this.host.tfSec() * 25;
         d.pts = [pt, { t: t1, p: pt.p - dir * dist }, { t: t1, p: pt.p + dir * dist * 2 }];
         d.color = type === 'long' ? '#1a9e93' : '#e0605a';
+        const def = this.host.posDefaults?.();
+        if (def) d.pos = { ...def };
         this.host.drawings().push(d);
         this.selected = d;
         this.host.changed();
@@ -257,7 +307,21 @@ export class DrawingLayer {
     if (hit) {
       stop();
       if ('d' in hit) {
-        this.selected = hit.d;
+        // pointerdown is default-prevented (so the chart doesn't pan), which also kills the
+        // browser's dblclick — detect the second press on the same drawing ourselves
+        const now = performance.now();
+        if (this.lastPress && this.lastPress.id === hit.d.id && now - this.lastPress.t < 400) {
+          this.lastPress = null;
+          this.drag = null;
+          this.doubleHit(hit.d);
+          return;
+        }
+        this.lastPress = { id: hit.d.id, t: now };
+        this.selected = hit.d.preview ? null : hit.d;
+        if (hit.d.locked) {
+          this.schedule();
+          return;
+        }
         this.drag = { hit, start: this.toPt(x, y, false), orig: hit.d.pts.map((p) => ({ ...p })), moved: false };
       } else {
         this.drag = { hit, start: this.toPt(x, y, false), orig: [], price: hit.line.price, moved: false };
@@ -293,7 +357,8 @@ export class DrawingLayer {
     }
     const d = hit.d;
     if (hit.handle >= 0) {
-      const pt = this.toPt(x, y);
+      // position-tool edges move freely (TradingView doesn't snap them to candles)
+      const pt = this.toPt(x, y, isPosTool(d) ? false : this.magnet);
       if (d.type === 'long' || d.type === 'short') {
         if (hit.handle === 0) {
           const dp = pt.p - this.drag.orig[0].p;
@@ -309,6 +374,7 @@ export class DrawingLayer {
       const dt = cur.t - this.drag.start.t, dp = cur.p - this.drag.start.p;
       d.pts = this.drag.orig.map((p) => ({ t: p.t + dt, p: p.p + dp }));
     }
+    this.host.onEdit?.(d, false);
     this.schedule();
   };
 
@@ -325,13 +391,35 @@ export class DrawingLayer {
       if (dr.moved && Math.abs(this.x(this.placing.pts[0].t) - this.x(this.placing.pts[1].t)) + Math.abs(this.y(this.placing.pts[0].p) - this.y(this.placing.pts[1].p)) > 6) this.finishPlacing();
       return; // otherwise click-move-click mode
     }
-    if (dr.moved) this.host.changed();
+    if (dr.moved) {
+      if ('d' in dr.hit) this.host.onEdit?.(dr.hit.d, true);
+      if (!('d' in dr.hit && dr.hit.d.preview)) this.host.changed();
+    }
     this.schedule();
   };
+
+  private lastPress: { id: string; t: number } | null = null;
+
+  private doubleHit(d: Drawing) {
+    if (d.preview) return;
+    if (isPosTool(d)) return this.host.onSettings?.(d);
+    if (d.type === 'text') {
+      const txt = prompt('Text', d.text);
+      if (txt != null) {
+        d.text = txt;
+        this.host.changed();
+      }
+    }
+  }
 
   private onDbl = (e: MouseEvent) => {
     const { x, y } = this.local(e);
     const hit = this.hitTest(x, y);
+    if (hit && 'd' in hit && isPosTool(hit.d) && !hit.d.preview) {
+      e.stopPropagation();
+      this.host.onSettings?.(hit.d);
+      return;
+    }
     if (hit && 'd' in hit && hit.d.type === 'text') {
       e.stopPropagation();
       const txt = prompt('Text', hit.d.text);
@@ -369,6 +457,12 @@ export class DrawingLayer {
     return true;
   }
 
+  /** everything drawn and hit-tested: saved drawings that are not hidden, plus the preview */
+  private all(): Drawing[] {
+    const out = this.host.drawings().filter((d) => !d.hidden);
+    return this.host.extraDrawings ? out.concat(this.host.extraDrawings()) : out;
+  }
+
   // ---- hit testing ------------------------------------------------------------
 
   private handles(d: Drawing): { x: number; y: number }[] {
@@ -388,11 +482,13 @@ export class DrawingLayer {
 
   private hitTest(x: number, y: number): Hit | null {
     for (const line of this.host.dragLines()) if (Math.abs(this.y(line.price) - y) < 5) return { line };
-    const arr = this.host.drawings();
+    const arr = this.all();
     const sel = this.selected;
-    if (sel) {
-      const hs = this.handles(sel);
-      for (let i = 0; i < hs.length; i++) if (Math.hypot(hs[i].x - x, hs[i].y - y) < 8) return { d: sel, handle: i };
+    // handles of the selected drawing and of the ticket preview (always editable)
+    for (const d of [...(sel && !sel.hidden ? [sel] : []), ...(this.host.extraDrawings?.() ?? [])]) {
+      if (d.locked) continue;
+      const hs = this.handles(d);
+      for (let i = 0; i < hs.length; i++) if (Math.hypot(hs[i].x - x, hs[i].y - y) < 8) return { d, handle: i };
     }
     for (let k = arr.length - 1; k >= 0; k--) {
       const d = arr[k];
@@ -461,7 +557,8 @@ export class DrawingLayer {
     ctx.beginPath();
     ctx.rect(0, 0, this.paneW(), this.paneH());
     ctx.clip();
-    for (const d of this.host.drawings()) this.drawOne(d, d === this.selected || d === this.placing);
+    this.drawZones();
+    for (const d of this.all()) this.drawOne(d, d === this.selected || d === this.placing || !!d.preview);
     if (this.drag && 'line' in this.drag.hit && this.drag.price != null) {
       const y = this.y(this.drag.price);
       ctx.strokeStyle = this.drag.hit.line.color;
@@ -475,15 +572,16 @@ export class DrawingLayer {
     this.renderToolbar();
   }
 
-  private label(x: number, y: number, text: string, bg: string, align: 'left' | 'right' | 'center' = 'left') {
+  private label(x: number, y: number, text: string, bg: string, align: 'left' | 'right' | 'center' = 'left', fg = '#fff') {
     const ctx = this.ctx;
     ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
     const w = ctx.measureText(text).width + 8;
-    const x0 = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+    // keep labels on screen (boxes near the price axis would otherwise clip them)
+    const x0 = Math.max(2, Math.min(this.paneW() - w - 2, align === 'left' ? x : align === 'right' ? x - w : x - w / 2));
     ctx.fillStyle = bg;
     roundRect(ctx, x0, y - 14, w, 17, 3);
     ctx.fill();
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = fg;
     ctx.fillText(text, x0 + 4, y - 2);
   }
 
@@ -539,25 +637,9 @@ export class DrawingLayer {
         break;
       }
       case 'long':
-      case 'short': {
-        const [e, s, t] = P;
-        const x1 = P[1].x;
-        const w = x1 - e.x;
-        ctx.fillStyle = 'rgba(26,158,147,0.22)';
-        ctx.fillRect(e.x, Math.min(e.y, t.y), w, Math.abs(t.y - e.y));
-        ctx.fillStyle = 'rgba(224,96,90,0.22)';
-        ctx.fillRect(e.x, Math.min(e.y, s.y), w, Math.abs(s.y - e.y));
-        ctx.strokeStyle = '#8a8f98';
-        ctx.lineWidth = 1;
-        line(ctx, e.x, e.y, x1, e.y);
-        const risk = Math.abs(d.pts[0].p - d.pts[1].p), rew = Math.abs(d.pts[2].p - d.pts[0].p);
-        const pip = this.host.pipSize();
-        const rr = risk ? rew / risk : 0;
-        this.label(e.x + w / 2, t.y + (d.type === 'long' ? -4 : 18), `Target ${(rew / pip).toFixed(1)} pips`, '#13776f', 'center');
-        this.label(e.x + w / 2, s.y + (d.type === 'long' ? 18 : -4), `Stop ${(risk / pip).toFixed(1)} pips`, '#b8443b', 'center');
-        this.label(e.x + w / 2, e.y - 3, `${d.type === 'long' ? 'Long' : 'Short'}  R:R ${rr.toFixed(2)}`, '#57564f', 'center');
+      case 'short':
+        this.drawPosition(d, P);
         break;
-      }
       case 'measure': {
         const up = d.pts[1].p >= d.pts[0].p;
         ctx.fillStyle = up ? 'rgba(91,147,214,0.18)' : 'rgba(224,96,90,0.18)';
@@ -599,6 +681,89 @@ export class DrawingLayer {
     }
   }
 
+  private colors(): ThemeColors {
+    return this.host.colors?.() ?? { up: '#1a9e93', down: '#e0605a', text: '#f9fafb', surface: '#1c262c', muted: '#9ba1a6' };
+  }
+
+  private drawZones() {
+    const zs = this.host.zones?.() ?? [];
+    if (!zs.length) return;
+    const ctx = this.ctx, c = this.colors(), W = this.paneW();
+    for (const z of zs) {
+      const x0 = Math.max(0, this.x(z.t));
+      if (x0 >= W) continue;
+      const ey = this.y(z.entry);
+      ctx.globalAlpha = 0.1;
+      if (z.tp != null) {
+        const ty = this.y(z.tp);
+        ctx.fillStyle = c.up;
+        ctx.fillRect(x0, Math.min(ey, ty), W - x0, Math.abs(ty - ey));
+      }
+      if (z.sl != null) {
+        const sy = this.y(z.sl);
+        ctx.fillStyle = c.down;
+        ctx.fillRect(x0, Math.min(ey, sy), W - x0, Math.abs(sy - ey));
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** TradingView-style long/short position: zones, read-outs and the replay outcome. */
+  private drawPosition(d: Drawing, P: { x: number; y: number }[]) {
+    const ctx = this.ctx, c = this.colors(), dg = this.host.digits();
+    const [e, s, t] = P;
+    const x1 = P[1].x, w = x1 - e.x;
+    const lv = posLevels(d);
+    const env = this.host.posEnv?.();
+    const calc = env ? posCalc(lv, d.pos ?? this.host.posDefaults?.() ?? { riskMode: 'pct', risk: 1 }, env) : null;
+    // outcome on revealed bars only
+    const from = Math.ceil(this.timeToLogical(d.pts[0].t));
+    const to = Math.min(Math.floor(this.timeToLogical(d.pts[1].t)), this.host.count() - 1);
+    const hit = d.preview ? null : firstHit(lv, from, to, (i) => this.host.bar(i));
+    const alpha = d.preview ? 0.2 : 0.16;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = c.up;
+    ctx.fillRect(e.x, Math.min(e.y, t.y), w, Math.abs(t.y - e.y));
+    ctx.fillStyle = c.down;
+    ctx.fillRect(e.x, Math.min(e.y, s.y), w, Math.abs(s.y - e.y));
+    ctx.globalAlpha = 1;
+    const lastIdx = Math.min(to, this.host.count() - 1);
+    const endIdx = hit ? hit.index : lastIdx;
+    if (!d.preview && endIdx >= from) {
+      // price path from the entry to the exit (or the latest revealed close)
+      const ex = (this.host.chart.timeScale().logicalToCoordinate(endIdx as Logical) ?? x1) as number;
+      const exitP = hit ? (hit.kind === 'tp' ? lv.tp : lv.sl) : this.host.bar(endIdx)?.c ?? lv.entry;
+      const zoneY = this.y(exitP);
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = (hit ? hit.kind === 'tp' : (lv.side === 'long' ? exitP >= lv.entry : exitP <= lv.entry)) ? c.up : c.down;
+      ctx.fillRect(e.x, Math.min(e.y, zoneY), Math.max(0, Math.min(ex, x1) - e.x), Math.abs(zoneY - e.y));
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = c.muted;
+      ctx.setLineDash([4, 3]);
+      line(ctx, e.x, e.y, Math.min(ex, x1), zoneY);
+      ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = c.muted;
+    ctx.lineWidth = 1;
+    line(ctx, e.x, e.y, x1, e.y);
+    const cx = e.x + w / 2;
+    const money = (v: number) => `${v < 0 ? '−' : '+'}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const above = (y: number) => y - 5, below = (y: number) => y + 19;
+    const tUp = t.y < e.y, sUp = s.y < e.y;
+    if (calc) {
+      this.label(cx, tUp ? above(t.y) : below(t.y), `Target ${lv.tp.toFixed(dg)} (${calc.tpPct.toFixed(2)}%) ${calc.tpPips.toFixed(1)} pips · ${money(calc.rewardUsd)}`, c.up, 'center');
+      this.label(cx, sUp ? above(s.y) : below(s.y), `Stop ${lv.sl.toFixed(dg)} (${calc.slPct.toFixed(2)}%) ${calc.slPips.toFixed(1)} pips · ${money(-calc.riskUsd)}`, c.down, 'center');
+      let mid = `${lv.side === 'long' ? 'Long' : 'Short'} · ${calc.lots.toFixed(2)} lots · R:R ${calc.rr.toFixed(2)}`;
+      if (calc.invalid) mid = `${lv.side === 'long' ? 'Long' : 'Short'} · stop/target on the wrong side`;
+      else if (hit) mid += hit.kind === 'tp' ? ` · Target hit ${money(calc.rewardUsd)}` : ` · Stop hit ${money(-calc.riskUsd)}`;
+      else if (!d.preview && lastIdx >= from && env) {
+        const close = this.host.bar(lastIdx)?.c;
+        if (close != null) mid += ` · Open ${money((lv.side === 'long' ? 1 : -1) * env.value(close - lv.entry, calc.lots, close))}`;
+      }
+      this.label(cx, (tUp ? e.y + 19 : e.y - 5), mid, calc.invalid ? c.down : c.surface, 'center', calc.invalid ? '#fff' : c.text);
+    }
+  }
+
   private renderToolbar() {
     const d = this.selected;
     const tb = this.toolbar;
@@ -610,13 +775,18 @@ export class DrawingLayer {
     tb.classList.remove('hidden');
     tb.style.left = Math.max(4, Math.min(this.paneW() - 220, h.x + 12)) + 'px';
     tb.style.top = Math.max(4, Math.min(this.paneH() - 40, h.y - 44)) + 'px';
-    const sig = d.id + d.color;
+    const sig = d.id + d.color + d.type + (d.locked ? 'L' : '');
     if (tb.dataset.sig === sig) return;
     tb.dataset.sig = sig;
     const colors = ['#22c96a', '#5b93d6', '#1a9e93', '#e0605a', '#d4a24c', '#9085e9', '#8a8780'];
     tb.innerHTML =
       colors.map((c) => `<button class="sw${c === d.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="Color"></button>`).join('') +
-      (d.type === 'long' || d.type === 'short' ? `<button class="tb-btn" data-act="order" title="Place this as a real order">Place order</button>` : '') +
+      (isPosTool(d)
+        ? `<button class="tb-btn primary" data-act="order" title="Place this as a real order (market, limit or stop is picked from the entry)">${d.type === 'long' ? 'Buy' : 'Sell'} this</button>` +
+          `<button class="tb-btn" data-act="flip" title="Flip long ↔ short">⇅ Flip</button>` +
+          `<button class="tb-btn" data-act="settings" title="Settings (double-click)">⚙</button>`
+        : '') +
+      `<button class="tb-btn${d.locked ? ' on' : ''}" data-act="lock" title="${d.locked ? 'Unlock' : 'Lock'}">${d.locked ? '🔒' : '🔓'}</button>` +
       `<button class="tb-btn" data-act="del" title="Delete (Del)">🗑</button>`;
     tb.onclick = (e) => {
       const b = (e.target as HTMLElement).closest('button');
@@ -627,8 +797,26 @@ export class DrawingLayer {
         this.host.changed();
       } else if (b.dataset.act === 'del') this.deleteSelected();
       else if (b.dataset.act === 'order') this.host.onPlaceFromTool?.(d);
+      else if (b.dataset.act === 'flip') {
+        flipDrawing(d);
+        this.host.onEdit?.(d, true);
+        this.host.changed();
+      } else if (b.dataset.act === 'settings') this.host.onSettings?.(d);
+      else if (b.dataset.act === 'lock') {
+        d.locked = !d.locked;
+        this.host.changed();
+      }
     };
   }
+}
+
+/** Long ↔ short in place: mirror stop and target around the entry. */
+export function flipDrawing(d: Drawing) {
+  const e = d.pts[0].p;
+  d.type = d.type === 'long' ? 'short' : 'long';
+  d.pts[1].p = 2 * e - d.pts[1].p;
+  d.pts[2].p = 2 * e - d.pts[2].p;
+  d.color = d.type === 'long' ? '#1a9e93' : '#e0605a';
 }
 
 function line(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
