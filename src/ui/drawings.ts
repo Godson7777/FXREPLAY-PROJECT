@@ -203,7 +203,7 @@ export class DrawingLayer {
   private onDown = (e: PointerEvent) => {
     this.blockNext = false;
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('.draw-toolbar')) return;
+    if ((e.target as HTMLElement).closest('.draw-toolbar, .line-tag')) return;
     const { x, y } = this.local(e);
     if (!this.inPane(x, y)) return;
     const stop = () => {
