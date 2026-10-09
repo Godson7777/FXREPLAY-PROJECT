@@ -31,7 +31,9 @@ export interface InstrumentSpec {
 export interface DatasetMeta {
   id: string; // same as symbol key
   symbol: string;
-  source: 'csv' | 'binance' | 'hyperliquid' | 'synthetic';
+  source: 'csv' | 'binance' | 'bybit' | 'okx' | 'twelvedata' | 'hyperliquid' | 'synthetic';
+  /** where the bars came from, so "Download newer bars" can extend them */
+  provider?: { provider: import('../data/providers').ProviderId; symbol: string };
   /** base resolution of the stored bars in seconds */
   resolution: number;
   from: number;

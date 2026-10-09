@@ -6,6 +6,7 @@ import { newBrokerState, round2, type OrderType, type Side, type Trade } from '.
 import { Replay, dataWindow, type ChartType, type Session } from '../engine/replay';
 import { LiveFeed, applyCandle, applyTick, hlCandles, HL_MAX_CANDLES, type FeedStatus } from '../data/hyperliquid';
 import { getDatasetMeta, saveDataset } from '../data/store';
+import { canRefresh, refreshDataset } from '../data/ingest';
 import type { ChallengeState } from '../engine/rules';
 import { saveSession, saveShot, getShot } from '../data/sessions';
 import { ChartPane, IND_COLORS, type LineAction, type PaneHost } from './chartpane';
@@ -363,6 +364,47 @@ export class Workspace implements PaneHost {
 
   // ---- no data after the clock -------------------------------------------------------
 
+  /**
+   * "Download newer bars" for sessions whose data came from an exchange API. Hidden until
+   * the dataset metas confirm a source; on success the replay reloads with the new bars.
+   */
+  private newerBarsButton(primary: boolean) {
+    const b = h('button', { class: `${primary ? 'primary' : 'ghost'} hidden`, type: 'button' }, 'Download newer bars');
+    const syms = this.session.symbols;
+    void Promise.all(syms.map((s) => getDatasetMeta(s))).then((metas) => {
+      if (metas.some((m) => canRefresh(m))) b.classList.remove('hidden');
+      b.onclick = async () => {
+        b.disabled = true;
+        let added = 0;
+        try {
+          for (const m of metas) {
+            if (!m || !canRefresh(m)) continue;
+            b.textContent = `Downloading ${m.symbol}…`;
+            added += (await refreshDataset(m, { onProgress: (_p, n, msg) => (b.textContent = msg ?? `Downloading ${m.symbol}: ${n.toLocaleString('en-US')} bars…`) })).added;
+          }
+        } catch (e) {
+          toast((e as Error).message, 'err');
+          b.disabled = false;
+          b.textContent = 'Download newer bars';
+          return;
+        }
+        if (!added) {
+          toast('No newer bars yet — the data is already up to date.', 'info');
+          b.disabled = false;
+          b.textContent = 'Download newer bars';
+          return;
+        }
+        toast(`+${added.toLocaleString('en-US')} bars — reloading the replay`, 'ok');
+        this.session.state.finished = false;
+        this.flushSave();
+        await saveSession(this.session);
+        document.querySelectorAll('.modal-back').forEach((m) => m.remove());
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      };
+    });
+    return b;
+  }
+
   private showNoDataBanner() {
     this.bannerEl?.remove();
     const s = this.session;
@@ -395,7 +437,8 @@ export class Workspace implements PaneHost {
         : pastEnd ? `The session end (${fmt(s.end!)}) has passed. Remove or move the end date in a new session to keep going.` : `The market data stops here: ${ends}. Import newer data with the same symbol name to continue.`),
       h('div', { class: 'row-btns' },
         empty && okWin && startedAfter ? restart : null,
-        h('button', { class: empty && startedAfter ? 'ghost' : 'primary', onclick: () => { this.flushSave(); this.nav('#/data'); } }, 'Import newer data'),
+        pastEnd ? null : this.newerBarsButton(!(empty && startedAfter)),
+        h('button', { class: 'ghost', onclick: () => { this.flushSave(); this.nav('#/data'); } }, 'Import newer data'),
         s.state.broker.trades.length ? h('button', { class: 'ghost', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, 'See analytics') : null,
         h('button', { class: 'ghost', onclick: () => { this.bannerEl?.remove(); this.bannerEl = null; } }, 'Dismiss'),
       ),
@@ -735,7 +778,7 @@ export class Workspace implements PaneHost {
       h('p', { class: 'muted' }, n
         ? `${n} closed trade${n === 1 ? '' : 's'}. See how the method scores: drawdowns, Sharpe, monthly consistency, market regimes, Monte Carlo and the final Overflow Score.`
         : 'No closed trades yet — the Overflow Score needs at least 10.'),
-      h('div', { class: 'row-btns' }, go, stay),
+      h('div', { class: 'row-btns' }, go, s.end != null && this.replay.clock > s.end ? null : this.newerBarsButton(false), stay),
     ));
     go.onclick = () => {
       close();
