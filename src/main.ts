@@ -22,12 +22,28 @@ const nav = (hash: string) => {
   else location.hash = hash;
 };
 
+/**
+ * Remove page-level overlays a previous page may have left on <body> (chart tooltip,
+ * context menu, modals), so nothing from the replay can paint over the next page.
+ */
+function cleanupOverlays() {
+  document.querySelectorAll('.viz-tip, .ctx-menu, .modal-back, .draw-toolbar').forEach((el) => {
+    if (!app.contains(el)) el.remove();
+  });
+  // nothing from lightweight-charts may outlive its page
+  document.querySelectorAll('body > .tv-lightweight-charts, body > table.tv-lightweight-charts').forEach((el) => el.remove());
+}
+
+// dev-only hook for the Playwright suites (stripped from production builds)
+if (import.meta.env.DEV) (window as unknown as { __page: () => unknown }).__page = () => current;
+
 async function route() {
   const token = ++routeToken;
   const stale = () => token !== routeToken;
   current?.destroy?.();
   current = null;
   app.innerHTML = '';
+  cleanupOverlays();
   window.scrollTo(0, 0);
   const [, view, id] = (location.hash.replace(/^#/, '') || '/').split('/');
   try {

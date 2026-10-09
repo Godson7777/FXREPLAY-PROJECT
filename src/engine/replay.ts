@@ -137,6 +137,18 @@ export class Replay {
     this.checkRules();
   }
 
+  /** Add a symbol mid-session: its cursor starts at the current clock, so it stays in sync. */
+  addSymbol(sym: string, bars: Bars, spec: InstrumentSpec) {
+    const s = this.session;
+    if (this.cursor[sym] != null) return;
+    this.data[sym] = bars;
+    s.specs[sym] = spec;
+    if (!s.symbols.includes(sym)) s.symbols.push(sym);
+    const i = Math.max(0, indexAtOrBefore(bars.t, bars.n, s.state.clock - 1));
+    this.cursor[sym] = i;
+    this.broker.setPrice(sym, bars.t[i], bars.c[i]);
+  }
+
   get locked(): string | null {
     const c = this.session.state.challenge;
     if (c && c.status === 'failed' && this.session.rules?.stopOnBreach) return `Challenge failed: ${c.reason}`;

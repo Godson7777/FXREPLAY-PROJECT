@@ -187,7 +187,7 @@ export class Broker {
   lotsForRisk(sym: string, riskUsd: number, slDistance: number, price: number) {
     const perLot = this.value(sym, Math.abs(slDistance), 1, price);
     if (!(perLot > 0)) return 0;
-    return Math.max(0.01, Math.floor((riskUsd / perLot) * 100) / 100);
+    return Math.max(0.01, Math.floor((riskUsd / perLot) * 100 + 1e-6) / 100);
   }
 
   floating(p: Position): number {

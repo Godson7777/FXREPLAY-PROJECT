@@ -7,7 +7,8 @@ import { indexAtOrBefore, type Bars } from '../core/types';
 import { offsetFn, fmtLocal } from '../core/tz';
 import { indicatorDef, type Series } from '../core/indicators';
 import type { ChartType, PaneConfig, Replay } from '../engine/replay';
-import { DrawingLayer, type DragLine, type Drawing } from './drawings';
+import { DrawingLayer, type DragLine, type Drawing, type Zone } from './drawings';
+import type { PosEnv, PosSettings } from '../engine/position';
 import { h, money, theme, type Theme } from './dom';
 
 const MAX_DISPLAY = 60000;
@@ -49,6 +50,27 @@ export interface PaneHost {
   setChartType(pane: ChartPane, t: ChartType): void;
   /** ✕ on an on-chart line tag: close a position, cancel an order, or remove a level */
   lineAction(kind: LineAction, id: number): void;
+  /** order-ticket preview box for this pane (not saved) */
+  previewDrawings(pane: ChartPane): Drawing[];
+  posEnv(sym: string): PosEnv;
+  posDefaults(): PosSettings;
+  /** TP/SL zones of orders and positions (UTC start times) */
+  zones(sym: string): Zone[];
+  drawingSelected(pane: ChartPane, d: Drawing | null): void;
+  drawingEdited(pane: ChartPane, d: Drawing, final: boolean): void;
+  drawingSettings(pane: ChartPane, d: Drawing): void;
+  /** crosshair read-out for the data window (null = cursor left the chart) */
+  crosshairData(pane: ChartPane, info: CrosshairInfo | null): void;
+}
+
+export interface CrosshairInfo {
+  t: number; // display time
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+  ind: { label: string; color: string; values: number[] }[];
 }
 
 export type LineAction = 'close' | 'cancel' | 'clear-sl' | 'clear-tp' | 'clear-osl' | 'clear-otp';
@@ -131,7 +153,11 @@ export class ChartPane {
     this.chart = createChart(this.chartEl, {
       autoSize: true,
       ...this.chartColors(),
-      crosshair: { mode: CrosshairMode.Normal },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: this.th.muted, width: 1, style: LineStyle.Dashed, labelBackgroundColor: this.th.surface },
+        horzLine: { color: this.th.muted, width: 1, style: LineStyle.Dashed, labelBackgroundColor: this.th.surface },
+      },
       timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
     });
@@ -159,6 +185,17 @@ export class ChartPane {
       changed: () => host.drawingsChanged(this.cfg.symbol),
       dragLines: () => host.dragLines(this.cfg.symbol),
       onPlaceFromTool: (d) => host.placeFromTool(d, this.cfg.symbol),
+      extraDrawings: () => host.previewDrawings(this),
+      posEnv: () => host.posEnv(this.cfg.symbol),
+      posDefaults: () => host.posDefaults(),
+      colors: () => ({ up: this.th.up, down: this.th.down, text: this.th.text, surface: this.th.surface, muted: this.th.muted }),
+      zones: () => {
+        const off = offsetFn(host.tz);
+        return host.zones(this.cfg.symbol).map((z) => ({ ...z, t: z.t + off(z.t) }));
+      },
+      onSelect: (d) => host.drawingSelected(this, d),
+      onEdit: (d, final) => host.drawingEdited(this, d, final),
+      onSettings: (d) => host.drawingSettings(this, d),
     });
     this.chart.subscribeCrosshairMove((p) => {
       const t = p.time as number | undefined;
@@ -167,7 +204,11 @@ export class ChartPane {
         const g = this.start + j;
         const c = g === this.k && this.lastC ? this.lastC : { o: this.agg.o[g], h: this.agg.h[g], l: this.agg.l[g], c: this.agg.c[g], v: this.agg.v[g], t: t! };
         this.renderLegend({ ...c, t: t! });
-      } else this.renderLegend(this.lastC);
+        host.crosshairData(this, { ...c, t: t!, ind: this.indValues(p.seriesData as Map<unknown, unknown>) });
+      } else {
+        this.renderLegend(this.lastC);
+        host.crosshairData(this, null);
+      }
       if (!this.syncingCrosshair) host.crosshairMoved(this, p.point ? (t ?? null) : null);
     });
     this.chartEl.addEventListener('contextmenu', (e) => {
@@ -184,6 +225,39 @@ export class ChartPane {
   }
 
   syncingCrosshair = false;
+
+  /** Indicator values at the crosshair, in config order. */
+  private indValues(sd: Map<unknown, unknown>) {
+    return this.ind.map((x) => {
+      const cfg = this.cfg.indicators.find((c) => c.id === x.id);
+      const def = cfg && indicatorDef(cfg.type);
+      const label = def ? `${def.label}${Object.keys(def.params).length ? ` (${Object.keys(def.params).map((k) => cfg!.params[k] ?? def.params[k]).join(', ')})` : ''}` : x.id;
+      return { label, color: cfg?.color ?? this.th.muted, values: x.series.map((s) => (sd.get(s) as { value?: number } | undefined)?.value ?? NaN) };
+    });
+  }
+
+  /** Latest revealed candle and indicator values (data window when the cursor is off the chart). */
+  lastInfo(): CrosshairInfo | null {
+    if (!this.lastC) return null;
+    const ind = this.ind.map((x) => {
+      const cfg = this.cfg.indicators.find((c) => c.id === x.id);
+      const def = cfg && indicatorDef(cfg.type);
+      return {
+        label: def?.label ?? x.id, color: cfg?.color ?? this.th.muted,
+        values: x.series.map((s) => {
+          const d = s.data();
+          const last = d[d.length - 1] as { value?: number } | undefined;
+          return last?.value ?? NaN;
+        }),
+      };
+    });
+    return { ...this.lastC, ind };
+  }
+
+  /** the drawing layer needs a redraw (preview or zones changed) */
+  redraw() {
+    this.layer.schedule();
+  }
 
   /** Mirror another pane's crosshair (time in local seconds). */
   showCrosshairAt(t: number | null) {
@@ -224,10 +298,18 @@ export class ChartPane {
     return { upColor: t === 'hollow' ? 'rgba(0,0,0,0)' : up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn };
   }
 
+  setSymbol(sym: string) {
+    if (sym === this.cfg.symbol) return;
+    this.cfg.symbol = sym;
+    this.load();
+    this.host.paneChanged();
+  }
+
   /** Re-read the CSS theme and recolour everything in place (no reload, replay state kept). */
   applyTheme() {
     this.th = theme();
-    this.chart.applyOptions({ ...this.chartColors(), timeScale: { borderColor: this.th.grid } });
+    const ch = { color: this.th.muted, labelBackgroundColor: this.th.surface };
+    this.chart.applyOptions({ ...this.chartColors(), timeScale: { borderColor: this.th.grid }, crosshair: { vertLine: ch, horzLine: ch } });
     this.main.applyOptions(this.mainOptions());
     this.rebuildIndicators();
     this.refreshOverlays();
@@ -276,11 +358,7 @@ export class ChartPane {
     const syms = this.host.replay.session.symbols;
     this.header.innerHTML = '';
     const sel = h('select', { class: 'pane-sym', title: 'Symbol' }, ...syms.map((s) => h('option', { value: s, selected: s === this.cfg.symbol }, s)));
-    sel.onchange = () => {
-      this.cfg.symbol = sel.value;
-      this.load();
-      this.host.paneChanged();
-    };
+    sel.onchange = () => this.setSymbol(sel.value);
     const tfBtn = h('button', { class: 'pane-tf', title: 'Change timeframe (type any: 7m, 2H, 3D…)' }, this.cfg.tf);
     tfBtn.onclick = () => this.host.onTfRequest(this);
     const ct = this.chartType();
@@ -568,8 +646,9 @@ export class ChartPane {
       if (o.symbol !== sym) continue;
       want.set(`o${o.id}`, { price: o.price, color: '#d4a24c', title: '', style: LineStyle.Dotted, width: 1,
         tag: { text: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, action: 'cancel', id: o.id, tip: `Cancel order #${o.id}` } });
-      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: this.th.down, title: '', style: LineStyle.Dotted, width: 1, tag: { text: 'SL', action: 'clear-osl', id: o.id, tip: 'Remove the order stop loss' } });
-      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: this.th.up, title: '', style: LineStyle.Dotted, width: 1, tag: { text: 'TP', action: 'clear-otp', id: o.id, tip: 'Remove the order take profit' } });
+      const od = o.side === 'long' ? 1 : -1;
+      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: this.th.down, title: '', style: LineStyle.Dotted, width: 1, tag: { text: `SL ${money(br.value(sym, od * (o.sl - o.price), o.lots, o.sl), true)} · ${o.lots}`, action: 'clear-osl', id: o.id, tip: 'Remove the order stop loss' } });
+      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: this.th.up, title: '', style: LineStyle.Dotted, width: 1, tag: { text: `TP ${money(br.value(sym, od * (o.tp - o.price), o.lots, o.tp), true)} · ${o.lots}`, action: 'clear-otp', id: o.id, tip: 'Remove the order take profit' } });
     }
     this.syncTags(want);
     for (const [key, pl] of this.priceLines) {
