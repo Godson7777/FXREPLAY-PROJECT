@@ -1,17 +1,18 @@
-import { guessSpec, detectResolution, mergeBars, type DatasetMeta, type Bars } from '../core/types';
+import type { DatasetMeta } from '../core/types';
 import { tfSeconds } from '../core/timeframe';
 import { ZONES } from '../core/tz';
 import { parseCsv } from '../data/csv';
-import { downloadBinance } from '../data/binance';
 import { generateSynthetic } from '../data/synthetic';
-import { saveDataset, listDatasets, deleteDataset, loadBars, updateDatasetMeta, getDatasetMeta } from '../data/store';
+import { listDatasets, deleteDataset, updateDatasetMeta, getDatasetMeta, loadBars } from '../data/store';
+import { storeBars, canRefresh, refreshDataset } from '../data/ingest';
+import { PROVIDERS, providerInfo, fetchCandles, datasetId, sourceOf, getTdKey, setTdKey, refreshSource, type ProviderId } from '../data/providers';
 import { cloudState, uploadDataset, listCloudDatasets, downloadDataset, deleteCloudDataset } from '../data/cloud';
 import { authModal } from './cloudui';
 import { listSessions, saveSession, deleteSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, dataWindow, checkRange, type Session } from '../engine/replay';
 import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
-import { barsFromRows, type InstrumentSpec } from '../core/types';
+import { barsFromRows } from '../core/types';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
 import { listStrategies, mergeStrategies } from '../data/strategies';
@@ -49,7 +50,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
         h('h1', { html: 'Replay any market, <em>bar by bar</em>.' }),
         h('p', {}, 'Backtest manually as if it were live: the future stays hidden, any timeframe you can type (7m, 2H, 3D…), multi-chart sync, a real order engine with SL/TP at 1-minute precision — and a quant-grade report that tells you whether your edge is real.'),
         h('div', { class: 'hero-actions' }, h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import your data'), h('button', { class: 'ghost lg', title: 'Forward-test on the live Hyperliquid market', onclick: () => liveSessionModal(async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '● Live market'), demo),
-        h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser) and never ranked. For real history, import CSVs from HistData, Dukascopy or MT4/MT5, or download crypto from Binance or Hyperliquid on the Data tab. Live market paper-trades Hyperliquid perps in real time.'))),
+        h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser) and never ranked. For real history, import CSVs from HistData, Dukascopy or MT4/MT5, or connect Binance, Bybit, OKX, Hyperliquid or Twelve Data (forex & gold) on the Data tab. Live market paper-trades Hyperliquid perps in real time.'))),
       h('section', { class: 'sec alt' }, h('div', { class: 'wrap' },
         h('div', { class: 'sec-head center' }, h('span', { class: 'eyebrow' }, 'Why Overflow Trade'), h('h2', { html: 'Find out if your edge is <em>real</em>.' })),
         h('div', { class: 'points' },
@@ -137,7 +138,9 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
 }
 
 async function loadDemo() {
-  const start = Math.floor(Date.UTC(2024, 0, 1) / 1000);
+  // the last 365 days up to yesterday, so recent start dates are inside the data
+  const today = Math.floor(Date.now() / 86400000) * 86400;
+  const start = today - 366 * 86400;
   const defs = [
     { sym: 'EURUSD', price: 1.1, vol: 0.07, seed: 11 },
     { sym: 'GBPUSD', price: 1.27, vol: 0.08, seed: 22 },
@@ -150,30 +153,11 @@ async function loadDemo() {
   toast('Demo data ready — create a session!', 'ok');
 }
 
-async function storeBars(symbol: string, bars: Bars, source: DatasetMeta['source'], merge = false, spec?: InstrumentSpec): Promise<DatasetMeta> {
-  const id = symbol.toUpperCase();
-  if (merge) {
-    const old = await loadBars(id);
-    if (old) {
-      bars = mergeBars(old, bars);
-      // practice data must never pass as real: a merge with synthetic bars stays synthetic
-      const oldMeta = await getDatasetMeta(id);
-      if (oldMeta?.source === 'synthetic') source = 'synthetic';
-    }
-  }
-  const meta: DatasetMeta = {
-    id, symbol: id, source, resolution: detectResolution(bars), from: bars.t[0], to: bars.t[bars.n - 1], count: bars.n,
-    spec: spec ?? guessSpec(id, bars.c[bars.n - 1]), createdAt: Date.now(),
-  };
-  await saveDataset(meta, bars);
-  return meta;
-}
-
 // ---- new session -------------------------------------------------------------
 
 function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
   const name = h('input', { value: `Backtest ${new Date().toISOString().slice(0, 10)}` });
-  const boxes = datasets.map((d, i) => ({ d, cb: h('input', { type: 'checkbox', checked: i === 0 }) }));
+  const boxes = datasets.map((d, i) => ({ d, cb: h('input', { type: 'checkbox', checked: i === 0 }) as HTMLInputElement }));
   const symList = h('div', { class: 'sym-list' }, ...boxes.map(({ d, cb }) =>
     h('label', { class: 'check' }, cb, ` ${d.symbol} `, h('small', { class: 'muted' }, `${fmtDate(d.from).slice(0, 10)} → ${fmtDate(d.to).slice(0, 10)} · ${tfSeconds(d.resolution).label}`))));
   const d0 = datasets[0];
@@ -181,9 +165,30 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
   const start = h('input', { type: 'datetime-local', value: dateInputValue(defStart) });
   const end = h('input', { type: 'datetime-local' });
   const winNote = h('small', { class: 'muted' });
+  const getNew = h('button', { class: 'ghost sm hidden', type: 'button' }, 'Download bars up to now');
   const picked = () => boxes.filter((b) => b.cb.checked).map((b) => b.d);
+  getNew.onclick = async () => {
+    const stale = picked().filter((d) => canRefresh(d) && d.to < Date.now() / 1000 - 3600);
+    getNew.disabled = true;
+    try {
+      for (const [i, d] of stale.entries()) {
+        getNew.textContent = `Downloading ${d.symbol} (${i + 1}/${stale.length})…`;
+        const { meta } = await refreshDataset(d, { onProgress: (_p, n, msg) => (getNew.textContent = msg ?? `Downloading ${d.symbol}: ${n.toLocaleString('en-US')} bars…`) });
+        const box = boxes.find((b) => b.d.id === d.id)!;
+        box.d = meta;
+        box.cb.parentElement!.querySelector('small')!.textContent = `${fmtDate(meta.from).slice(0, 10)} → ${fmtDate(meta.to).slice(0, 10)} · ${tfSeconds(meta.resolution).label}`;
+      }
+      toast('Data is up to date', 'ok');
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    }
+    getNew.disabled = false;
+    getNew.textContent = 'Download bars up to now';
+    updateWindow();
+  };
   const updateWindow = () => {
     const syms = picked();
+    getNew.classList.toggle('hidden', !syms.some((d) => canRefresh(d) && d.to < Date.now() / 1000 - 3600));
     if (!syms.length) return void (winNote.textContent = 'Pick at least one symbol.');
     const w = dataWindow(syms);
     if (w.from >= w.to) return void (winNote.textContent = 'These symbols have no overlapping dates.');
@@ -232,7 +237,7 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     field('Session name', name),
     field('Symbols (all stay time-synchronised)', symList),
     h('div', { class: 'row2' }, field('Start (UTC) — history before this is visible', start), field('End (optional, UTC)', end)),
-    winNote,
+    h('div', { class: 'row-btns' }, winNote, getNew),
     h('div', { class: 'row2' }, field('Starting balance ($)', bal), field('Default risk per trade (%)', risk)),
     h('div', { class: 'row2' }, field('Commission / lot / side ($)', comm), field('Spread (pips, editable per symbol later)', spread)),
     h('div', { class: 'row2' }, field('Chart timezone', tz), field('Leverage', lev, 'Isolated margin per position: a position is liquidated (losing its margin) if price moves ~1/leverage against it.')),
@@ -353,7 +358,7 @@ function liveSessionModal(done: (s: Session) => void) {
       const bars = barsFromRows(rows);
       const id = hlSymbol(c.name);
       const spec = hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]);
-      await storeBars(id, bars, 'hyperliquid', true, spec);
+      await storeBars(id, bars, 'hyperliquid', true, spec, { provider: 'hyperliquid', symbol: c.name });
       const s = newSession({
         id: uid(), name: name.value || `${c.name} live`, description: '', symbols: [id], start: now, end: null,
         balance: +bal.value, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz.value, riskPct: +risk.value,
@@ -420,7 +425,7 @@ function hyperliquidModal(refresh: () => void) {
       const id = hlSymbol(c.name);
       const old = await getDatasetMeta(id);
       if (old && old.resolution !== iv.sec) throw new Error(`${id} is already stored as ${tfSeconds(old.resolution).label} bars — delete it first to download ${iv.id} bars.`);
-      const meta = await storeBars(id, bars, 'hyperliquid', true, hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]));
+      const meta = await storeBars(id, bars, 'hyperliquid', true, hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]), { provider: 'hyperliquid', symbol: c.name });
       toast(`${meta.symbol}: ${meta.count.toLocaleString('en-US')} bars saved`, 'ok');
       close();
       refresh();
@@ -437,11 +442,12 @@ function hyperliquidModal(refresh: () => void) {
 function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => void) {
   page.append(pageHead({
     eyebrow: 'Market data', titleHtml: 'Your market <em>data</em>.', compact: true,
-    lead: 'Everything is stored in this browser. One-minute data gives exact fills and lets you replay any timeframe. Only real market data (CSV, Binance or Hyperliquid) can be ranked on the leaderboard; synthetic data is for practice.',
+    lead: 'Everything is stored in this browser. One-minute data gives exact fills and lets you replay any timeframe. Only real market data (CSV or an exchange/API download) can be ranked on the leaderboard; synthetic data is for practice.',
     actions: [
       h('button', { class: 'primary', onclick: () => importCsvModal(refresh) }, 'Import CSV'),
-      h('button', { class: 'ghost', onclick: () => binanceModal(refresh) }, 'Binance (crypto)'),
+      h('button', { class: 'primary', onclick: () => exchangeModal(refresh) }, 'Connect exchange / API'),
       h('button', { class: 'ghost', onclick: () => hyperliquidModal(refresh) }, 'Hyperliquid (perps)'),
+      datasets.some(canRefresh) ? h('button', { class: 'ghost', title: 'Download the newest bars for every dataset that came from an API', onclick: (e: Event) => void updateAll(e.target as HTMLButtonElement, datasets, refresh) }, 'Update all') : null,
       h('button', { class: 'ghost', onclick: () => syntheticModal(refresh) }, 'Generate synthetic'),
     ],
   }));
@@ -464,6 +470,7 @@ function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => v
       h('td', {}, fmtDate(d.from)), h('td', {}, fmtDate(d.to)), h('td', {}, d.count.toLocaleString('en-US')),
       h('td', {}, pip), h('td', {}, cs), h('td', {}, dg),
       h('td', { class: 'acts' },
+        canRefresh(d) ? h('button', { class: 'mini', title: `Download bars newer than ${fmtDate(d.to)} from ${providerInfo(refreshSource(d)!.provider).label}`, onclick: (e: Event) => void updateOne(e.target as HTMLButtonElement, d, refresh) }, 'Update') : null,
         h('button', { class: 'mini', title: 'Upload to your cloud so your other devices can use it', onclick: async (e: Event) => {
           if (!cloudState().user) return authModal();
           const b = e.target as HTMLButtonElement;
@@ -486,7 +493,7 @@ function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => v
       } }, 'Delete')),
     ));
   }
-  if (!datasets.length) tb.append(h('tr', {}, h('td', { colspan: 10, class: 'empty' }, 'No data yet — import a CSV, download crypto from Binance or generate synthetic practice data.')));
+  if (!datasets.length) tb.append(h('tr', {}, h('td', { colspan: 10, class: 'empty' }, 'No data yet — import a CSV, connect an exchange / data API, or generate synthetic practice data.')));
   t.append(tb);
   main.append(h('div', { class: 'card' }, h('div', { class: 'table-wrap' }, t)));
   if (cloudState().user) main.append(cloudDataCard(datasets, refresh));
@@ -496,7 +503,9 @@ function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => v
       h('li', { html: '<b>Forex 1-minute (free):</b> histdata.com → “ASCII / 1 Minute Bar Quotes”. Their timestamps are EST without DST → use source offset <code>-5</code>.' }),
       h('li', { html: '<b>Dukascopy:</b> dukascopy.com Historical Data Feed (or the <code>dukascopy-node</code> CLI) → export 1-minute CSV in UTC.' }),
       h('li', { html: '<b>MetaTrader 4/5:</b> History Center / Symbols → Bars → Export. Timestamps are broker server time (often UTC+2/+3).' }),
-      h('li', { html: '<b>Crypto:</b> use the Binance button — downloads 1-minute candles straight from the public API.' }),
+      h('li', { html: '<b>Crypto (no key):</b> Connect exchange / API → Binance, Bybit or OKX, or the Hyperliquid button. Downloads 1-minute candles straight from the public APIs.' }),
+      h('li', { html: '<b>Forex, gold, indices, stocks:</b> Connect exchange / API → Twelve Data (free key from twelvedata.com), e.g. <code>XAU/USD</code>, <code>EUR/USD</code>, <code>AAPL</code>.' }),
+      h('li', { html: 'Datasets from an API have an <b>Update</b> button that downloads everything newer than the last bar, so a replay never runs out of data.' }),
       h('li', { html: 'Importing the same symbol again <b>merges</b> the data, so you can add a year at a time. Any base resolution works (1m recommended; 1s/5s/tick-bars work too).' }),
     )));
 }
@@ -546,36 +555,109 @@ function importCsvModal(refresh: () => void) {
   };
 }
 
-function binanceModal(refresh: () => void) {
-  const sym = h('input', { value: 'BTCUSDT' });
-  const market = h('select', {}, h('option', { value: 'spot' }, 'Spot'), h('option', { value: 'futures' }, 'USDⓈ-M Futures'));
+async function updateOne(btn: HTMLButtonElement, d: DatasetMeta, refresh: () => void) {
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = '…';
+  try {
+    const { added, meta } = await refreshDataset(d, { onProgress: (_p, n, msg) => (btn.textContent = msg ? '⏳' : `${n.toLocaleString('en-US')}…`) });
+    toast(added ? `${d.symbol}: +${added.toLocaleString('en-US')} bars, now up to ${fmtDate(meta.to)}` : `${d.symbol} is already up to date`, 'ok');
+    refresh();
+  } catch (e) {
+    toast(`${d.symbol}: ${(e as Error).message}`, 'err');
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+async function updateAll(btn: HTMLButtonElement, datasets: DatasetMeta[], refresh: () => void) {
+  btn.disabled = true;
+  const list = datasets.filter(canRefresh);
+  let ok = 0, bars = 0;
+  for (const [i, d] of list.entries()) {
+    btn.textContent = `Updating ${i + 1}/${list.length}…`;
+    try {
+      bars += (await refreshDataset(d)).added;
+      ok++;
+    } catch (e) {
+      toast(`${d.symbol}: ${(e as Error).message}`, 'err');
+    }
+  }
+  toast(`${ok}/${list.length} datasets updated, +${bars.toLocaleString('en-US')} bars`, ok ? 'ok' : 'err');
+  refresh();
+}
+
+function exchangeModal(refresh: () => void) {
+  const prov = h('select', {}, ...PROVIDERS.filter((p) => p.id !== 'hyperliquid').map((p) => h('option', { value: p.id }, `${p.label}${p.needsKey ? ' (free key)' : ''}`)));
+  const sym = h('input', { value: 'BTCUSDT', autocomplete: 'off' });
+  const key = h('input', { type: 'password', value: getTdKey(), placeholder: 'Paste your Twelve Data API key', autocomplete: 'off' });
+  const keyRow = field('API key', key, 'Stored only in this browser — never synced, uploaded or put in backups. Free key: twelvedata.com → Sign up → API keys.');
+  const note = h('small', { class: 'muted' });
+  const idNote = h('small', { class: 'muted' });
   const now = Math.floor(Date.now() / 1000);
   const from = h('input', { type: 'date', value: new Date((now - 90 * 86400) * 1000).toISOString().slice(0, 10) });
   const to = h('input', { type: 'date', value: new Date(now * 1000).toISOString().slice(0, 10) });
   const bar = h('div', { class: 'progress' }, h('div', { class: 'progress-fill' }));
-  const status = h('div', { class: 'muted small' }, '~43,000 bars per month; each request fetches 1,000.');
+  const status = h('div', { class: 'muted small' });
   const go = h('button', { class: 'primary' }, 'Download');
   const ctrl = new AbortController();
-  const close = modal('Download from Binance', h('div', { class: 'stack' },
-    h('div', { class: 'row2' }, field('Symbol', sym), field('Market', market)),
+  const p = () => prov.value as ProviderId;
+  const upd = () => {
+    const info = providerInfo(p());
+    note.textContent = `${info.markets}. ${info.note}`;
+    keyRow.classList.toggle('hidden', !info.needsKey);
+    sym.placeholder = info.example;
+    idNote.textContent = sym.value.trim() ? `Saved as ${datasetId(p(), sym.value)}` : '';
+  };
+  prov.onchange = () => {
+    sym.value = providerInfo(p()).example;
+    if (p() === 'twelvedata') from.value = new Date((now - 30 * 86400) * 1000).toISOString().slice(0, 10);
+    upd();
+  };
+  sym.oninput = upd;
+  upd();
+  const close = modal('Connect an exchange or data API', h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, 'Real candles are downloaded straight from the provider into this browser — no account needed except the free Twelve Data key for forex, gold and stocks. Datasets get an Update button so you can extend them to today later.'),
+    field('Provider', prov), note,
+    h('div', { class: 'row2' }, field('Symbol', sym), keyRow),
+    idNote,
     h('div', { class: 'row2' }, field('From (UTC)', from), field('To (UTC)', to)),
     bar, status, go,
   ), { onClose: () => ctrl.abort() });
   go.onclick = async () => {
+    const id = p();
+    const f = Date.parse(from.value) / 1000, t = Math.min(now, Date.parse(to.value) / 1000 + 86400);
+    if (!isFinite(f) || !isFinite(t) || t <= f) return toast('Pick a valid date range', 'err');
+    if (providerInfo(id).needsKey) {
+      if (!key.value.trim()) return toast('Paste your Twelve Data API key first', 'err');
+      setTdKey(key.value);
+    }
+    const dsId = datasetId(id, sym.value);
+    const old = await getDatasetMeta(dsId);
+    let merge = true;
+    if (old?.source === 'synthetic') {
+      if (!confirm(`${dsId} currently holds synthetic demo data. Replace it with real ${providerInfo(id).label} data? Sessions on ${dsId} keep their trades.`)) return;
+      merge = false;
+    }
     go.disabled = true;
     try {
-      const f = Date.parse(from.value) / 1000, t = Date.parse(to.value) / 1000 + 86400;
-      const bars = await downloadBinance(sym.value.trim(), f, t, (p, n) => {
-        (bar.firstChild as HTMLElement).style.width = `${p * 100}%`;
-        status.textContent = `${n.toLocaleString('en-US')} bars…`;
-      }, ctrl.signal, market.value as 'spot' | 'futures');
-      const meta = await storeBars(sym.value.trim() + (market.value === 'futures' ? '.P' : ''), bars, 'binance', true);
-      toast(`${meta.symbol}: ${meta.count.toLocaleString('en-US')} bars saved`, 'ok');
+      const bars = await fetchCandles(id, sym.value, f, t, {
+        signal: ctrl.signal,
+        key: key.value.trim() || undefined,
+        onProgress: (pc, n, msg) => {
+          (bar.firstChild as HTMLElement).style.width = `${pc * 100}%`;
+          status.textContent = msg ?? `${n.toLocaleString('en-US')} bars…`;
+        },
+      });
+      const symbol = sym.value.trim().toUpperCase();
+      const meta = await storeBars(dsId, bars, sourceOf(id), merge, undefined, { provider: id, symbol: id === 'okx' ? symbol : symbol.replace(/\s+/g, '') });
+      toast(`${meta.symbol}: ${meta.count.toLocaleString('en-US')} bars saved (${fmtDate(meta.from).slice(0, 10)} → ${fmtDate(meta.to).slice(0, 10)})`, 'ok');
       close();
       refresh();
     } catch (e) {
-      toast(String((e as Error).message ?? e), 'err');
-      status.textContent = String((e as Error).message ?? e);
+      const m = String((e as Error).message ?? e);
+      toast(m, 'err');
+      status.textContent = m;
       go.disabled = false;
     }
   };

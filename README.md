@@ -149,8 +149,11 @@ Buka aplikasinya, klik **Load demo data** (EURUSD, GBPUSD, XAUUSD sintetis 1 tah
 | **Forex 1m gratis** | histdata.com → ASCII / 1-Minute Bar. Import dengan offset `-5` (EST tanpa DST). |
 | **Dukascopy** | Export CSV 1-minute (UTC), bisa lewat `npx dukascopy-node`. |
 | **MT4 / MT5** | History Center → Export. Offset = timezone server broker (biasanya +2/+3). |
-| **Crypto** | Tombol **Binance** di tab Data, download 1m langsung dari API publik. |
+| **Crypto (tanpa key)** | Tab Data → **Connect exchange / API** → Binance (spot/futures, otomatis pindah ke `data-api.binance.vision` kalau binance.com diblokir), Bybit (spot/USDT perp), atau OKX (`BTC-USDT`, `BTC-USDT-SWAP`). Data 1 menit langsung dari API publik. |
+| **Forex, emas, indeks, saham** | **Connect exchange / API** → **Twelve Data**. Perlu API key gratis dari twelvedata.com (sekitar 800 request/hari, 8/menit, maksimal 5000 bar 1 menit per request). Contoh: `XAU/USD`, `EUR/USD`, `GBP/JPY`, `AAPL`. Key hanya disimpan di browser-mu. |
 | **Hyperliquid perps** | Tombol **Hyperliquid** di tab Data. Interval dipilih otomatis (1m untuk ~3,5 hari terakhir, lalu 5m/15m/1h…) karena API hanya menyimpan 5000 candle terakhir per interval. |
+
+Dataset dari API punya tombol **Update** (atau **Update all**) untuk mengambil semua bar yang lebih baru dari bar terakhir. Kalau tanggal start session melewati akhir data, form New session menawarkan **Download bars up to now**. Kalau replay sampai di ujung data, ada tombol **Download newer bars** dan replay lanjut dari posisi terakhir. Data demo selalu mencakup 365 hari terakhir.
 
 Parser CSV mendeteksi format secara otomatis. Import symbol yang sama berkali-kali akan **menggabungkan** datanya. Pip size, contract size, dan digits bisa diedit per symbol.
 
