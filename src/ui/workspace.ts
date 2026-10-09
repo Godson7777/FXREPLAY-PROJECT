@@ -10,7 +10,7 @@ import { ChartPane, IND_COLORS, type PaneHost } from './chartpane';
 import { TOOL_INFO, type DragLine, type Drawing, type DrawingType } from './drawings';
 import { h, money, num, cls, toast, modal, field, esc, parseDateInput, themeButton } from './dom';
 import { cloudButton } from './cloudui';
-import { LOGO } from './home';
+import { LOGO } from './logo';
 
 type PlayUnit = 'candle' | 'base';
 
@@ -120,7 +120,7 @@ export class Workspace implements PaneHost {
       h('button', { class: 'ghost', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
       cloudButton(),
       themeButton(),
-      h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, '📊 Analytics'),
+      h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, 'Analytics & score'),
     );
   }
 
@@ -425,9 +425,28 @@ export class Workspace implements PaneHost {
     if (performance.now() - t0 > 300) toast(`Jumped to ${fmtLocal(this.replay.clock + offsetFn(this.tz)(this.replay.clock))}`);
   }
 
+  private endNotified = false;
+
   private endReached() {
     this.pause();
-    toast('End of data / session reached', 'info');
+    if (this.endNotified) return toast('End of data / session reached', 'info');
+    this.endNotified = true;
+    const n = this.replay.broker.s.trades.length;
+    const go = h('button', { class: 'primary' }, 'See your Overflow Score');
+    const stay = h('button', { class: 'ghost' }, 'Keep reviewing');
+    const close = modal('End of the replay', h('div', { class: 'stack' },
+      h('p', {}, 'You reached the end of the market data or of this session.'),
+      h('p', { class: 'muted' }, n
+        ? `${n} closed trade${n === 1 ? '' : 's'}. See how the method scores: drawdowns, Sharpe, monthly consistency, market regimes, Monte Carlo and the final Overflow Score.`
+        : 'No closed trades yet — the Overflow Score needs at least 10.'),
+      h('div', { class: 'row-btns' }, go, stay),
+    ));
+    go.onclick = () => {
+      close();
+      this.flushSave();
+      this.nav(`#/analytics/${this.session.id}`);
+    };
+    stay.onclick = () => close();
   }
 
   togglePlay() {
@@ -519,7 +538,8 @@ export class Workspace implements PaneHost {
     this.renderSide();
     this.renderBottom();
     const passed = c.status === 'passed';
-    modal(passed ? '🏆 Challenge passed!' : '✖ Challenge failed', h('div', { class: 'stack' },
+    const scoreBtn = h('button', { class: 'primary' }, 'See your Overflow Score');
+    const closeModal = modal(passed ? 'Challenge passed' : 'Challenge failed', h('div', { class: 'stack' },
       h('p', {}, c.reason + '.'),
       h('div', { class: 'kv-grid' },
         kv('Balance', money(this.replay.broker.s.balance)),
@@ -529,7 +549,13 @@ export class Workspace implements PaneHost {
       h('p', { class: 'muted' }, passed
         ? 'You can keep replaying this session; the result is saved in analytics.'
         : this.session.rules?.stopOnBreach ? 'Positions were closed and trading is locked for this session. Duplicate it from the Sessions page to try again.' : 'Trading is still allowed (stop-on-breach is off).'),
+      h('div', { class: 'row-btns' }, scoreBtn),
     ));
+    scoreBtn.onclick = () => {
+      closeModal();
+      this.flushSave();
+      this.nav(`#/analytics/${this.session.id}`);
+    };
   }
 
   private afterTrade() {

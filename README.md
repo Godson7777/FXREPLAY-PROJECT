@@ -1,6 +1,6 @@
 # Overflow Trade — Market Replay & Backtesting
 
-**Overflow Trade** adalah platform *market replay* dan *manual backtesting*. Kamu bisa replay chart bar-per-bar dengan data masa depan tersembunyi, trading dengan order engine sungguhan, lalu membedah performa lewat analytics yang dalam.
+**Overflow Trade** adalah platform *market replay* dan *manual backtesting*. Kamu bisa replay chart bar-per-bar dengan data masa depan tersembunyi, trading dengan order engine sungguhan, lalu membedah performa lewat analytics kelas quant. Setiap backtest mendapat **Overflow Score** (0–100) yang menjawab satu pertanyaan: apakah metode ini benar-benar punya *edge*?
 
 Aplikasinya berjalan **100% di browser** (IndexedDB), jadi bisa dipakai tanpa server. Kalau Supabase diaktifkan, tersedia **login dan sinkron cloud** antar perangkat.
 
@@ -38,18 +38,63 @@ Trend line, ray, extended line, horizontal line/ray, vertical line, rectangle, F
 ### Indikator
 SMA, EMA, Bollinger Bands, VWAP harian, Donchian, RSI, MACD, ATR, Stochastic, Volume. Parameternya bisa diubah per pane.
 
-### Analytics (mendalam)
-- KPI: Net P&L, return %, win rate, profit factor, expectancy ($ dan R), max drawdown (%, $, durasi), total R.
-- 30+ statistik: payoff ratio, SQN, Sharpe, Sortino, recovery factor, Kelly %, streak, rata-rata holding (winner vs loser), long vs short, avg MAE/MFE, edge ratio, TP/SL hit rate, best/worst day, % hari profit.
-- Equity curve (closed balance dan equity termasuk floating) serta drawdown *underwater*.
-- Breakdown (P&L / avg R / win rate / jumlah trade) per hari, jam, market session (Asia/London/overlap/NY), symbol, long/short, setup/tag, exit reason, lama holding, order type, bulan, dan rating.
-- **Psikologi:** performa setelah win vs setelah loss (deteksi tilt) dan trade ke-N dalam sehari (deteksi overtrading).
-- Distribusi R-multiple, scatter MAE vs MFE, MFE vs realised R (profit yang tertinggal), holding time vs hasil.
-- Kalender P&L harian dan tabel return bulanan.
-- **Simulasi Monte Carlo:** band persentil equity, peluang profit, median/95% drawdown, dan risk of ruin.
-- **Jurnal:** screenshot chart otomatis setiap trade ditutup, plus tag, catatan, dan rating bintang. Bisa export CSV.
-- **Backup/restore** semua session (termasuk trade, drawing, jurnal, dan screenshot) ke satu file JSON, plus export data market ke CSV. Cocok untuk pindah laptop.
-- Filter: symbol, side, tag, exit reason, rentang tanggal. Tersedia mode gabungan semua session.
+### Overflow Score
+Satu angka 0–100 dari **7 pilar** dengan bobot tetap:
+- Profitabilitas: expectancy dalam R, profit factor, CAGR.
+- Return yang disesuaikan risiko: Sharpe, Sortino, Calmar.
+- Drawdown & tail risk: max DD, Ulcer index, CVaR, peluang DD 30%.
+- Konsistensi: % bulan profit, bulan terburuk vs rata-rata bulanan, R² equity, paruh pertama vs kedua.
+- **Kondisi market:** trending naik/turun, ranging, volatilitas rendah/normal/tinggi.
+- Keyakinan statistik: jumlah trade, p-value, PSR, batas bawah CI 95%, ketergantungan pada trade outlier.
+- Eksekusi: ketahanan terhadap biaya, pemakaian stop loss, konsistensi risiko.
+
+**Hard cap** menahan skor untuk kelemahan fatal:
+- kurang dari 30 trade, atau periode tes di bawah 3 bulan;
+- expectancy ≤ 0 atau drawdown di atas 30%;
+- edge yang hilang tanpa 5% trade terbaik, atau rugi di sebagian besar rezim market;
+- bulan terburuk yang rugi melebihi rata-rata profit sebulan.
+
+Hasilnya:
+- **Grade** dari A+ sampai F, dengan verdict "Worth trading long-term?".
+- **Saran perbaikan** otomatis, misalnya filter rezim, batas rugi bulanan, atau ukuran risiko.
+- Label **All-weather** hanya diberikan kalau skor ≥ 80 dan semua syarat ini terpenuhi:
+  - profit saat ranging *dan* saat trending;
+  - tidak rugi di rezim volatilitas mana pun;
+  - DD ≤ 20%;
+  - signifikan (p < 0.05);
+  - tidak ada bulan yang rugi lebih dari rata-rata bulanan.
+
+Rumus lengkapnya ada di halaman **Methodology**, yang dirender langsung dari `src/analytics/score.ts`.
+
+### Analytics (kelas quant)
+Setiap tool punya panel **"How to read"**: apa yang diukur, cara membaca, seperti apa yang bagus, dan hal yang perlu diwaspadai.
+- **Performance:** KPI, equity curve dan drawdown *underwater*, serta 30+ statistik (payoff, SQN, Kelly, streak, MAE/MFE, edge ratio, dll.).
+- **Risk:** Sharpe/Sortino/Calmar/Martin/Gain-to-pain, VaR & CVaR 95% per trade dan per hari, serta losing streak aktual vs yang diharapkan secara statistik.
+- **Consistency:** aturan bulanan (bulan terburuk vs rata-rata), tabel return bulanan, rolling expectancy, paruh pertama vs kedua, dan kalender P&L.
+- **Market regimes:** setiap trade diberi tag kondisi market chart 4H saat entry (ADX/ATR, tanpa lookahead), ditampilkan sebagai heatmap tren × volatilitas.
+- **Statistical confidence:** t-test, bootstrap CI 95%, Probabilistic & Deflated Sharpe, dan jumlah trade yang masih dibutuhkan.
+- **Robustness:** stress test biaya (+1/+2 unit), titik impas biaya, hasil tanpa 5% trade terbaik, profit capture, dan konsistensi risiko.
+- **Monte Carlo:**
+  - Bootstrap atau shuffle, skip trade, dan biaya tambahan.
+  - Fan chart, histogram max DD, dan tabel risk of ruin.
+  - **Simulasi position sizing** (0.25–3% risiko).
+  - **Simulator prop-firm** (peluang lulus FTMO dkk.).
+- **Breakdown & distribusi:** per hari, jam, market session, symbol, side, tag, exit, holding, bulan, psikologi (setelah win/loss, trade ke-N), R-multiple, dan MAE/MFE.
+- **Jurnal:** screenshot otomatis, tag, catatan, rating, dan export CSV. Filter tersedia untuk symbol, side, tag, exit, dan tanggal.
+
+### Strategy & Leaderboard
+- **Strategy** menggabungkan beberapa session yang memakai aturan sama (symbol dan periode bebas) menjadi satu track record dan satu skor. Setiap trade dihitung sebagai % equity, jadi ukuran akun yang berbeda tetap adil.
+- **Leaderboard** (lokal, di browser ini) meranking strategy berdasarkan Overflow Score. Syaratnya:
+  - di-publish;
+  - **≥ 50 trade dalam ≥ 3 bulan**;
+  - memakai data market asli (data sintetis/demo tidak pernah diranking).
+- Badge: All-weather, Prop-ready, 100+ trades, 1-year record, Significant.
+- Tombol **Detail** membuka analytics lengkap strategy. Strategy yang belum memenuhi syarat tampil dengan alasan dan progresnya.
+
+![Leaderboard](docs/leaderboard.png)
+
+### Backup/restore
+Semua session dan strategy (termasuk trade, drawing, jurnal, dan screenshot) bisa dibackup ke satu file JSON dengan format v2. File v1 lama tetap bisa direstore. Data market bisa diexport ke CSV.
 
 ![Analytics](docs/analytics.png)
 
@@ -68,7 +113,7 @@ Aplikasi bisa dipakai tanpa login (data tersimpan di browser). Kalau mau akun da
 
 Yang tersinkron:
 - **Otomatis:** session, trade, drawing, catatan jurnal, screenshot, dan status challenge. Konflik diselesaikan dengan *last write wins* per session, dan penghapusan ikut tersinkron.
-- **Data market:** tombol **☁** per symbol di tab Data mengunggah file terkompresi (sekitar 10 MB per tahun data 1 menit). Di perangkat lain, data diunduh otomatis saat session membutuhkannya.
+- **Data market:** tombol **Upload** per symbol di tab Data mengunggah file terkompresi (sekitar 10 MB per tahun data 1 menit). Di perangkat lain, data diunduh otomatis saat session membutuhkannya.
 
 > Anon key memang dirancang untuk dipakai di frontend. Keamanannya dijamin oleh Row Level Security di `schema.sql`. Jangan pernah memasukkan `service_role` key ke aplikasi.
 
@@ -77,7 +122,7 @@ Yang tersinkron:
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm test          # unit test engine (timeframe, broker, stats, csv)
+npm test          # unit test engine (timeframe, broker, csv, statistik quant, score, leaderboard)
 npm run build     # hasil static di dist/, bisa di-host di mana saja
 ```
 
@@ -115,10 +160,13 @@ Parser CSV mendeteksi format secara otomatis. Import symbol yang sama berkali-ka
 ```
 src/
   core/        timeframe.ts (parser + agregasi TF apa pun), tz.ts, indicators.ts, types.ts
-  data/        csv.ts, binance.ts, synthetic.ts, store.ts (IndexedDB), sessions.ts, sync.ts (engine sinkron), cloud.ts (Supabase)
+  data/        csv.ts, binance.ts, synthetic.ts, store.ts (IndexedDB), sessions.ts, strategies.ts, sync.ts (engine sinkron), cloud.ts (Supabase)
   engine/      broker.ts (order, fill, SL/TP, MAE/MFE), replay.ts (jam replay multi-symbol), rules.ts (prop firm challenge)
-  analytics/   stats.ts (metrik, breakdown, Monte Carlo)
-  ui/          workspace, chartpane (Lightweight Charts), drawings (canvas overlay), analytics, charts (SVG)
+  analytics/   records.ts (trade ternormalisasi), regime.ts (tag kondisi market 4H), report.ts (semua metrik quant),
+               score.ts (Overflow Score: pilar, gate, grade, saran), montecarlo.ts, service.ts (pipeline + leaderboard),
+               explain.ts (teks "How to read"), math.ts, stats.ts
+  ui/          workspace, chartpane (Lightweight Charts), drawings (canvas overlay), analytics (+ an-score, an-montecarlo,
+               an-widgets), strategies, leaderboard, methodology, layout (header/section/kartu), charts (SVG)
 ```
 
 Chart menggunakan [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0).

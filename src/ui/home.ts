@@ -4,108 +4,131 @@ import { ZONES } from '../core/tz';
 import { parseCsv } from '../data/csv';
 import { downloadBinance } from '../data/binance';
 import { generateSynthetic } from '../data/synthetic';
-import { saveDataset, listDatasets, deleteDataset, loadBars, updateDatasetMeta } from '../data/store';
+import { saveDataset, listDatasets, deleteDataset, loadBars, updateDatasetMeta, getDatasetMeta } from '../data/store';
 import { cloudState, uploadDataset, listCloudDatasets, downloadDataset, deleteCloudDataset } from '../data/cloud';
-import { cloudButton, authModal } from './cloudui';
+import { authModal } from './cloudui';
 import { listSessions, saveSession, deleteSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, type Session } from '../engine/replay';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
-import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, themeButton } from './dom';
+import { listStrategies, mergeStrategies } from '../data/strategies';
+import { reportsFor } from '../analytics/service';
+import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid } from './dom';
+import { pageHead, pageShell, scoreBadge } from './layout';
+import { addToStrategyModal } from './strategies';
 
-export const LOGO = `<svg class="logo-svg" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="otg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e08a68"/><stop offset="1" stop-color="#c15f3c"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#otg)"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#fff" opacity=".75"/><rect x="14" y="12" width="4" height="13" rx="1" fill="#fff" opacity=".88"/><rect x="21" y="7" width="4" height="18" rx="1" fill="#fff"/><path d="M5 12c3-4 6-4 9-1s6 3 9-2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;
+export { LOGO } from './logo';
+export { uid } from './dom';
 
 const fmtDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
 export async function renderHome(root: HTMLElement, nav: (h: string) => void, tab: 'sessions' | 'data') {
   const [sessions, datasets] = await Promise.all([listSessions(), listDatasets()]);
-  root.innerHTML = '';
-  const page = h('div', { class: 'home' });
-  root.append(page);
-  page.append(
-    h('header', { class: 'topbar' },
-      h('a', { class: 'brand', href: '#/' }, h('span', { class: 'logo', html: LOGO }), h('b', {}, 'Overflow Trade'), h('small', {}, 'market replay & backtesting')),
-      h('nav', { class: 'nav' },
-        h('a', { href: '#/', class: tab === 'sessions' ? 'on' : '' }, 'Sessions'),
-        h('a', { href: '#/data', class: tab === 'data' ? 'on' : '' }, `Data (${datasets.length})`),
-        h('a', { href: '#/analytics/all' }, 'Analytics'),
-      ),
-      h('div', { class: 'spacer' }),
-      cloudButton(),
-      themeButton(),
-    ),
-  );
-  const main = h('main', { class: 'home-main' });
-  page.append(main);
+  const { page, main } = pageShell(tab);
+  root.replaceChildren(page);
   if (tab === 'data') return renderData(main, datasets, () => renderHome(root, nav, 'data'));
 
   if (!datasets.length && !sessions.length) {
-    main.append(h('section', { class: 'hero' },
-      h('div', { class: 'eyebrow' }, 'Overflow Trade'),
-      h('h1', {}, 'Replay any market, bar by bar.'),
-      h('p', {}, 'Backtest manually like it\'s live: hidden future, any timeframe you can type (7m, 2H, 3D…), multi-chart sync, a real order engine with SL/TP at 1-minute precision, and analytics deep enough to find your edge.'),
-      h('div', { class: 'hero-actions' },
-        h('button', { class: 'primary lg', onclick: async (e: Event) => { (e.target as HTMLButtonElement).disabled = true; await loadDemo(); renderHome(root, nav, 'sessions'); } }, '⚡ Load demo data (EURUSD · GBPUSD · XAUUSD)'),
-        h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import CSV / download BTC, ETH… from Binance'),
-      ),
-      h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser). For real history, import CSVs from HistData.com, Dukascopy, MT4/MT5 or download crypto from Binance on the Data tab.'),
-    ));
+    const demo = h('button', { class: 'primary lg', onclick: async () => {
+      demo.disabled = true;
+      demo.textContent = 'Generating…';
+      try {
+        await loadDemo();
+        void renderHome(root, nav, 'sessions');
+      } catch (e) {
+        demo.disabled = false;
+        toast(String((e as Error).message ?? e), 'err');
+      }
+    } }, 'Load demo data');
+    main.append(
+      h('section', { class: 'hero' }, h('div', { class: 'wrap' },
+        h('span', { class: 'pill' }, h('i', {}), 'New: Overflow Score for every backtest'),
+        h('h1', { html: 'Replay any market, <em>bar by bar</em>.' }),
+        h('p', {}, 'Backtest manually as if it were live: the future stays hidden, any timeframe you can type (7m, 2H, 3D…), multi-chart sync, a real order engine with SL/TP at 1-minute precision — and a quant-grade report that tells you whether your edge is real.'),
+        h('div', { class: 'hero-actions' }, h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import your data'), demo),
+        h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser) and never ranked. For real history, import CSVs from HistData, Dukascopy or MT4/MT5, or download crypto from Binance on the Data tab.'))),
+      h('section', { class: 'sec alt' }, h('div', { class: 'wrap' },
+        h('div', { class: 'sec-head center' }, h('span', { class: 'eyebrow' }, 'Why Overflow Trade'), h('h2', { html: 'Find out if your edge is <em>real</em>.' })),
+        h('div', { class: 'points' },
+          h('div', { class: 'point' }, h('span', { class: 'n' }, '01'), h('h5', {}, 'Unlimited timeframes'), h('p', {}, 'Any timeframe from one-minute data — 3m, 45m, 6H, 2D — with exact OHLC aggregation and multi-chart sync.')),
+          h('div', { class: 'point' }, h('span', { class: 'n' }, '02'), h('h5', {}, '1-minute execution'), h('p', {}, 'Market, limit and stop orders, SL/TP, trailing and break-even stops, spreads and commissions, filled on 1-minute bars.')),
+          h('div', { class: 'point' }, h('span', { class: 'n' }, '03'), h('h5', {}, 'The Overflow Score'), h('p', {}, 'Sharpe, drawdown, monthly consistency, market regimes, significance, costs and Monte Carlo — summed up in one score and a leaderboard.')),
+        ))),
+    );
     return;
   }
 
-  main.append(h('div', { class: 'section-head' },
-    h('h2', {}, 'Backtesting sessions'),
-    h('div', { class: 'row-btns' },
-      h('button', { class: 'ghost', title: 'Download all sessions, trades, drawings & journal screenshots as one JSON file', onclick: () => exportBackup(sessions) }, '⭳ Backup'),
-      h('button', { class: 'ghost', title: 'Restore sessions from a backup file', onclick: () => importBackup(() => renderHome(root, nav, 'sessions')) }, '⭱ Restore'),
-      h('button', { class: 'primary', onclick: () => (datasets.length ? newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) : nav('#/data')) }, '+ New session'),
-    ),
-  ));
+  const newBtn = h('button', { class: 'primary', onclick: () => (datasets.length ? newSessionModal(datasets, async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) : nav('#/data')) }, '+ New session');
+  main.append(pageHead({
+    eyebrow: 'Sessions', titleHtml: 'Your backtesting <em>sessions</em>.', compact: true,
+    lead: 'Each session replays the market from a start date with the future hidden. Every closed trade feeds its analytics and Overflow Score; group sessions into a strategy to compete on the leaderboard.',
+    actions: [
+      newBtn,
+      h('button', { class: 'ghost', title: 'Download all sessions, strategies, trades, drawings & journal screenshots as one JSON file', onclick: () => exportBackup(sessions) }, 'Backup'),
+      h('button', { class: 'ghost', title: 'Restore sessions and strategies from a backup file', onclick: () => importBackup(() => renderHome(root, nav, 'sessions')) }, 'Restore'),
+    ],
+  }));
+  const body = h('div', { class: 'wrap page-body' });
+  main.append(body);
   if (!sessions.length) {
-    main.append(h('div', { class: 'empty-state' }, h('h3', {}, 'No sessions yet'), h('p', {}, 'Create a session: pick symbols, a start date and your account size. Everything after the start date stays hidden until you replay it.')));
+    body.append(h('div', { class: 'card empty-state' }, h('h3', {}, 'No sessions yet'), h('p', {}, 'Create a session: pick symbols, a start date and your account size. Everything after the start date stays hidden until you replay it.'),
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => newBtn.click() }, 'Create a session'))));
     return;
   }
   const grid = h('div', { class: 'cards' });
+  const badges = new Map<string, HTMLElement>();
   for (const s of sessions) {
     const st = computeStats(s.state.broker.trades, s.balance);
     const bal = s.state.broker.balance;
+    const scoreSlot = h('span', {}, scoreBadge(null, '', 'loading'));
+    badges.set(s.id, scoreSlot);
+    const status = s.state.challenge
+      ? h('span', { class: `badge ${s.state.challenge.status}` }, s.state.challenge.status === 'active' ? `Challenge · ${s.rules?.name ?? 'active'}` : s.state.challenge.status === 'passed' ? 'Challenge passed' : 'Challenge failed')
+      : s.state.finished ? h('span', { class: 'badge' }, 'Finished') : null;
     const card = h('article', { class: 'scard' },
-      h('div', { class: 'scard-head' }, h('h3', {}, s.name),
-        s.state.challenge
-          ? h('span', { class: `badge ${s.state.challenge.status}` }, s.state.challenge.status === 'active' ? `🎯 ${s.rules?.name ?? 'Challenge'}` : s.state.challenge.status.toUpperCase())
-          : s.state.finished ? h('span', { class: 'badge' }, 'Finished') : null),
-      h('div', { class: 'muted small' }, `${s.symbols.join(' · ')} · started ${fmtDate(s.start).slice(0, 10)}`),
+      h('div', { class: 'scard-head' }, h('div', {}, h('h3', {}, s.name), h('div', { class: 'by' }, `${s.symbols.join(' · ')} · started ${fmtDate(s.start).slice(0, 10)}`)), scoreSlot),
+      status ? h('div', { class: 'badges' }, status) : null,
       h('div', { class: 'muted small' }, `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
       h('div', { class: 'scard-stats' },
-        h('div', {}, h('span', {}, 'Balance'), h('b', {}, money(bal))),
+        h('div', {}, h('span', {}, 'Balance'), h('b', { title: money(bal) }, `$${Math.round(bal).toLocaleString('en-US')}`)),
         h('div', {}, h('span', {}, 'Net'), h('b', { class: cls(bal - s.balance) }, pct((bal - s.balance) / s.balance, 2, true))),
         h('div', {}, h('span', {}, 'Trades'), h('b', {}, String(st.trades))),
         h('div', {}, h('span', {}, 'Win rate'), h('b', {}, st.trades ? pct(st.winRate) : '—')),
-        h('div', {}, h('span', {}, 'PF'), h('b', {}, st.trades ? st.profitFactor.toFixed(2) : '—')),
+        h('div', {}, h('span', {}, 'PF'), h('b', {}, st.trades ? (isFinite(st.profitFactor) ? st.profitFactor.toFixed(2) : '∞') : '—')),
       ),
       h('div', { class: 'scard-actions' },
-        h('button', { class: 'primary', onclick: () => nav(`#/replay/${s.id}`) }, '▶ Continue'),
-        h('button', { class: 'ghost', onclick: () => nav(`#/analytics/${s.id}`) }, '📊 Analytics'),
-        h('button', { class: 'ghost', title: 'Duplicate settings into a fresh session', onclick: async () => {
+        h('button', { class: 'primary', onclick: () => nav(`#/replay/${s.id}`) }, 'Continue'),
+        h('button', { class: 'ghost', onclick: () => nav(`#/analytics/${s.id}`) }, 'Analytics'),
+        h('button', { class: 'ghost', title: 'Add this session to a strategy', onclick: () => addToStrategyModal(s, sessions, () => renderHome(root, nav, 'sessions')) }, '+ Strategy'),
+      ),
+      h('div', { class: 'scard-foot' },
+        h('button', { class: 'link', type: 'button', title: 'Duplicate the settings into a fresh session', onclick: async () => {
           const copy = newSession({ ...s, id: uid(), name: s.name + ' (copy)', createdAt: Date.now() });
           await saveSession(copy);
-          renderHome(root, nav, 'sessions');
-        } }, '⧉'),
-        h('button', { class: 'ghost danger', title: 'Delete', onclick: async () => {
+          void renderHome(root, nav, 'sessions');
+        } }, 'Duplicate'),
+        h('button', { class: 'link danger', type: 'button', onclick: async () => {
           if (!confirm(`Delete session "${s.name}" and its ${st.trades} trades?`)) return;
           await deleteSession(s.id);
-          renderHome(root, nav, 'sessions');
-        } }, '🗑'),
+          void renderHome(root, nav, 'sessions');
+        } }, 'Delete'),
       ),
     );
     grid.append(card);
   }
-  main.append(grid);
-}
-
-export function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  body.append(grid);
+  // scores load in the background (regime tagging may need the market data)
+  void reportsFor(sessions.map((s) => [s]), sessions).then((reps) => {
+    reps.forEach((r, i) => {
+      const slot = badges.get(sessions[i].id);
+      if (!slot?.isConnected) return;
+      slot.replaceChildren(r ? scoreBadge(r.score.score, r.score.grade, r.score.tier, r.score.label) : scoreBadge(null, '—', 'insufficient'));
+    });
+  }).catch((e) => {
+    console.error(e);
+    for (const slot of badges.values()) if (slot.isConnected) slot.replaceChildren(scoreBadge(null, '—', 'insufficient'));
+  });
 }
 
 async function loadDemo() {
@@ -126,7 +149,12 @@ async function storeBars(symbol: string, bars: Bars, source: DatasetMeta['source
   const id = symbol.toUpperCase();
   if (merge) {
     const old = await loadBars(id);
-    if (old) bars = mergeBars(old, bars);
+    if (old) {
+      bars = mergeBars(old, bars);
+      // practice data must never pass as real: a merge with synthetic bars stays synthetic
+      const oldMeta = await getDatasetMeta(id);
+      if (oldMeta?.source === 'synthetic') source = 'synthetic';
+    }
   }
   const meta: DatasetMeta = {
     id, symbol: id, source, resolution: detectResolution(bars), from: bars.t[0], to: bars.t[bars.n - 1], count: bars.n,
@@ -222,13 +250,18 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
 
 // ---- data manager ------------------------------------------------------------
 
-function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => void) {
-  main.append(h('div', { class: 'section-head' }, h('h2', {}, 'Market data'),
-    h('div', { class: 'row-btns' },
-      h('button', { class: 'primary', onclick: () => importCsvModal(refresh) }, '⭱ Import CSV'),
-      h('button', { class: 'ghost', onclick: () => binanceModal(refresh) }, '⭳ Binance (crypto)'),
-      h('button', { class: 'ghost', onclick: () => syntheticModal(refresh) }, '✦ Generate synthetic'),
-    )));
+function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => void) {
+  page.append(pageHead({
+    eyebrow: 'Market data', titleHtml: 'Your market <em>data</em>.', compact: true,
+    lead: 'Everything is stored in this browser. One-minute data gives exact fills and lets you replay any timeframe. Only real market data (CSV or Binance) can be ranked on the leaderboard; synthetic data is for practice.',
+    actions: [
+      h('button', { class: 'primary', onclick: () => importCsvModal(refresh) }, 'Import CSV'),
+      h('button', { class: 'ghost', onclick: () => binanceModal(refresh) }, 'Binance (crypto)'),
+      h('button', { class: 'ghost', onclick: () => syntheticModal(refresh) }, 'Generate synthetic'),
+    ],
+  }));
+  const main = h('div', { class: 'wrap page-body' });
+  page.append(main);
   const t = h('table', { class: 'tbl data-tbl' }, h('thead', { html: '<tr><th>Symbol</th><th>Source</th><th>Base TF</th><th>From (UTC)</th><th>To (UTC)</th><th>Bars</th><th>Pip size</th><th>Contract/lot</th><th>Digits</th><th></th></tr>' }));
   const tb = h('tbody');
   for (const d of datasets) {
@@ -242,11 +275,11 @@ function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => v
     };
     pip.onchange = cs.onchange = dg.onchange = upd;
     tb.append(h('tr', {},
-      h('td', {}, h('b', {}, d.symbol)), h('td', {}, d.source), h('td', {}, tfSeconds(d.resolution).label),
+      h('td', {}, h('b', {}, d.symbol)), h('td', {}, h('span', { class: `badge${d.source === 'synthetic' ? '' : ' accent'}`, title: d.source === 'synthetic' ? 'Practice data — scored but never ranked' : 'Real market data' }, d.source)), h('td', {}, tfSeconds(d.resolution).label),
       h('td', {}, fmtDate(d.from)), h('td', {}, fmtDate(d.to)), h('td', {}, d.count.toLocaleString('en-US')),
       h('td', {}, pip), h('td', {}, cs), h('td', {}, dg),
       h('td', { class: 'acts' },
-        h('button', { class: 'mini', title: 'Upload to your cloud so other devices can use it', onclick: async (e: Event) => {
+        h('button', { class: 'mini', title: 'Upload to your cloud so your other devices can use it', onclick: async (e: Event) => {
           if (!cloudState().user) return authModal();
           const b = e.target as HTMLButtonElement;
           b.disabled = true;
@@ -258,9 +291,9 @@ function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => v
           } catch (err) {
             toast((err as Error).message, 'err');
             b.disabled = false;
-            b.textContent = '☁';
+            b.textContent = 'Upload';
           }
-        } }, '☁'),
+        } }, 'Upload'),
         h('button', { class: 'mini', title: 'Download as CSV (UTC)', onclick: () => exportDataset(d) }, 'CSV'), h('button', { class: 'mini danger', onclick: async () => {
         if (!confirm(`Delete ${d.symbol} data? Sessions using it will not open.`)) return;
         await deleteDataset(d.id);
@@ -268,12 +301,12 @@ function renderData(main: HTMLElement, datasets: DatasetMeta[], refresh: () => v
       } }, 'Delete')),
     ));
   }
-  if (!datasets.length) tb.append(h('tr', {}, h('td', { colspan: 10, class: 'empty' }, 'No data yet.')));
+  if (!datasets.length) tb.append(h('tr', {}, h('td', { colspan: 10, class: 'empty' }, 'No data yet — import a CSV, download crypto from Binance or generate synthetic practice data.')));
   t.append(tb);
   main.append(h('div', { class: 'card' }, h('div', { class: 'table-wrap' }, t)));
   if (cloudState().user) main.append(cloudDataCard(datasets, refresh));
   main.append(h('section', { class: 'card help' },
-    h('h3', {}, 'Where to get free historical data'),
+    h('div', { class: 'card-title' }, h('span', {}, 'Where to get free historical data')),
     h('ul', {},
       h('li', { html: '<b>Forex 1-minute (free):</b> histdata.com → “ASCII / 1 Minute Bar Quotes”. Their timestamps are EST without DST → use source offset <code>-5</code>.' }),
       h('li', { html: '<b>Dukascopy:</b> dukascopy.com Historical Data Feed (or the <code>dukascopy-node</code> CLI) → export 1-minute CSV in UTC.' }),
@@ -289,12 +322,21 @@ function importCsvModal(refresh: () => void) {
   const off = h('input', { type: 'number', value: 0, step: 0.5 });
   const merge = h('input', { type: 'checkbox', checked: true });
   const status = h('div', { class: 'muted small' });
+  const warn = h('div', { class: 'callout warn hidden' });
   const go = h('button', { class: 'primary' }, 'Import');
+  const checkWarn = async () => {
+    const symbol = (sym.value || (file.files?.[0]?.name ?? '').replace(/\.[^.]+$/, '').replace(/^DAT_ASCII_|_M1.*$/gi, '').split(/[_\s-]/)[0]).toUpperCase();
+    const m = symbol ? await getDatasetMeta(symbol) : undefined;
+    const show = !!m && m.source === 'synthetic' && merge.checked;
+    warn.classList.toggle('hidden', !show);
+    warn.textContent = show ? `${symbol} already holds synthetic practice data. Merging keeps it marked as synthetic (never ranked). Untick “Merge” to replace it with your real data.` : '';
+  };
+  sym.oninput = file.onchange = merge.onchange = () => void checkWarn();
   const close = modal('Import OHLC CSV', h('div', { class: 'stack' },
     field('CSV file(s)', file, 'MT4/MT5, HistData, Dukascopy, Binance or any time,open,high,low,close[,volume] layout — auto-detected.'),
     h('div', { class: 'row2' }, field('Symbol', sym), field('Timestamps are in UTC offset (hours)', off, 'HistData: -5 · MT4 servers: often 2 or 3')),
     h('label', { class: 'check' }, merge, ' Merge with existing data for this symbol'),
-    status, go,
+    warn, status, go,
   ));
   go.onclick = async () => {
     const files = [...(file.files ?? [])];
@@ -386,9 +428,10 @@ async function exportBackup(sessions: Session[]) {
     const u = await idb.get<string>('shots', t.shot);
     if (u) shots[t.shot] = u;
   }
-  const payload = { app: 'overflowtrade', version: 1, exportedAt: new Date().toISOString(), sessions, shots };
+  const strategies = await listStrategies();
+  const payload = { app: 'overflowtrade', version: 2, exportedAt: new Date().toISOString(), sessions, strategies, shots };
   download(`overflowtrade-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload), 'application/json');
-  toast(`Backed up ${sessions.length} sessions`, 'ok');
+  toast(`Backed up ${sessions.length} session${sessions.length === 1 ? '' : 's'} and ${strategies.length} strateg${strategies.length === 1 ? 'y' : 'ies'}`, 'ok');
 }
 
 function importBackup(done: () => void) {
@@ -397,14 +440,15 @@ function importBackup(done: () => void) {
     const f = input.files?.[0];
     if (!f) return;
     try {
-      const data = JSON.parse(await f.text()) as { app?: string; sessions?: Session[]; shots?: Record<string, string> };
+      const data = JSON.parse(await f.text()) as { app?: string; sessions?: Session[]; strategies?: unknown[]; shots?: Record<string, string> };
       if (!['overflowtrade', 'replaylab'].includes(data.app ?? '') || !Array.isArray(data.sessions)) throw new Error('Not an Overflow Trade backup file');
       for (const [k, v] of Object.entries(data.shots ?? {})) await idb.put('shots', k, v);
       for (const s of data.sessions) await saveSession(s);
+      const nStrat = Array.isArray(data.strategies) ? await mergeStrategies(data.strategies) : 0;
       const missing = [...new Set(data.sessions.flatMap((s) => s.symbols))];
       const have = new Set((await listDatasets()).map((d) => d.id));
       const need = missing.filter((m) => !have.has(m));
-      toast(`Restored ${data.sessions.length} sessions${need.length ? ` — import data for ${need.join(', ')} to open them` : ''}`, need.length ? 'info' : 'ok');
+      toast(`Restored ${data.sessions.length} session${data.sessions.length === 1 ? '' : 's'}${nStrat ? ` and ${nStrat} strateg${nStrat === 1 ? 'y' : 'ies'}` : ''}${need.length ? ` — import data for ${need.join(', ')} to open them` : ''}`, need.length ? 'info' : 'ok');
       done();
     } catch (e) {
       toast(String((e as Error).message ?? e), 'err');
