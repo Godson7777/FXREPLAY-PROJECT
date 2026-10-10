@@ -30,18 +30,27 @@ export function hideTip() {
   if (tip) tip.style.display = 'none';
 }
 
-function niceTicks(lo: number, hi: number, count = 5): number[] {
+export function niceTicks(lo: number, hi: number, count = 5): number[] {
   if (!isFinite(lo) || !isFinite(hi)) return [0];
-  if (lo === hi) {
-    lo -= 1;
-    hi += 1;
+  if (hi < lo) [lo, hi] = [hi, lo];
+  // a range lost in float noise (e.g. a flat equity curve) would make the step smaller than
+  // the spacing between doubles and the loop below would never advance
+  if (hi - lo <= Math.max(Math.abs(lo), Math.abs(hi), 1) * 1e-9) {
+    const pad = Math.max(Math.abs(lo) * 0.01, 1);
+    lo -= pad;
+    hi += pad;
   }
   const span = hi - lo;
   const step0 = span / count;
   const mag = Math.pow(10, Math.floor(Math.log10(step0)));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => span / s <= count) ?? mag * 10;
   const out: number[] = [];
-  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toPrecision(12));
+  const first = Math.ceil(lo / step) * step;
+  for (let i = 0; i <= count * 3; i++) {
+    const v = first + i * step;
+    if (v > hi + step * 1e-9) break;
+    out.push(+v.toPrecision(12));
+  }
   return out;
 }
 

@@ -225,7 +225,9 @@ export class Replay {
 
   /** Jump forward to a UTC time, processing every bar in between (orders stay honest). */
   jumpTo(utc: number) {
-    this.advanceWhile(() => this.nextTime() <= utc);
+    const n = this.advanceWhile(() => this.nextTime() <= utc);
+    // the target fell inside a gap (weekend, closed market): land on the next bar after it
+    if (!n && utc > this.clock && this.hasFuture()) this.stepBase();
     this.emit('jump');
   }
 

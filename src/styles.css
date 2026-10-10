@@ -912,3 +912,44 @@ span.tree-name { font-size: 12px; }
   .side { order: 4; }
 }
 .pane-legend { max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- collapsible drawing tools ---- */
+.tools.collapsed > :not(.tools-toggle) { display: none; }
+.ws .tools-toggle { font-size: 15px; }
+.tools:not(.collapsed) .tools-toggle { color: var(--accent-ink); }
+
+/* floating drawing toolbar stays usable on touch */
+.draw-toolbar { flex-wrap: wrap; max-width: calc(100% - 8px); }
+@media (pointer: coarse) {
+  .draw-toolbar .tb-btn { min-height: 32px; padding: 4px 10px; }
+  .draw-toolbar .sw { width: 22px; height: 22px; min-height: 22px; }
+}
+
+/* new-session symbol list: checkbox | symbol, dates underneath */
+.sym-list .check { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; row-gap: 2px; }
+.sym-list .check input { width: auto; height: auto; margin: 0; flex: none; }
+.sym-list .check small { grid-column: 2; }
+
+/* ---- phone: trade bar + slide-up order sheet ---- */
+.trade-bar, .sheet { display: none; }
+@media (max-width: 767px) {
+  .trade-bar { display: grid; grid-template-columns: 1fr auto auto 1fr; gap: 6px; position: sticky; bottom: 0; z-index: 30; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border); }
+  .ws .trade-bar button { border: 0; border-radius: var(--radius); padding: 8px 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ws .trade-bar .tb-sell, .ws .trade-bar .tb-buy { display: flex; flex-direction: column; align-items: center; color: #fff; line-height: 1.15; }
+  .ws .trade-bar .tb-sell { background: var(--sell); }
+  .ws .trade-bar .tb-buy { background: var(--buy); }
+  .trade-bar small { font-size: 10px; letter-spacing: .08em; opacity: .9; }
+  .ws .trade-bar .tb-play { background: var(--accent); color: var(--on-accent); min-width: 44px; font-size: 15px; }
+  .ws .trade-bar .tb-order { background: var(--surface-2); color: var(--text); border: 1px solid var(--border-input); }
+  .sheet { display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; max-height: 62vh; background: var(--surface); border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; box-shadow: 0 -10px 30px rgba(0, 0, 0, .35); transform: translateY(105%); transition: transform .22s ease; }
+  .sheet.open { transform: none; }
+  .sheet-handle { display: flex; justify-content: center; padding: 8px 0 4px; touch-action: none; cursor: grab; }
+  .sheet-handle i { width: 44px; height: 5px; border-radius: 3px; background: var(--border-strong); }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 6px; }
+  .sheet-body { overflow-y: auto; padding: 0 10px calc(14px + env(safe-area-inset-bottom)); }
+  .sheet-body .card + .card { margin-top: 8px; }
+  .rail { order: 3; }
+}
+@media (max-width: 767px) and (prefers-reduced-motion: reduce) { .sheet { transition: none; } }
+/* toasts clear the phone trade bar */
+@media (max-width: 767px) { body:has(.trade-bar) #toasts { bottom: calc(84px + env(safe-area-inset-bottom)); } }

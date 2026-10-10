@@ -104,9 +104,10 @@ export interface LayerHost {
   /** a drawing was dragged (final = pointer released) */
   onEdit?(d: Drawing, final: boolean): void;
   onSettings?(d: Drawing): void;
+  onPreviewClose?(): void;
 }
 
-type Hit = { d: Drawing; handle: number | -1 } | { line: DragLine };
+type Hit = { d: Drawing; handle: number | -1 } | { line: DragLine } | { close: Drawing };
 
 export class DrawingLayer {
   canvas: HTMLCanvasElement;
@@ -123,7 +124,7 @@ export class DrawingLayer {
     this.host.onSelect?.(d);
   }
   private placing: Drawing | null = null;
-  private drag: { hit: Hit; start: Pt; orig: Pt[]; price?: number; moved: boolean } | null = null;
+  private drag: { hit: Exclude<Hit, { close: Drawing }>; start: Pt; orig: Pt[]; price?: number; moved: boolean } | null = null;
   private raf = 0;
   private toolbar: HTMLDivElement;
   onToolDone: (() => void) | null = null;
@@ -306,6 +307,10 @@ export class DrawingLayer {
     const hit = this.hitTest(x, y);
     if (hit) {
       stop();
+      if ('close' in hit) {
+        this.host.onPreviewClose?.();
+        return;
+      }
       if ('d' in hit) {
         // pointerdown is default-prevented (so the chart doesn't pan), which also kills the
         // browser's dblclick — detect the second press on the same drawing ourselves
@@ -343,7 +348,7 @@ export class DrawingLayer {
     if (!this.drag) {
       if (this.tool === 'cursor' && this.inPane(x, y)) {
         const h = this.hitTest(x, y);
-        this.host.container.style.cursor = h ? ('line' in h ? 'ns-resize' : h.handle >= 0 ? 'grab' : 'move') : '';
+        this.host.container.style.cursor = h ? ('close' in h ? 'pointer' : 'line' in h ? 'ns-resize' : h.handle >= 0 ? 'grab' : 'move') : '';
       }
       return;
     }
@@ -481,6 +486,10 @@ export class DrawingLayer {
   }
 
   private hitTest(x: number, y: number): Hit | null {
+    for (const d of this.host.extraDrawings?.() ?? []) {
+      const c = this.closeChip(d);
+      if (c && Math.hypot(c.x - x, c.y - y) < 12) return { close: d };
+    }
     for (const line of this.host.dragLines()) if (Math.abs(this.y(line.price) - y) < 5) return { line };
     const arr = this.all();
     const sel = this.selected;
@@ -708,6 +717,16 @@ export class DrawingLayer {
     }
   }
 
+  /** ✕ chip position of the order preview box (top-right corner of the box) */
+  private closeChip(d: Drawing): { x: number; y: number } | null {
+    if (!d.preview) return null;
+    const x1 = this.x(d.pts[1].t);
+    const top = Math.min(this.y(d.pts[1].p), this.y(d.pts[2].p));
+    const x = Math.min(this.paneW() - 14, x1 - 12);
+    const y = Math.max(14, top + 12);
+    return { x, y };
+  }
+
   /** TradingView-style long/short position: zones, read-outs and the replay outcome. */
   private drawPosition(d: Drawing, P: { x: number; y: number }[]) {
     const ctx = this.ctx, c = this.colors(), dg = this.host.digits();
@@ -762,6 +781,20 @@ export class DrawingLayer {
       }
       this.label(cx, (tUp ? e.y + 19 : e.y - 5), mid, calc.invalid ? c.down : c.surface, 'center', calc.invalid ? '#fff' : c.text);
     }
+    const chip = this.closeChip(d);
+    if (chip) {
+      ctx.fillStyle = c.surface;
+      ctx.strokeStyle = c.muted;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(chip.x, chip.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = c.text;
+      ctx.lineWidth = 1.6;
+      line(ctx, chip.x - 4, chip.y - 4, chip.x + 4, chip.y + 4);
+      line(ctx, chip.x + 4, chip.y - 4, chip.x - 4, chip.y + 4);
+    }
   }
 
   private renderToolbar() {
@@ -773,10 +806,14 @@ export class DrawingLayer {
     }
     const h = this.handles(d)[0];
     tb.classList.remove('hidden');
-    tb.style.left = Math.max(4, Math.min(this.paneW() - 220, h.x + 12)) + 'px';
-    tb.style.top = Math.max(4, Math.min(this.paneH() - 40, h.y - 44)) + 'px';
+    // keep the whole toolbar (incl. 🗑) inside the pane, whatever its width
+    const place = () => {
+      const w = tb.offsetWidth || 220, ht = tb.offsetHeight || 32;
+      tb.style.left = Math.max(4, Math.min(this.paneW() - w - 4, h.x + 12)) + 'px';
+      tb.style.top = Math.max(4, Math.min(this.paneH() - ht - 4, h.y - ht - 12)) + 'px';
+    };
     const sig = d.id + d.color + d.type + (d.locked ? 'L' : '');
-    if (tb.dataset.sig === sig) return;
+    if (tb.dataset.sig === sig) return place();
     tb.dataset.sig = sig;
     const colors = ['#22c96a', '#5b93d6', '#1a9e93', '#e0605a', '#d4a24c', '#9085e9', '#8a8780'];
     tb.innerHTML =
@@ -788,6 +825,7 @@ export class DrawingLayer {
         : '') +
       `<button class="tb-btn${d.locked ? ' on' : ''}" data-act="lock" title="${d.locked ? 'Unlock' : 'Lock'}">${d.locked ? '🔒' : '🔓'}</button>` +
       `<button class="tb-btn" data-act="del" title="Delete (Del)">🗑</button>`;
+    place();
     tb.onclick = (e) => {
       const b = (e.target as HTMLElement).closest('button');
       if (!b) return;
