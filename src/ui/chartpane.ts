@@ -59,6 +59,8 @@ export interface PaneHost {
   drawingSelected(pane: ChartPane, d: Drawing | null): void;
   drawingEdited(pane: ChartPane, d: Drawing, final: boolean): void;
   drawingSettings(pane: ChartPane, d: Drawing): void;
+  /** ✕ on the order preview box */
+  previewClosed(): void;
   /** crosshair read-out for the data window (null = cursor left the chart) */
   crosshairData(pane: ChartPane, info: CrosshairInfo | null): void;
 }
@@ -196,6 +198,7 @@ export class ChartPane {
       onSelect: (d) => host.drawingSelected(this, d),
       onEdit: (d, final) => host.drawingEdited(this, d, final),
       onSettings: (d) => host.drawingSettings(this, d),
+      onPreviewClose: () => host.previewClosed(),
     });
     this.chart.subscribeCrosshairMove((p) => {
       const t = p.time as number | undefined;

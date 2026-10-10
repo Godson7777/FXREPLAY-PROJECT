@@ -35,6 +35,7 @@ interface Prefs {
   panel: Panel;
   sideCollapsed: boolean;
   preview: boolean;
+  toolsOpen: boolean;
 }
 
 type Panel = 'order' | 'goto' | 'watch' | 'tree' | 'data';
@@ -48,7 +49,7 @@ const PANELS: { id: Panel; icon: string; label: string; title: string }[] = [
 
 const PREF_KEY = 'overflowtrade.prefs';
 function loadPrefs(): Prefs {
-  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false, panel: 'order', sideCollapsed: false, preview: true };
+  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false, panel: 'order', sideCollapsed: false, preview: true, toolsOpen: typeof window === 'undefined' || window.innerWidth >= 768 };
   try {
     return { ...def, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') };
   } catch {
@@ -81,6 +82,17 @@ export class Workspace implements PaneHost {
   private pv: Drawing = { id: 'ticket-preview', type: 'long', pts: [{ t: 0, p: 0 }, { t: 0, p: 0 }, { t: 0, p: 0 }], color: '#1a9e93', preview: true };
   private pvDragging = false;
   private rail!: HTMLDivElement;
+  /** phone layout: trade bar + slide-up order sheet instead of the stacked ticket */
+  private mq = window.matchMedia('(max-width: 767px)');
+  private sheet!: HTMLDivElement;
+  private sheetBody!: HTMLDivElement;
+  private sheetOpen = false;
+  private tradeBar!: HTMLDivElement;
+  private onMq = () => {
+    if (!this.mobile) this.closeSheet(false);
+    this.renderSide();
+    this.panes.forEach((p) => p.redraw());
+  };
   private dataInfo: CrosshairInfo | null = null;
   private magnet = true;
   private stayInTool = false;
@@ -116,7 +128,9 @@ export class Workspace implements PaneHost {
     this.progress = h('div', { class: 'progress-fill' });
     this.center = h('div', { class: 'center' }, this.grid, this.session.live ? this.liveControls() : this.controls(), this.bottom);
     this.rail = this.buildRail();
-    this.root = h('div', { class: `ws${this.session.live ? ' is-live' : ''}` }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail));
+    this.buildSheet();
+    this.root = h('div', { class: `ws${this.session.live ? ' is-live' : ''}` }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail), this.tradeBar, this.sheet);
+    this.mq.addEventListener('change', this.onMq);
     this.initBottomGestures();
     document.addEventListener('keydown', this.onKey);
     window.addEventListener('beforeunload', this.flushSave);
@@ -135,6 +149,7 @@ export class Workspace implements PaneHost {
   }
 
   destroy() {
+    this.mq.removeEventListener('change', this.onMq);
     this.pause();
     this.stopLive();
     this.flushSave();
@@ -167,7 +182,16 @@ export class Workspace implements PaneHost {
   }
 
   private toolbar() {
-    const bar = h('div', { class: 'tools' });
+    const bar = h('div', { class: `tools${this.prefs.toolsOpen ? '' : ' collapsed'}` });
+    const tog = h('button', { class: 'tool tools-toggle', title: 'Show / hide the drawing tools', 'aria-expanded': String(this.prefs.toolsOpen) }, '✎');
+    tog.onclick = () => {
+      this.prefs.toolsOpen = !this.prefs.toolsOpen;
+      bar.classList.toggle('collapsed', !this.prefs.toolsOpen);
+      tog.setAttribute('aria-expanded', String(this.prefs.toolsOpen));
+      if (!this.prefs.toolsOpen) this.setTool('cursor');
+      this.savePrefs();
+    };
+    bar.append(tog);
     for (const t of TOOL_INFO) {
       const b = h('button', { class: 'tool', title: t.title, onclick: () => this.setTool(t.type) }, t.icon);
       this.toolBtns.set(t.type, b);
@@ -718,6 +742,7 @@ export class Workspace implements PaneHost {
     });
     if (!r.ok) return toast(r.error, 'err');
     toast(`${lv.side === 'long' ? 'Buy' : 'Sell'} ${type} ${lots} lots placed from the R:R tool`, 'ok');
+    this.closeSheet(false);
     this.afterTrade();
   }
 
@@ -841,6 +866,7 @@ export class Workspace implements PaneHost {
     if (this.playing) return;
     this.playing = true;
     this.playBtn.textContent = '❚❚';
+    this.renderTradeBar();
     this.playBtn.classList.add('on');
     this.lastFrame = performance.now();
     this.acc = 0;
@@ -893,6 +919,7 @@ export class Workspace implements PaneHost {
     cancelAnimationFrame(this.rafId);
     if (this.playBtn) {
       this.playBtn.textContent = '▶';
+      this.renderTradeBar();
       this.playBtn.classList.remove('on');
     }
   }
@@ -1011,6 +1038,7 @@ export class Workspace implements PaneHost {
     });
     if (!r.ok) return toast(r.error, 'err');
     toast(`${side === 'long' ? 'BUY' : 'SELL'} ${lv.type} ${lv.lots} ${lv.sym}`, 'ok');
+    this.closeSheet(false);
     this.afterTrade();
   }
 
@@ -1048,9 +1076,99 @@ export class Workspace implements PaneHost {
     return rail;
   }
 
+  get mobile() {
+    return this.mq.matches;
+  }
+
+  /** where the order ticket renders: the slide-up sheet on phones, the side panel otherwise */
+  private get orderRoot(): HTMLElement {
+    return this.mobile ? this.sheetBody : this.right;
+  }
+
+  private buildSheet() {
+    this.sheetBody = h('div', { class: 'sheet-body' });
+    const handle = h('div', { class: 'sheet-handle', title: 'Swipe down to close' }, h('i', {}));
+    this.sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Order ticket', 'aria-hidden': 'true' },
+      handle,
+      h('div', { class: 'sheet-head' }, h('b', {}, 'Order'), h('button', { class: 'ghost sm', 'aria-label': 'Close the order sheet', onclick: () => this.closeSheet() }, '✕')),
+      this.sheetBody);
+    // swipe down on the handle closes the sheet
+    let y0: number | null = null;
+    handle.addEventListener('pointerdown', (e) => {
+      y0 = e.clientY;
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (y0 == null) return;
+      this.sheet.style.transform = `translateY(${Math.max(0, e.clientY - y0)}px)`;
+    });
+    const up = (e: PointerEvent) => {
+      if (y0 == null) return;
+      const dy = e.clientY - y0;
+      y0 = null;
+      this.sheet.style.transform = '';
+      if (dy > 60) this.closeSheet();
+    };
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+    const bid = h('b', { 'data-tb': 'bid' }), ask = h('b', { 'data-tb': 'ask' });
+    this.tradeBar = h('div', { class: 'trade-bar' },
+      h('button', { class: 'tb-sell', title: 'Sell at market with the ticket settings', onclick: () => this.submit('short') }, h('small', {}, 'SELL'), bid),
+      this.session.live ? null : h('button', { class: 'tb-play', 'aria-label': 'Play / pause', onclick: () => this.togglePlay() }, '▶'),
+      h('button', { class: 'tb-order', onclick: () => (this.sheetOpen ? this.closeSheet() : this.openSheet()) }, 'Order ▴'),
+      h('button', { class: 'tb-buy', title: 'Buy at market with the ticket settings', onclick: () => this.submit('long') }, h('small', {}, 'BUY'), ask),
+    );
+  }
+
+  private renderTradeBar() {
+    if (!this.tradeBar || !this.active) return;
+    const br = this.replay.broker, sym = this.active.cfg.symbol;
+    const dg = this.session.specs[sym]?.digits ?? 5;
+    const b = this.tradeBar.querySelector('[data-tb=bid]'), a = this.tradeBar.querySelector('[data-tb=ask]');
+    if (b) b.textContent = br.bid(sym).toFixed(dg);
+    if (a) a.textContent = br.ask(sym).toFixed(dg);
+    const play = this.tradeBar.querySelector('.tb-play');
+    if (play) play.textContent = this.playing ? '❚❚' : '▶';
+    const ord = this.tradeBar.querySelector('.tb-order');
+    if (ord) ord.textContent = this.sheetOpen ? 'Order ▾' : 'Order ▴';
+  }
+
+  openSheet() {
+    this.sheetOpen = true;
+    this.sheet.classList.add('open');
+    this.sheet.setAttribute('aria-hidden', 'false');
+    this.renderOrder();
+    this.renderTradeBar();
+    // keep the chart in view above the sheet
+    this.grid.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    this.panes.forEach((p) => p.redraw());
+  }
+
+  closeSheet(redraw = true) {
+    if (!this.sheetOpen) return;
+    this.sheetOpen = false;
+    this.sheet.classList.remove('open');
+    this.sheet.setAttribute('aria-hidden', 'true');
+    this.renderTradeBar();
+    if (redraw) this.panes.forEach((p) => p.redraw());
+  }
+
+  /** ✕ on the chart's order preview box */
+  previewClosed() {
+    this.prefs.preview = false;
+    this.savePrefs();
+    toast('Order preview hidden — turn it back on with “Show on chart” in the order ticket.', 'info');
+    this.panes.forEach((p) => p.redraw());
+    this.renderSide();
+  }
+
   /** Show a side panel; clicking the active one again collapses the side area. */
   openPanel(id: Panel, toggle = false) {
     const pr = this.prefs;
+    if (id === 'order' && this.mobile) {
+      this.sheetOpen ? this.closeSheet() : this.openSheet();
+      return;
+    }
     if (toggle && pr.panel === id && !pr.sideCollapsed) pr.sideCollapsed = true;
     else {
       pr.panel = id;
@@ -1065,17 +1183,20 @@ export class Workspace implements PaneHost {
     if (!this.active) return;
     const pr = this.prefs;
     this.rail?.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => {
-      const on = b.dataset.panel === pr.panel && !pr.sideCollapsed;
+      const on = this.mobile && b.dataset.panel === 'order' ? this.sheetOpen : b.dataset.panel === pr.panel && !pr.sideCollapsed && !(this.mobile && pr.panel === 'order');
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
     });
-    this.right.classList.toggle('hidden', pr.sideCollapsed);
-    if (pr.sideCollapsed) return;
+    this.renderTradeBar();
+    const mobileOrder = this.mobile && (pr.panel === 'order' || pr.sideCollapsed);
+    this.right.classList.toggle('hidden', pr.sideCollapsed || mobileOrder);
+    if (this.mobile && this.sheetOpen) this.renderOrder();
+    if (pr.sideCollapsed || mobileOrder) return;
     if (pr.panel === 'goto') return this.renderGoto();
     if (pr.panel === 'watch') return this.renderWatch();
     if (pr.panel === 'tree') return this.renderTree();
     if (pr.panel === 'data') return this.renderData();
-    this.renderOrder();
+    if (!this.mobile) this.renderOrder();
   }
 
   private panelHead(title: string, sub?: string) {
@@ -1278,7 +1399,8 @@ export class Workspace implements PaneHost {
 
   previewDrawings(pane: ChartPane): Drawing[] {
     const pr = this.prefs;
-    if (pane !== this.active || !pr.preview || pr.sideCollapsed || pr.panel !== 'order' || this.ticket.link) return [];
+    const ticketShown = this.mobile ? this.sheetOpen : !pr.sideCollapsed && pr.panel === 'order';
+    if (pane !== this.active || !pr.preview || !ticketShown || this.ticket.link) return [];
     if (!this.pvDragging && !this.fillPreview()) return [];
     return [this.pv];
   }
@@ -1329,7 +1451,7 @@ export class Workspace implements PaneHost {
     const sym = pane.cfg.symbol;
     // the chart swallows pointerdown, so a ticket input could keep focus and show a stale value
     const fe = document.activeElement as HTMLElement | null;
-    if (fe && this.right.contains(fe)) fe.blur();
+    if (fe && this.orderRoot.contains(fe)) fe.blur();
     if (d === this.pv) {
       this.pvDragging = !final;
       this.ticketFromLevels(posLevels(d), sym);
@@ -1374,13 +1496,13 @@ export class Workspace implements PaneHost {
   /** Update ticket inputs in place while a box is dragged (no rebuild, keeps focus). */
   private refreshTicketInputs() {
     const set = (id: string, v: number | string) => {
-      const el = this.right.querySelector<HTMLInputElement>(`#${id}`);
+      const el = this.orderRoot.querySelector<HTMLInputElement>(`#${id}`);
       if (el && document.activeElement !== el) el.value = String(v);
     };
     set('tSl', this.prefs.slPips);
     set('tTp', this.prefs.tpVal);
     if (this.ticket.type !== 'market') set('tPrice', this.ticket.price);
-    this.right.querySelectorAll<HTMLButtonElement>('[data-otype]').forEach((b) => b.classList.toggle('on', b.dataset.otype === this.ticket.type));
+    this.orderRoot.querySelectorAll<HTMLButtonElement>('[data-otype]').forEach((b) => b.classList.toggle('on', b.dataset.otype === this.ticket.type));
     this.renderTicketCalc();
   }
 
@@ -1456,10 +1578,10 @@ export class Workspace implements PaneHost {
     const trades = br.s.trades;
     const wr = trades.length ? trades.filter((t) => t.pnl > 0).length / trades.length : 0;
     const focused = document.activeElement as HTMLElement | null;
-    const focusId = focused && this.right.contains(focused) ? focused.id : '';
+    const focusId = focused && this.orderRoot.contains(focused) ? focused.id : '';
     if (focusId) {
       // don't rebuild the ticket while the user is typing; refresh numbers only
-      this.right.querySelectorAll<HTMLElement>('[data-live]').forEach((el) => {
+      this.orderRoot.querySelectorAll<HTMLElement>('[data-live]').forEach((el) => {
         const k = el.dataset.live!;
         if (k === 'bid') el.textContent = bid.toFixed(dg);
         if (k === 'ask') el.textContent = ask.toFixed(dg);
@@ -1520,8 +1642,8 @@ export class Workspace implements PaneHost {
       h('button', { class: 'chip', title: 'Any timeframe…', onclick: () => this.tfPrompt(this.active, '') }, '+'),
     );
 
-    this.right.innerHTML = '';
-    this.right.append(
+    this.orderRoot.innerHTML = '';
+    this.orderRoot.append(
       h('section', { class: 'card' },
         h('div', { class: 'card-title' }, h('span', {}, `${sym}`), h('small', { class: 'muted' }, `Active chart · ${this.active.cfg.tf}`)),
         favs,
@@ -1595,7 +1717,7 @@ export class Workspace implements PaneHost {
   }
 
   private renderTicketCalc() {
-    const el = this.right.querySelector('#calc');
+    const el = this.orderRoot.querySelector('#calc');
     if (!el) return;
     const br = this.replay.broker;
     const L = this.ticketLevels('long'), S = this.ticketLevels('short');
