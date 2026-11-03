@@ -47,6 +47,8 @@ export interface TradeRecord {
   vol: Vol | null;
   /** null = the market data for this symbol is not on this device */
   synthetic: boolean | null;
+  /** came from an imported trade list (CSV), not a replay on this site */
+  imported?: boolean;
 }
 
 /** Size of one friction unit in pips: 1 pip, or 0.01 % of price when that is bigger. */
@@ -108,7 +110,9 @@ function toRecord(s: Session, t: Trade, before: number, metas: Map<string, Datas
     frictionR: t.risk ? frictionUsd / t.risk : null,
     trend: t.regime?.trend ?? null,
     vol: t.regime?.vol ?? null,
-    synthetic: meta ? meta.source === 'synthetic' : null,
+    // an imported trade list carries its own prices; it is never practice data
+    synthetic: s.imported ? false : meta ? meta.source === 'synthetic' : null,
+    imported: !!s.imported,
   };
 }
 
@@ -140,6 +144,8 @@ export async function ensureRegimes(
     if (!bars || bars.n < 2) continue; // data missing on this device: try again later
     const rs = series(sym, bars);
     for (const { s, t } of items) {
+      // trades outside the stored history stay untagged (imported lists can predate the data)
+      if (t.entryTime < bars.t[0] || t.entryTime > bars.t[bars.n - 1] + 86400) continue;
       t.regime = tagAt(rs, bars, t.entryTime);
       changed.add(s);
     }

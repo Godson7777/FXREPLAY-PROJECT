@@ -2,12 +2,13 @@ import type { Report } from '../analytics/report';
 import { PILLARS } from '../analytics/score';
 import { badges } from '../analytics/service';
 import { h } from './dom';
+import type { Session } from '../engine/replay';
 import { howButton } from './layout';
 
 const pillarColor = (p: number) => (p >= 70 ? 'var(--band-good)' : p >= 50 ? 'var(--band-warn)' : 'var(--band-bad)');
 
 /** The Overflow Score block: number, grade, verdict, pillars, strengths, fixes and flags. */
-export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number; extraBox?: HTMLElement | null } = {}) {
+export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number; extraBox?: HTMLElement | null; sessions?: Session[] } = {}) {
   const sc = r.score;
   const left = h('div', { class: 'score-main' });
   const num = h('div', { class: 'score-num', 'aria-label': sc.score == null ? 'No score yet' : `Overflow Score ${sc.score} out of 100` });
@@ -19,7 +20,7 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
     h('p', { class: 'verdict' }, sc.verdict),
     h('div', { class: 'worth' }, h('span', {}, 'Worth trading long-term?'), h('b', {}, sc.worthIt)),
   );
-  const bs = badges(r);
+  const bs = badges(r, o.sessions);
   if (bs.length) left.append(h('div', { class: 'badges' }, ...bs.map((b) => h('span', { class: `badge${b.id === 'allweather' ? ' accent' : ''}`, title: b.title }, b.label))));
   const howMount = h('div', {});
   left.append(

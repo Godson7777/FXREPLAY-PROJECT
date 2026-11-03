@@ -140,7 +140,7 @@ export class AnalyticsView {
       out.push(h('div', { class: 'wrap' }, h('div', { class: 'empty-state' },
         h('h2', {}, this.base ? 'No trades match these filters' : 'No closed trades yet'),
         h('p', {}, this.base ? 'Clear a filter to see results.' : 'Open the session, replay the market and take some trades — every closed trade feeds these analytics and the Overflow Score.'),
-        this.scope.kind === 'session' && !this.base ? h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => this.nav(`#/replay/${this.scopeSessions[0].id}`) }, 'Open the replay')) : null)));
+        this.scope.kind === 'session' && !this.base && !this.scopeSessions[0]?.imported ? h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => this.nav(`#/replay/${this.scopeSessions[0].id}`) }, 'Open the replay')) : null)));
     } else {
       out.push(
         this.scoreSection(r), this.performanceSection(r), this.riskSection(r), this.consistencySection(r), this.regimeSection(r),
@@ -191,11 +191,13 @@ export class AnalyticsView {
       const s = this.scopeSessions[0];
       if (!s) return pageHead({ eyebrow: 'Session analytics', title: 'Session not found', compact: true });
       return pageHead({
-        eyebrow: 'Session analytics', title: s.name, compact: true,
-        lead: `${s.symbols.join(' · ')} · started ${dateOnly(s.start)} · $${Math.round(s.balance).toLocaleString('en-US')} account · ${nTrades} closed trade${nTrades === 1 ? '' : 's'}`,
+        eyebrow: s.imported ? `Imported trades · ${s.imported.source === 'fxreplay' ? 'FX Replay' : 'CSV'}` : 'Session analytics', title: s.name, compact: true,
+        lead: s.imported
+          ? `${s.symbols.join(' · ')} · ${dateOnly(s.start)} → ${dateOnly(s.end ?? s.start)} · $${Math.round(s.balance).toLocaleString('en-US')} starting balance · ${nTrades} closed trade${nTrades === 1 ? '' : 's'} from ${s.imported.file}`
+          : `${s.symbols.join(' · ')} · started ${dateOnly(s.start)} · $${Math.round(s.balance).toLocaleString('en-US')} account · ${nTrades} closed trade${nTrades === 1 ? '' : 's'}`,
         extra: toolbar,
         actions: [
-          h('button', { class: 'primary', onclick: () => this.nav(`#/replay/${s.id}`) }, 'Continue replay'),
+          s.imported ? null : h('button', { class: 'primary', onclick: () => this.nav(`#/replay/${s.id}`) }, 'Continue replay'),
           h('button', { class: 'ghost', onclick: () => addToStrategyModal(s, this.all, () => this.nav(location.hash)) }, 'Add to strategy'),
           this.exportBtn(),
         ],
@@ -320,7 +322,7 @@ export class AnalyticsView {
         h('div', { class: 'row-btns', style: 'margin-top:1rem' }, h('button', { class: 'link', type: 'button', onclick: () => addToStrategyModal(s, this.all, () => this.nav(location.hash)) }, 'Add this session to a strategy →')));
     }
     return section({ id: 'score', eyebrow: 'Overflow Score', titleHtml: 'Does this method have a <em>real</em> edge?', tone: 'band' },
-      scoreHero(r, { filtered: this.filtered, combined: this.scopeSessions.length, extraBox: extra }));
+      scoreHero(r, { filtered: this.filtered, combined: this.scopeSessions.length, extraBox: extra, sessions: this.scopeSessions }));
   }
 
   private performanceSection(r: Report) {
@@ -479,6 +481,10 @@ export class AnalyticsView {
     const out: (HTMLElement | null)[] = [];
     const cov = regimeCoverage(r);
     if (cov) out.push(h('div', { class: 'callout warn', style: 'margin-bottom:1rem' }, cov));
+    if (!rg.taggedPct) {
+      return section({ id: 'regimes', eyebrow: 'Market regimes', titleHtml: 'Trending, ranging, calm or <em>wild</em>?', tone: 'alt',
+        lead: 'Every trade is tagged with the market state at entry on the 4-hour chart. No trade could be tagged yet, so this pillar is left out of the score.' }, ...out);
+    }
     out.push(
       h('div', { class: 'grid2' },
         infoCard('By trend (4-hour, at entry)', 'regimeTrend', bars(rg.trend), summary(rg.trend)),
@@ -847,10 +853,13 @@ export class AnalyticsView {
 export function regimeCoverage(r: Report): string | null {
   const untagged = r.trades.filter((t) => t.trend == null || t.vol == null);
   if (!untagged.length) return null;
-  const missing = untagged.filter((t) => t.synthetic === null);
+  const imported = untagged.filter((t) => t.imported);
+  const missing = untagged.filter((t) => !t.imported && t.synthetic === null);
   const missingSyms = [...new Set(missing.map((t) => t.symbol))];
-  const early = untagged.length - missing.length;
+  const impSyms = [...new Set(imported.map((t) => t.symbol))];
+  const early = untagged.length - missing.length - imported.length;
   const parts: string[] = [];
+  if (imported.length) parts.push(`${imported.length} are imported trades with no real ${impSyms.join(', ')} price history for their dates on this device — download or import that data on the Data tab (demo data is never used) and the regimes fill in automatically`);
   if (missing.length) parts.push(`${missing.length} use ${missingSyms.join(', ')}, whose market data is not on this device (import it on the Data tab)`);
   if (early) parts.push(`${early} entered before enough price history was available (about two weeks of 4-hour bars)`);
   return `Market regime known for ${r.n - untagged.length} of ${r.n} trades: ${parts.join('; ')}.`;

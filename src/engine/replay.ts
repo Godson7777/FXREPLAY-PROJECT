@@ -40,6 +40,8 @@ export interface SessionConfig {
   feePct?: number;
   /** forward-test on a live market feed instead of replaying history */
   live?: { venue: 'hyperliquid'; coin: string } | null;
+  /** trades imported from a CSV (FX Replay export, broker statement): analytics only, no replay */
+  imported?: { source: 'fxreplay' | 'csv'; file: string; rows: number } | null;
 }
 
 export interface SessionState {

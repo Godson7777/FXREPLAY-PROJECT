@@ -29,7 +29,14 @@ function seriesFor(symbol: string, b: Bars): RegimeSeries {
 
 /** Tags trades with their market regime and saves the tags (derived data only). */
 export async function prepareSessions(sessions: Session[]): Promise<void> {
-  const changed = await ensureRegimes(sessions, (sym) => loadBars(sym), seriesFor);
+  const plain = sessions.filter((s) => !s.imported), imported = sessions.filter((s) => s.imported);
+  const changed = await ensureRegimes(plain, (sym) => loadBars(sym), seriesFor);
+  if (imported.length) {
+    // imported trades are only tagged from real market data, never from demo/synthetic bars
+    const metas = await datasetMetas();
+    const real = (sym: string) => (metas.get(sym)?.source ?? 'synthetic') !== 'synthetic';
+    changed.push(...(await ensureRegimes(imported, (sym) => (real(sym) ? loadBars(sym) : Promise.resolve(null)), seriesFor)));
+  }
   for (const s of changed) {
     const tags = new Map<number, RegimeTag | null>();
     for (const t of s.state.broker.trades) if (t.regime !== undefined) tags.set(t.id, t.regime);
@@ -154,8 +161,9 @@ export interface Badge {
   title: string;
 }
 
-export function badges(r: Report): Badge[] {
+export function badges(r: Report, sessions: Session[] = []): Badge[] {
   const out: Badge[] = [];
+  if (sessions.some((s) => s.imported)) out.push({ id: 'imported', label: 'Imported', title: 'Includes trades imported from a CSV file (e.g. an FX Replay export) — they were not replayed on this site, so they cannot be verified' });
   if (r.score.allWeather) out.push({ id: 'allweather', label: 'All-weather', title: 'Profitable in trending and ranging markets and in every tested volatility regime' });
   if ((r.propPass ?? 0) >= 0.5) out.push({ id: 'prop', label: 'Prop-ready', title: `${Math.round((r.propPass ?? 0) * 100)}% simulated chance to pass a 10%-target / 5%-daily / 10%-max-loss evaluation at 1% risk` });
   if (r.n >= 100) out.push({ id: 'n100', label: '100+ trades', title: `${r.n} closed trades` });

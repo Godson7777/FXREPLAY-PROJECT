@@ -398,7 +398,8 @@ export function suggestions(r: R, pillars: PillarScore[]): string[] {
     if (g.key === 'low') add(65, `It struggles in quiet markets (${sg(g.exp ?? 0)} ${u} per trade). Targets may be too far for low volatility — consider skipping trades when the 4-hour ATR is in the bottom third.`);
     if (g.key === 'normal' && sig.mean > 0) add(60, `It loses in normal volatility (${sg(g.exp ?? 0)} ${u} per trade), so the profit relies on unusual conditions. Check whether the edge is really repeatable.`);
   }
-  if (r.regimes.testedTrend < 2 && r.n >= 20) add(62, `So far the trades cover only ${r.regimes.testedTrend} trend regime${r.regimes.testedTrend === 1 ? '' : 's'}. Test periods with different market conditions before trusting the score.`);
+  if (r.regimes.taggedPct < 0.5 && r.n >= 20) add(62, `Market regimes are unknown for ${Math.round((1 - r.regimes.taggedPct) * 100)}% of trades — add real price history for these symbols on the Data tab so the score can check trending, ranging, calm and volatile markets.`);
+  else if (r.regimes.testedTrend < 2 && r.n >= 20) add(62, `So far the trades cover only ${r.regimes.testedTrend} trend regime${r.regimes.testedTrend === 1 ? '' : 's'}. Test periods with different market conditions before trusting the score.`);
   const c = r.consistency;
   if (c.monthsCount >= 3 && (c.avgMonth ?? 0) > 0 && (c.worstMonth ?? 0) < 0 && (c.worstVsAvg ?? 0) > 1)
     add(72, `Your worst month lost ${pc(c.worstMonth ?? 0)}, more than an average month makes (${pc(c.avgMonth ?? 0, 2)}). A monthly loss limit — for example, stop for the month at ${pc(-(Math.max(0, c.avgMonth ?? 0)), 1)} — keeps one bad month from erasing several good ones.`);
