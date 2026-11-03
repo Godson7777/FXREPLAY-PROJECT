@@ -13,6 +13,7 @@ import { computeStats } from '../analytics/stats';
 import { newSession, dataWindow, checkRange, type Session } from '../engine/replay';
 import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
 import { barsFromRows } from '../core/types';
+import { parseTradeCsv, importedSession, type TradeImport } from '../data/tradeimport';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
 import { listStrategies, mergeStrategies } from '../data/strategies';
@@ -49,7 +50,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
         h('span', { class: 'pill' }, h('i', {}), 'New: Overflow Score for every backtest'),
         h('h1', { html: 'Replay any market, <em>bar by bar</em>.' }),
         h('p', {}, 'Backtest manually as if it were live: the future stays hidden, any timeframe you can type (7m, 2H, 3D…), multi-chart sync, a real order engine with SL/TP at 1-minute precision — and a quant-grade report that tells you whether your edge is real.'),
-        h('div', { class: 'hero-actions' }, h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import your data'), h('button', { class: 'ghost lg', title: 'Forward-test on the live Hyperliquid market', onclick: () => liveSessionModal(async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '● Live market'), demo),
+        h('div', { class: 'hero-actions' }, h('button', { class: 'ghost lg', title: 'Analyse a trade history CSV (FX Replay export, broker statement)', onclick: () => importTradesModal(nav) }, 'Import trades (CSV)'), h('button', { class: 'ghost lg', onclick: () => nav('#/data') }, 'Import your data'), h('button', { class: 'ghost lg', title: 'Forward-test on the live Hyperliquid market', onclick: () => liveSessionModal(async (s) => { await saveSession(s); nav(`#/replay/${s.id}`); }) }, '● Live market'), demo),
         h('p', { class: 'muted small' }, 'Demo data is synthetic (realistic-looking, generated in your browser) and never ranked. For real history, import CSVs from HistData, Dukascopy or MT4/MT5, or connect Binance, Bybit, OKX, Hyperliquid or Twelve Data (forex & gold) on the Data tab. Live market paper-trades Hyperliquid perps in real time.'))),
       h('section', { class: 'sec alt' }, h('div', { class: 'wrap' },
         h('div', { class: 'sec-head center' }, h('span', { class: 'eyebrow' }, 'Why Overflow Trade'), h('h2', { html: 'Find out if your edge is <em>real</em>.' })),
@@ -71,6 +72,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
     actions: [
       newBtn,
       liveBtn,
+      h('button', { class: 'ghost', title: 'Analyse a trade history CSV (FX Replay export, broker statement)', onclick: () => importTradesModal(nav) }, 'Import trades'),
       h('button', { class: 'ghost', title: 'Download all sessions, strategies, trades, drawings & journal screenshots as one JSON file', onclick: () => exportBackup(sessions) }, 'Backup'),
       h('button', { class: 'ghost', title: 'Restore sessions and strategies from a backup file', onclick: () => importBackup(() => renderHome(root, nav, 'sessions')) }, 'Restore'),
     ],
@@ -91,11 +93,12 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
     badges.set(s.id, scoreSlot);
     const status = s.state.challenge
       ? h('span', { class: `badge ${s.state.challenge.status}` }, s.state.challenge.status === 'active' ? `Challenge · ${s.rules?.name ?? 'active'}` : s.state.challenge.status === 'passed' ? 'Challenge passed' : 'Challenge failed')
+      : s.imported ? h('span', { class: 'badge accent', title: `Imported from ${s.imported.file}` }, `Imported · ${s.imported.source === 'fxreplay' ? 'FX Replay' : 'CSV'}`)
       : s.state.finished ? h('span', { class: 'badge' }, 'Finished') : null;
     const card = h('article', { class: 'scard' },
       h('div', { class: 'scard-head' }, h('div', {}, h('h3', {}, s.name, s.live ? h('span', { class: 'live-badge live', style: 'margin-left:.5rem;vertical-align:middle' }, '● LIVE') : null), h('div', { class: 'by' }, `${s.symbols.join(' · ')} · ${s.live ? 'live since' : 'started'} ${fmtDate(s.start).slice(0, 10)}${s.leverage ? ` · ${s.leverage}×` : ''}`)), scoreSlot),
       status ? h('div', { class: 'badges' }, status) : null,
-      h('div', { class: 'muted small' }, `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
+      h('div', { class: 'muted small' }, s.imported ? `${fmtDate(s.start).slice(0, 10)} → ${fmtDate(s.end ?? s.start).slice(0, 10)} · ${s.imported.file}` : `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
       h('div', { class: 'scard-stats' },
         h('div', {}, h('span', {}, 'Balance'), h('b', { title: money(bal) }, `$${Math.round(bal).toLocaleString('en-US')}`)),
         h('div', {}, h('span', {}, 'Net'), h('b', { class: cls(bal - s.balance) }, pct((bal - s.balance) / s.balance, 2, true))),
@@ -104,12 +107,12 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
         h('div', {}, h('span', {}, 'PF'), h('b', {}, st.trades ? (isFinite(st.profitFactor) ? st.profitFactor.toFixed(2) : '∞') : '—')),
       ),
       h('div', { class: 'scard-actions' },
-        h('button', { class: 'primary', onclick: () => nav(`#/replay/${s.id}`) }, 'Continue'),
-        h('button', { class: 'ghost', onclick: () => nav(`#/analytics/${s.id}`) }, 'Analytics'),
+        s.imported ? null : h('button', { class: 'primary', onclick: () => nav(`#/replay/${s.id}`) }, 'Continue'),
+        h('button', { class: s.imported ? 'primary' : 'ghost', onclick: () => nav(`#/analytics/${s.id}`) }, 'Analytics'),
         h('button', { class: 'ghost', title: 'Add this session to a strategy', onclick: () => addToStrategyModal(s, sessions, () => renderHome(root, nav, 'sessions')) }, '+ Strategy'),
       ),
       h('div', { class: 'scard-foot' },
-        h('button', { class: 'link', type: 'button', title: 'Duplicate the settings into a fresh session', onclick: async () => {
+        s.imported ? null : h('button', { class: 'link', type: 'button', title: 'Duplicate the settings into a fresh session', onclick: async () => {
           const copy = newSession({ ...s, id: uid(), name: s.name + ' (copy)', createdAt: Date.now() });
           await saveSession(copy);
           void renderHome(root, nav, 'sessions');
@@ -274,6 +277,75 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     }
     close();
     done(s);
+  };
+}
+
+// ---- import a trade history ----------------------------------------------------
+
+function importTradesModal(nav: (h: string) => void) {
+  const file = h('input', { type: 'file', accept: '.csv,.txt,.tsv' }) as HTMLInputElement;
+  const name = h('input', { placeholder: 'Defaults to the file name' }) as HTMLInputElement;
+  const bal = h('input', { type: 'number', min: 1, step: 100, value: 10000 }) as HTMLInputElement;
+  const off = h('input', { type: 'number', step: 0.5, value: 0 }) as HTMLInputElement;
+  const tz = h('select', {}, ...ZONES.map((z) => h('option', { value: z, selected: z === 'Asia/Jakarta' }, z))) as HTMLSelectElement;
+  const preview = h('div', { class: 'stack' }, h('p', { class: 'muted small' }, 'Pick a CSV to see a preview.'));
+  const go = h('button', { class: 'primary', disabled: true }, 'Import & analyse') as HTMLButtonElement;
+  let text = '', parsed: TradeImport | null = null, balTouched = false;
+  bal.oninput = () => (balTouched = true);
+  const read = () => {
+    if (!text) return;
+    try {
+      parsed = parseTradeCsv(text, { utcOffsetHours: +off.value || 0 });
+    } catch (e) {
+      parsed = null;
+      go.disabled = true;
+      preview.replaceChildren(h('div', { class: 'callout bad' }, String((e as Error).message ?? e)));
+      return;
+    }
+    const p = parsed;
+    if (p.initialBalance && !balTouched) bal.value = String(p.initialBalance);
+    const n = p.trades.length, wins = p.trades.filter((t) => t.pnl > 0).length;
+    const net = p.trades.reduce((a, t) => a + t.pnl, 0);
+    const kv = (k: string, v: string, c = '') => h('div', { class: 'kv' }, h('span', {}, k), h('b', { class: c }, v));
+    preview.replaceChildren(
+      h('div', { class: 'callout' }, h('b', {}, p.format === 'fxreplay' ? 'FX Replay export detected' : 'Trade list detected'),
+        ` — ${n} closed trade${n === 1 ? '' : 's'} read from ${p.rows} row${p.rows === 1 ? '' : 's'}.`),
+      h('div', { class: 'kv-grid' },
+        kv('Symbols', p.symbols.join(', ')),
+        kv('Period', `${fmtDate(p.from).slice(0, 10)} → ${fmtDate(p.to).slice(0, 10)}`),
+        kv('Win rate', pct(wins / n)),
+        kv('Net P&L', money(net, true), cls(net)),
+        kv('With stop loss', `${p.trades.filter((t) => t.risk != null).length} of ${n}`)),
+      p.warnings.length ? h('details', { class: 'small' }, h('summary', {}, `${p.warnings.length} row${p.warnings.length === 1 ? '' : 's'} skipped`), h('ul', {}, ...p.warnings.slice(0, 50).map((w) => h('li', {}, w)))) : '',
+    );
+    go.disabled = false;
+  };
+  file.onchange = async () => {
+    const f = file.files?.[0];
+    if (!f) return;
+    text = await f.text();
+    if (!name.value) name.value = f.name.replace(/\.[^.]+$/, '');
+    read();
+  };
+  off.oninput = read;
+  const close = modal('Import trades', h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, 'Bring in closed trades from FX Replay (Analytics → export CSV) or any CSV with open/close time, symbol, side, entry and exit price, size and profit. You get the full report, Monte Carlo and the Overflow Score. Imported trades show an “Imported” badge on the leaderboard.'),
+    field('Trade history CSV', file),
+    preview,
+    h('div', { class: 'row2' }, field('Session name', name), field('Starting balance ($)', bal, 'Read from the file when it has it')),
+    h('div', { class: 'row2' }, field('Timestamps are in UTC offset (hours)', off, 'FX Replay exports your chart time — e.g. 7 for Jakarta, 0 for UTC'), field('Show times in', tz)),
+    go,
+  ), { wide: true });
+  go.onclick = async () => {
+    if (!parsed) return;
+    const b = +bal.value;
+    if (!(b > 0)) return toast('Enter the starting balance', 'err');
+    go.disabled = true;
+    const s = importedSession(parsed, { id: uid(), name: name.value.trim() || 'Imported trades', balance: b, file: file.files?.[0]?.name ?? 'trades.csv', timezone: tz.value });
+    await saveSession(s);
+    toast(`${parsed.trades.length} trades imported — crunching the numbers…`, 'ok');
+    close();
+    nav(`#/analytics/${s.id}`);
   };
 }
 
@@ -743,6 +815,7 @@ function importGuide(refresh: () => void) {
       step('03', 'Check & replay', h('p', { html: 'The table shows each symbol with its first and last bar. Create a session with a start date inside that range — the New session form shows the exact window.' })),
     ),
     h('p', { class: 'muted small', html: 'Accepted columns (auto-detected, header optional): <code>time,open,high,low,close[,volume]</code> · <code>2024.01.02,00:00,o,h,l,c,v</code> (MT4/MT5) · <code>20240102 170000;o;h;l;c;v</code> (HistData) · <code>02.01.2024 00:00:00.000,o,h,l,c,v</code> (Dukascopy) · Unix seconds/ms timestamps (Binance).' }),
+    h('p', { class: 'muted small' }, 'Have a list of closed trades instead (e.g. an FX Replay export)? Use “Import trades” on the Sessions page to get the score and Monte Carlo straight away.'),
     h('div', { class: 'row-btns' },
       h('button', { class: 'ghost', onclick: sample }, 'Download sample CSV'),
       h('button', { class: 'primary', onclick: () => importCsvModal(refresh) }, 'Import CSV')),

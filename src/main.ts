@@ -51,6 +51,8 @@ async function route() {
       const s = await getSession(id);
       if (stale()) return;
       if (!s) return nav('#/');
+      // imported trade lists have no chart to replay
+      if (s.imported) return nav(`#/analytics/${s.id}`);
       app.append(h('div', { class: 'loading' }, 'Loading market data…'));
       let cloudError = '';
       const data: Record<string, Bars> = {};

@@ -101,7 +101,7 @@ function content(board: BoardEntry[], nav: (hash: string) => void, redraw: () =>
           h('div', {}, h('span', {}, 'Return / yr'), h('b', { class: (r.cagr ?? r.returnPct) >= 0 ? 'up' : 'dn' }, r.cagrReliable ? pctTxt(r.cagr, 1, true) : pctTxt(r.returnPct, 1, true))),
           h('div', {}, h('span', {}, 'Max DD'), h('b', {}, pctTxt(-r.risk.maxDD, 1))),
           h('div', {}, h('span', {}, 'Trades'), h('b', {}, String(r.n)))),
-        h('div', { class: 'badges' }, ...badges(r).map((b) => h('span', { class: `badge${b.id === 'allweather' ? ' accent' : ''}`, title: b.title }, b.label))),
+        h('div', { class: 'badges' }, ...badges(r, e.sessions).map((b) => h('span', { class: `badge${b.id === 'allweather' ? ' accent' : ''}`, title: b.title }, b.label))),
         h('div', { class: 'actions' }, h('button', { class: i === 0 ? 'primary' : 'ghost', onclick: () => nav(`#/strategy/${e.strategy.id}`) }, 'Detail')));
     })));
     const th = (t: string, r = false) => h('th', { class: r ? 'r' : '' }, t);
@@ -120,7 +120,7 @@ function content(board: BoardEntry[], nav: (hash: string) => void, redraw: () =>
           h('td', { class: 'r' }, pctTxt(-r.risk.maxDD, 1)),
           h('td', { class: 'r' }, num(r.ratios.sharpe)),
           h('td', { class: 'r' }, num(r.core.profitFactor)),
-          h('td', {}, h('div', { class: 'badges' }, ...badges(r).map((b) => h('span', { class: `badge${b.id === 'allweather' ? ' accent' : ''}`, title: b.title }, b.label)))),
+          h('td', {}, h('div', { class: 'badges' }, ...badges(r, e.sessions).map((b) => h('span', { class: `badge${b.id === 'allweather' ? ' accent' : ''}`, title: b.title }, b.label)))),
           h('td', { class: 'acts' }, h('button', { class: 'ghost sm', onclick: () => nav(`#/strategy/${e.strategy.id}`) }, 'Detail')));
       }))))));
   }
