@@ -1,3 +1,4 @@
+import { onSeen, reduced } from './motion';
 /**
  * Small dependency-free SVG charts for the analytics page.
  * Thin marks, recessive grid, one y-axis per chart, hover tooltips everywhere.
@@ -58,6 +59,10 @@ export function niceTicks(lo: number, hi: number, count = 5): number[] {
 function responsive(height: number, draw: (root: SVGSVGElement, w: number, h: number) => void): HTMLDivElement {
   const box = document.createElement('div');
   box.className = 'viz';
+  if (chartIntro && !reduced()) {
+    box.classList.add('viz-in');
+    onSeen(box, () => box.classList.add('in'));
+  }
   box.style.height = height + 'px';
   let lastW = 0;
   const render = () => {
@@ -71,6 +76,12 @@ function responsive(height: number, draw: (root: SVGSVGElement, w: number, h: nu
   };
   new ResizeObserver(render).observe(box);
   return box;
+}
+
+let chartIntro = false;
+/** While on, charts created now draw themselves in the first time they are scrolled into view. */
+export function setChartIntro(on: boolean) {
+  chartIntro = on;
 }
 
 function axisY(root: SVGSVGElement, ticks: number[], y: (v: number) => number, x0: number, x1: number, fmt: (v: number) => string) {

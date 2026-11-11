@@ -4,6 +4,10 @@ import { badges } from '../analytics/service';
 import { h } from './dom';
 import type { Session } from '../engine/replay';
 import { howButton } from './layout';
+import { countUpText, scoreRing } from './motion';
+
+/** scores already shown with their entrance, so a re-render (filters, theme) stays still */
+const introduced = new Set<string>();
 
 const pillarColor = (p: number) => (p >= 70 ? 'var(--band-good)' : p >= 50 ? 'var(--band-warn)' : 'var(--band-bad)');
 
@@ -12,10 +16,17 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
   const sc = r.score;
   const left = h('div', { class: 'score-main' });
   const num = h('div', { class: 'score-num', 'aria-label': sc.score == null ? 'No score yet' : `Overflow Score ${sc.score} out of 100` });
+  const introKey = `${sc.score}|${r.n}|${o.combined ?? ''}`;
+  const intro = sc.score != null && !introduced.has(introKey);
+  introduced.add(introKey);
   if (sc.score == null) num.textContent = '—';
-  else num.append(String(sc.score), h('small', {}, '/100'));
+  else {
+    const n = h('span', {}, String(sc.score));
+    num.append(n, h('small', {}, '/100'));
+    if (intro) countUpText(n, 1300);
+  }
   left.append(
-    num,
+    scoreRing(sc.score, num, intro),
     h('div', { class: 'score-tier' }, h('span', { class: 'grade' }, sc.grade), h('span', { class: 'tier-label' }, sc.label)),
     h('p', { class: 'verdict' }, sc.verdict),
     h('div', { class: 'worth' }, h('span', {}, 'Worth trading long-term?'), h('b', {}, sc.worthIt)),
@@ -30,14 +41,14 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
 
   // pillars
   const pillHow = h('div', {});
-  const pillars = h('div', { class: 'pillars' });
-  for (const p of sc.pillars) {
+  const pillars = h('div', { class: `pillars${intro ? ' grow' : ''}` });
+  for (const [pi, p] of sc.pillars.entries()) {
     const def = PILLARS.find((d) => d.id === p.id);
     const pts = p.points;
     const wrap = h('div', { class: 'pillar' });
     const btn = h('button', { type: 'button', 'aria-expanded': 'false' },
       h('span', {}, p.label, h('em', {}, `${p.weight}%`)),
-      h('span', { class: 'bar' }, h('i', { style: `width:${pts == null ? 0 : Math.max(2, pts)}%;--c:${pillarColor(pts ?? 0)}` })),
+      h('span', { class: 'bar' }, h('i', { style: `width:${pts == null ? 0 : Math.max(2, pts)}%;--c:${pillarColor(pts ?? 0)};--i:${pi}` })),
       h('span', { class: 'pts' }, pts == null ? '—' : String(Math.round(pts))),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, '▶'),
     );

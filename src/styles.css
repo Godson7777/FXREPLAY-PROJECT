@@ -1012,3 +1012,93 @@ span.tree-name { font-size: 12px; }
 .live-badge.polling { color: var(--warn-ink); background: color-mix(in srgb, var(--warn-ink) 14%, transparent); }
 .calc .calc-warn { display: block; color: var(--down); font-size: 11.5px; line-height: 1.4; padding-top: 4px; border-top: 1px solid var(--border); }
 @media (max-width: 767px) { .ws.is-live .trade-bar { grid-template-columns: 1fr auto 1fr; } }
+
+/* =====================================================================================
+   Motion: entrances, drawing charts, price and trade feedback.
+   All of it is decoration; it only runs when the visitor has not asked for less motion.
+   ===================================================================================== */
+@media (prefers-reduced-motion: no-preference) {
+  .rv { opacity: 0; transform: translateY(14px); transition: opacity 0.7s var(--ease) var(--rv-d, 0ms), transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) var(--rv-d, 0ms); }
+  .rv.in { opacity: 1; transform: none; }
+  .viz.viz-in { clip-path: inset(0 100% 0 0); transition: clip-path 1.2s cubic-bezier(0.3, 0.6, 0.2, 1); }
+  .viz.viz-in.in { clip-path: inset(0 -2% 0 0); }
+  .ring-fg { transition: stroke-dashoffset 1.4s cubic-bezier(0.3, 0.6, 0.2, 1); }
+  .pillars.grow .bar > i, .demo-score li .bar > i { transform-origin: left center; animation: bar-grow 0.9s cubic-bezier(0.3, 0.6, 0.2, 1) calc(0.35s + var(--i, 0) * 90ms) both; }
+  .spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: spark-draw 1.2s var(--ease) 0.25s forwards; }
+  .fx-up { animation: fx-up 0.45s ease-out; }
+  .fx-dn { animation: fx-dn 0.45s ease-out; }
+  .tbl tr.row-new td { animation: row-new 1.3s ease-out; }
+  .tbl tr.row-new.win td { animation-name: row-win; }
+  .tbl tr.row-new.loss td { animation-name: row-loss; }
+  .toast { animation: toast-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .demo-chip.show { animation: chip-in 0.3s ease-out; }
+  .ws .quote button:active, .ws .place-btn:active, .ws .trade-bar button:active { transform: scale(0.97); }
+  .ws .quote button, .ws .place-btn, .ws .trade-bar button { transition: transform 0.08s ease-out, filter 0.15s; }
+  .scard, .kpi, .sec .card { transition: border-color var(--t-short) var(--ease), transform var(--t-short) var(--ease), box-shadow var(--t-short) var(--ease); }
+  .scard:hover { transform: translateY(-3px); }
+}
+@keyframes bar-grow { from { transform: scaleX(0); } }
+@keyframes spark-draw { to { stroke-dashoffset: 0; } }
+@keyframes fx-up { 0% { color: var(--band-accent); text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent); } }
+@keyframes fx-dn { 0% { color: #ffb3b6; text-shadow: 0 0 12px color-mix(in srgb, var(--down) 70%, transparent); } }
+@keyframes row-new { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+@keyframes row-win { 0% { background: color-mix(in srgb, var(--up) 22%, transparent); } 100% { background: transparent; } }
+@keyframes row-loss { 0% { background: color-mix(in srgb, var(--down) 20%, transparent); } 100% { background: transparent; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes chip-in { from { opacity: 0; transform: translateY(-4px); } }
+.tab.fx-up, .tab.fx-dn { animation-duration: 0.9s; }
+
+/* score ring (analytics hero and landing example) */
+.score-ring { position: relative; width: clamp(13rem, 24vw, 17rem); aspect-ratio: 1; }
+.score-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.score-ring circle { fill: none; stroke-width: 3; }
+.ring-bg { stroke: var(--band-border); }
+.ring-fg { stroke: var(--g, var(--band-accent)); stroke-linecap: round; }
+.ring-mid { position: absolute; inset: 0; display: grid; place-items: center; }
+.score-ring .score-num { font-size: clamp(4.25rem, 8.5vw, 6.25rem); line-height: 1; display: flex; align-items: baseline; }
+
+/* reading progress under the analytics section bar */
+.subnav::after { content: ''; position: absolute; left: 0; bottom: -1px; height: 2px; width: 100%; background: var(--accent); transform-origin: left; transform: scaleX(var(--read, 0)); opacity: 0.7; pointer-events: none; }
+
+/* session card sparkline */
+.spark { height: 40px; margin-top: var(--space-2); }
+.spark svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.spark polyline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.spark polygon { stroke: none; opacity: 0.1; }
+.spark.up polyline { stroke: var(--up); } .spark.up polygon { fill: var(--up); }
+.spark.dn polyline { stroke: var(--down); } .spark.dn polygon { fill: var(--down); }
+
+/* landing: self-playing replay + example score */
+.demo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 19rem); gap: var(--space-5); margin: var(--space-11) auto 0; max-width: 68rem; text-align: left; }
+.demo-stage { background: var(--surface); border: 1px solid var(--border-card); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.demo-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); min-height: 2.75rem; }
+.demo-sym b { color: var(--text); font-weight: 600; }
+.demo-tag { font: 600 10px/1 var(--font-ui); letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--border-card); border-radius: 99px; padding: 4px 8px; }
+.demo-chip { margin-left: auto; font: 600 11.5px/1 var(--font-ui); padding: 5px 9px; border-radius: 99px; background: var(--surface-3); color: var(--text-2); visibility: hidden; white-space: nowrap; }
+.demo-chip.show { visibility: visible; }
+.demo-chip.up { background: var(--accent-soft); color: var(--accent-ink); }
+.demo-chip.dn { background: color-mix(in srgb, var(--down) 12%, transparent); color: var(--down); }
+.demo-chart { height: clamp(15rem, 34vw, 22rem); }
+.demo-foot { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); padding: var(--space-3) var(--space-4) var(--space-4); border-top: 1px solid var(--border); }
+.demo-foot div { display: flex; flex-direction: column; gap: 2px; }
+.demo-foot span { font: 600 10px/1.2 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.demo-foot b { font: 400 1.25rem/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.demo-foot b.up { color: var(--up); } .demo-foot b.dn { color: var(--down); }
+.demo-foot .demo-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; display: block; }
+.demo-progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.19s linear; }
+.demo-score { background: var(--band); color: var(--band-text-2); border-radius: var(--radius-lg); padding: var(--space-6); display: flex; flex-direction: column; align-items: center; gap: var(--space-4); box-shadow: var(--shadow); --g: var(--band-good); }
+.demo-score .eyebrow { color: var(--band-muted); }
+.demo-score .score-ring { width: 11.5rem; }
+.demo-score-num { font: 300 4.5rem/1 var(--font-display); color: var(--band-text); font-variant-numeric: tabular-nums; }
+.demo-grade { display: flex; align-items: center; gap: var(--space-3); }
+.demo-grade .grade { border-color: var(--g); color: var(--g); min-width: 2.25rem; height: 2.25rem; font-size: 1.1rem; }
+.demo-grade em { font: 350 1.25rem/1.1 var(--font-display); font-style: italic; color: var(--band-text); }
+.demo-score ul { list-style: none; margin: 0; padding: 0; width: 100%; display: grid; gap: var(--space-2); }
+.demo-score li { display: grid; grid-template-columns: 7.5rem 1fr 1.75rem; align-items: center; gap: var(--space-3); font-size: 12.5px; }
+.demo-score li .bar { height: 5px; border-radius: 3px; background: var(--band-2); overflow: hidden; }
+.demo-score li .bar > i { display: block; height: 100%; border-radius: 3px; background: var(--band-good); }
+.demo-score li b { color: var(--band-text); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .demo { grid-template-columns: 1fr; } .demo-score { flex-direction: row; flex-wrap: wrap; justify-content: center; } .demo-score .eyebrow, .demo-score ul { width: 100%; text-align: center; } }
+@media (prefers-reduced-motion: no-preference) { .panel-in > * { animation: panel-in 0.22s ease-out; } }
+@keyframes panel-in { from { opacity: 0; transform: translateX(6px); } }
+.subnav { background: color-mix(in srgb, var(--bg) 97%, transparent); }

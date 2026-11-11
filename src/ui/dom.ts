@@ -34,7 +34,12 @@ function applyMorph(a: Node, b: Node) {
     return;
   }
   const ea = a as HTMLElement, eb = b as HTMLElement;
-  for (const at of Array.from(eb.attributes)) if (ea.getAttribute(at.name) !== at.value) ea.setAttribute(at.name, at.value);
+  for (const at of Array.from(eb.attributes)) {
+    let v = at.value;
+    // transient feedback classes (price flash, new row) outlive the next update
+    if (at.name === 'class' && ea.className.includes('fx-')) v = [v, ...Array.from(ea.classList).filter((c) => c.startsWith('fx-'))].join(' ').trim();
+    if (ea.getAttribute(at.name) !== v) ea.setAttribute(at.name, v);
+  }
   for (const at of Array.from(ea.attributes)) if (!eb.hasAttribute(at.name)) ea.removeAttribute(at.name);
   if (!ea.hasAttribute('data-keep')) for (let i = 0; i < a.childNodes.length; i++) applyMorph(a.childNodes[i], b.childNodes[i]);
   if (ea !== document.activeElement && (ea instanceof HTMLInputElement || ea instanceof HTMLSelectElement || ea instanceof HTMLTextAreaElement)) {
@@ -199,7 +204,7 @@ export function themeButton(): HTMLButtonElement {
 export function toast(msg: string, kind: 'info' | 'ok' | 'err' = 'info') {
   let box = $('#toasts');
   if (!box) document.body.append((box = h('div', { id: 'toasts' })));
-  const t = h('div', { class: `toast ${kind}` }, msg);
+  const t = h('div', { class: `toast ${kind}`, role: 'status' }, msg);
   box.append(t);
   while (box.children.length > 3) box.firstElementChild!.remove();
   setTimeout(() => t.classList.add('out'), 2600);
