@@ -60,8 +60,11 @@ function responsive(height: number, draw: (root: SVGSVGElement, w: number, h: nu
   const box = document.createElement('div');
   box.className = 'viz';
   if (chartIntro && !reduced()) {
-    box.classList.add('viz-in');
-    onSeen(box, () => box.classList.add('in'));
+    // the chart is always there; when it is first seen it draws itself in once
+    onSeen(box, () => {
+      box.classList.add('viz-draw');
+      setTimeout(() => box.classList.remove('viz-draw'), 1400);
+    });
   }
   box.style.height = height + 'px';
   let lastW = 0;

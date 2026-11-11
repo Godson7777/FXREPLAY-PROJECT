@@ -1018,13 +1018,12 @@ span.tree-name { font-size: 12px; }
    All of it is decoration; it only runs when the visitor has not asked for less motion.
    ===================================================================================== */
 @media (prefers-reduced-motion: no-preference) {
-  .rv { opacity: 0; transform: translateY(14px); transition: opacity 0.7s var(--ease) var(--rv-d, 0ms), transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) var(--rv-d, 0ms); }
-  .rv.in { opacity: 1; transform: none; }
-  .viz.viz-in { clip-path: inset(0 100% 0 0); transition: clip-path 1.2s cubic-bezier(0.3, 0.6, 0.2, 1); }
-  .viz.viz-in.in { clip-path: inset(0 -2% 0 0); }
-  .ring-fg { transition: stroke-dashoffset 1.4s cubic-bezier(0.3, 0.6, 0.2, 1); }
+  /* Entrances start from the hidden state only once the element is seen (class added by
+     motion.ts). Without the class everything is simply visible, so nothing can stay hidden. */
+  .rv-in { animation: rv-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) var(--rv-d, 0ms) backwards; }
+  .viz.viz-draw > svg { animation: viz-draw 1.2s cubic-bezier(0.3, 0.6, 0.2, 1) backwards; }
   .pillars.grow .bar > i, .demo-score li .bar > i { transform-origin: left center; animation: bar-grow 0.9s cubic-bezier(0.3, 0.6, 0.2, 1) calc(0.35s + var(--i, 0) * 90ms) both; }
-  .spark polyline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: spark-draw 1.2s var(--ease) 0.25s forwards; }
+  .spark polyline { stroke-dasharray: 1; animation: spark-draw 1.2s var(--ease) 0.25s backwards; }
   .fx-up { animation: fx-up 0.45s ease-out; }
   .fx-dn { animation: fx-dn 0.45s ease-out; }
   .tbl tr.row-new td { animation: row-new 1.3s ease-out; }
@@ -1038,7 +1037,9 @@ span.tree-name { font-size: 12px; }
   .scard:hover { transform: translateY(-3px); }
 }
 @keyframes bar-grow { from { transform: scaleX(0); } }
-@keyframes spark-draw { to { stroke-dashoffset: 0; } }
+@keyframes spark-draw { from { stroke-dashoffset: 1; } }
+@keyframes rv-in { from { opacity: 0; transform: translateY(14px); } }
+@keyframes viz-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 -2% 0 0); } }
 @keyframes fx-up { 0% { color: var(--band-accent); text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent); } }
 @keyframes fx-dn { 0% { color: #ffb3b6; text-shadow: 0 0 12px color-mix(in srgb, var(--down) 70%, transparent); } }
 @keyframes row-new { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
