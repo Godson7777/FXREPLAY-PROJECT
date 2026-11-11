@@ -13,10 +13,19 @@ export const HL_MAX_CANDLES = 5000;
 export const HL_TAKER_FEE = 0.045;
 
 export interface HlCoin {
+  /** API name; builder-deployed markets are prefixed with their dex ("xyz:GOLD") */
   name: string;
   szDecimals: number;
   maxLeverage: number;
+  /** builder dex the market lives on; undefined for Hyperliquid's own perps */
+  dex?: string;
 }
+
+/** "GOLD · xyz" for builder markets, the plain name otherwise. */
+export const coinLabel = (name: string) => {
+  const i = name.indexOf(':');
+  return i < 0 ? name : `${name.slice(i + 1)} · ${name.slice(0, i)}`;
+};
 
 export interface HlCandle {
   t: number; // open time, ms
@@ -77,11 +86,27 @@ async function post<T>(body: unknown, signal?: AbortSignal, f: typeof fetch = fe
   throw new Error(`Could not reach Hyperliquid${last instanceof Error ? ` (${last.message})` : ''}`);
 }
 
+type Universe = { universe: (HlCoin & { isDelisted?: boolean })[] };
+const listed = (m: Universe | null | undefined): HlCoin[] =>
+  (m?.universe ?? []).filter((u) => !u.isDelisted && u.name).map((u) => {
+    const i = u.name.indexOf(':');
+    return { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, ...(i > 0 ? { dex: u.name.slice(0, i) } : {}) };
+  });
+
 let metaCache: Promise<HlCoin[]> | null = null;
-/** Tradable perp coins (delisted ones removed), cached per page load. */
+/**
+ * Tradable perp markets (delisted ones removed), cached per page load: Hyperliquid's own
+ * perps first, then the builder-deployed ones (gold, stocks, indices…). Falls back to the
+ * native list when the combined endpoint is unavailable.
+ */
 export function hlCoins(f: typeof fetch = fetch): Promise<HlCoin[]> {
-  metaCache ??= post<{ universe: (HlCoin & { isDelisted?: boolean })[] }>({ type: 'meta' }, undefined, f)
-    .then((m) => m.universe.filter((u) => !u.isDelisted).map((u) => ({ name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage })))
+  metaCache ??= post<Universe[]>({ type: 'allPerpMetas' }, undefined, f)
+    .then((all) => {
+      if (!Array.isArray(all) || !all.length) throw new Error('empty');
+      const seen = new Set<string>();
+      return all.flatMap(listed).filter((c) => !seen.has(c.name) && !!seen.add(c.name));
+    })
+    .catch(() => post<Universe>({ type: 'meta' }, undefined, f).then(listed))
     .catch((e) => {
       metaCache = null;
       throw e;
@@ -162,7 +187,26 @@ export function applyTick(b: Bars, t: number, px: number): 'update' | 'append' |
   return 'update';
 }
 
-export type FeedStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
+/** 'polling' = the socket is unavailable and prices are fetched every few seconds instead */
+export type FeedStatus = 'connecting' | 'live' | 'polling' | 'reconnecting' | 'offline';
+
+/** no message for this long on an open socket means it is dead (the server answers a ping every 10 s) */
+export const FEED_STALE_MS = 25000;
+export const FEED_POLL_MS = 3000;
+
+export interface FeedOptions {
+  url?: string;
+  /** latest 1-minute candles, used while the socket is down */
+  poll?: (coin: string) => Promise<number[][]>;
+  pollMs?: number;
+  staleMs?: number;
+  now?: () => number;
+}
+
+const defaultPoll = (coin: string) => {
+  const now = Math.floor(Date.now() / 1000);
+  return hlCandles(coin, '1m', now - 180, now);
+};
 
 export interface FeedHandlers {
   candle: (row: number[]) => void;
@@ -172,26 +216,47 @@ export interface FeedHandlers {
   opened: () => void;
 }
 
-/** Live WebSocket feed for one coin's 1-minute candles and trades, with reconnect + keepalive. */
+/**
+ * Live feed for one coin's 1-minute candles and trades.
+ * WebSocket first, with keepalive pings and a watchdog that reconnects a silent socket.
+ * When the socket cannot be reached (blocked network, outage) it falls back to polling
+ * the latest candles over HTTPS every few seconds and keeps retrying the socket.
+ */
 export class LiveFeed {
   private ws: WebSocket | null = null;
   private closed = false;
   private retry = 0;
   private ping: ReturnType<typeof setInterval> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private polling = false;
+  private url: string;
+  private o: FeedOptions;
+  private now: () => number;
+  /** last message of any kind (pongs included): tells a dead socket from a quiet market */
   lastMsg = 0;
+  /** last candle or trade */
+  lastData = 0;
 
   constructor(
     public coin: string,
     private on: FeedHandlers,
-    private url = HL_WS,
+    opts: FeedOptions | string = {},
   ) {
+    this.o = typeof opts === 'string' ? { url: opts } : opts;
+    this.url = this.o.url ?? HL_WS;
+    this.now = this.o.now ?? Date.now;
     this.connect();
+  }
+
+  /** true while prices come from HTTPS polling instead of the socket */
+  get isPolling() {
+    return !!this.pollTimer;
   }
 
   private connect() {
     if (this.closed) return;
-    this.on.status(this.retry ? 'reconnecting' : 'connecting');
+    if (!this.pollTimer) this.on.status(this.retry ? 'reconnecting' : 'connecting');
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.url);
@@ -201,15 +266,19 @@ export class LiveFeed {
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;
+      this.stopPolling();
       ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'candle', coin: this.coin, interval: '1m' } }));
       ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin: this.coin } }));
-      this.ping = setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({ method: 'ping' })), 30000);
-      this.lastMsg = Date.now();
+      this.lastMsg = this.now();
+      this.ping = setInterval(() => {
+        if (this.now() - this.lastMsg > (this.o.staleMs ?? FEED_STALE_MS)) return ws.close(); // silent socket: reconnect
+        if (ws.readyState === 1) ws.send(JSON.stringify({ method: 'ping' }));
+      }, 10000);
       this.on.status('live');
       this.on.opened();
     };
     ws.onmessage = (ev) => {
-      this.lastMsg = Date.now();
+      this.lastMsg = this.now();
       let m: { channel?: string; data?: unknown };
       try {
         m = JSON.parse(String(ev.data));
@@ -218,12 +287,18 @@ export class LiveFeed {
       }
       if (m.channel === 'candle' && m.data && typeof m.data === 'object') {
         const c = m.data as HlCandle;
-        if (!c.s || c.s === this.coin) this.on.candle(candleRow(c));
+        if (!c.s || c.s === this.coin) {
+          this.lastData = this.lastMsg;
+          this.on.candle(candleRow(c));
+        }
       } else if (m.channel === 'trades' && Array.isArray(m.data)) {
         for (const tr of m.data as { coin?: string; px: string; time: number }[]) {
           if (tr.coin && tr.coin !== this.coin) continue;
           const px = +tr.px;
-          if (px > 0 && tr.time > 0) this.on.trade(Math.floor(tr.time / 1000), px);
+          if (px > 0 && tr.time > 0) {
+            this.lastData = this.lastMsg;
+            this.on.trade(Math.floor(tr.time / 1000), px);
+          }
         }
       }
     };
@@ -238,13 +313,63 @@ export class LiveFeed {
 
   private scheduleRetry() {
     if (this.closed) return;
-    this.on.status(this.retry > 3 ? 'offline' : 'reconnecting');
+    // two failed attempts in a row: keep prices coming over HTTPS while the socket is retried
+    if (this.retry >= 1) this.startPolling();
+    if (!this.pollTimer) this.on.status('reconnecting');
     const wait = Math.min(30000, 1000 * 2 ** this.retry++);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.connect(), wait);
+  }
+
+  private startPolling() {
+    if (this.pollTimer || this.closed) return;
+    let failures = 0;
+    const tick = async () => {
+      if (this.polling || this.closed) return;
+      this.polling = true;
+      try {
+        const rows = await (this.o.poll ?? defaultPoll)(this.coin);
+        if (this.closed || !this.pollTimer) return;
+        for (const r of rows) this.on.candle(r);
+        const last = rows[rows.length - 1];
+        if (last) {
+          this.lastMsg = this.lastData = this.now();
+          this.on.trade(Math.max(last[0], Math.floor(this.now() / 1000)), last[4]);
+        }
+        failures = 0;
+        this.on.status('polling');
+      } catch {
+        if (++failures >= 3 && !this.closed && this.pollTimer) this.on.status('offline');
+      } finally {
+        this.polling = false;
+      }
+    };
+    this.pollTimer = setInterval(() => void tick(), this.o.pollMs ?? FEED_POLL_MS);
+    void tick();
+  }
+
+  private stopPolling() {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+  }
+
+  /** The tab came back or the network returned: reconnect now instead of waiting out the back-off. */
+  wake() {
+    if (this.closed) return;
+    const ws = this.ws;
+    if (ws && ws.readyState === 1) {
+      if (this.now() - this.lastMsg > (this.o.staleMs ?? FEED_STALE_MS)) ws.close();
+      return;
+    }
+    if (ws && ws.readyState === 0) return;
+    this.retry = Math.min(this.retry, 1);
+    if (this.timer) clearTimeout(this.timer);
+    this.connect();
   }
 
   close() {
     this.closed = true;
+    this.stopPolling();
     if (this.timer) clearTimeout(this.timer);
     if (this.ping) clearInterval(this.ping);
     const ws = this.ws;

@@ -292,7 +292,10 @@ export class Broker {
     if (lev) {
       const need = this.marginFor(sym, common.lots, px, lev);
       const free = this.freeMargin();
-      if (need > free) return { ok: false, error: `Not enough margin: needs $${need.toFixed(2)}, free $${Math.max(0, free).toFixed(2)} at ${lev}×` };
+      if (need > free) {
+        const max = Math.floor((common.lots * Math.max(0, free) / need) * 100) / 100;
+        return { ok: false, error: `Not enough margin: needs $${need.toFixed(2)}, free $${Math.max(0, free).toFixed(2)} at ${lev}×. ${max > 0 ? `The most you can open is ${max.toFixed(2)} lots — ` : ''}widen the stop, lower the risk or raise the leverage.` };
+      }
       const liq = this.liqPrice(sym, req.side, px, lev);
       if (sl != null && (req.side === 'long' ? sl <= liq : sl >= liq)) return { ok: false, error: `Stop loss is past the liquidation price (${liq.toFixed(this.spec(sym).digits)}) — lower the leverage or tighten the stop` };
     }

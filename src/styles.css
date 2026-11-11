@@ -633,6 +633,29 @@ input.lvl { width: 90px; height: 1.75rem; padding: 2px 5px; font-size: 12px; }
 .how { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: var(--space-4) var(--space-6); background: var(--bg-alt); border: 1px solid var(--border-card); border-radius: var(--radius); padding: var(--space-4) var(--space-5); margin: 0 0 var(--space-4); font-size: 13px; line-height: 1.55; color: var(--text-2); }
 .how h6 { margin: 0 0 var(--space-2); font: 600 10.5px/1.2 var(--font-ui); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .how p + p { margin-top: var(--space-2); }
+/* ideal vs weak drawing at the top of every guide */
+.how-ideal { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 23rem) minmax(0, 1fr); gap: var(--space-4) var(--space-6); align-items: center; padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-card); }
+.iv-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); align-items: start; }
+.iv-fig { margin: 0; display: grid; gap: var(--space-2); min-width: 0; }
+.iv-svg { background: var(--surface); border: 1px solid var(--border-card); border-radius: var(--radius); padding: var(--space-2); --iv-g: var(--up); --iv-b: var(--down); --iv-w: var(--warn); --iv-m: var(--faint); --iv-ax: var(--border-strong); }
+.iv-fig.good .iv-svg { border-color: color-mix(in srgb, var(--up) 45%, var(--border-card)); }
+.iv-svg svg { display: block; width: 100%; height: auto; stroke-width: 1.4; }
+.iv-svg svg * { stroke-linejoin: round; }
+.iv-svg .g { stroke: var(--iv-g); } .iv-svg .b { stroke: var(--iv-b); } .iv-svg .w { stroke: var(--iv-w); } .iv-svg .m { stroke: var(--iv-m); }
+.iv-svg .f { stroke: none; }
+.iv-svg .g.f { fill: var(--iv-g); } .iv-svg .b.f { fill: var(--iv-b); } .iv-svg .w.f { fill: var(--iv-w); } .iv-svg .m.f { fill: var(--iv-m); opacity: 0.55; }
+.iv-svg .soft { opacity: 0.22; } .iv-svg .mid { opacity: 0.6; }
+.iv-svg .ax { stroke: var(--iv-ax); stroke-width: 1; }
+.iv-svg .t { font: 600 7.5px/1 var(--font-ui); stroke: none; fill: var(--iv-m); }
+.iv-svg .g.t { fill: var(--iv-g); font-size: 10px; } .iv-svg .b.t { fill: var(--iv-b); font-size: 10px; }
+.iv-fig figcaption { font-size: 12px; line-height: 1.4; color: var(--text-2); }
+.iv-fig figcaption b { display: block; font: 600 10.5px/1.2 var(--font-ui); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2px; }
+.iv-fig.good figcaption b { color: var(--up); } .iv-fig.bad figcaption b { color: var(--down); }
+@media (max-width: 767px) { .how-ideal { grid-template-columns: 1fr; } }
+.sec.band .how-ideal { border-color: var(--band-border); }
+.sec.band .iv-svg { background: var(--band); border-color: var(--band-border); --iv-g: var(--band-good); --iv-b: var(--band-bad); --iv-w: var(--band-warn); --iv-m: var(--band-muted); --iv-ax: var(--band-border); }
+.sec.band .iv-fig figcaption { color: var(--band-text-2); }
+.sec.band .iv-fig.good figcaption b { color: var(--band-good); } .sec.band .iv-fig.bad figcaption b { color: var(--band-bad); }
 .sec.band .how { background: var(--band-2); border-color: var(--band-border); color: var(--band-text-2); }
 .sec.band .how h6 { color: var(--band-muted); }
 .sec.band .how-btn { border-color: var(--band-border); color: var(--band-muted); }
@@ -953,3 +976,39 @@ span.tree-name { font-size: 12px; }
 @media (max-width: 767px) and (prefers-reduced-motion: reduce) { .sheet { transition: none; } }
 /* toasts clear the phone trade bar */
 @media (max-width: 767px) { body:has(.trade-bar) #toasts { bottom: calc(84px + env(safe-area-inset-bottom)); } }
+
+/* ---- touch ergonomics: 40px+ targets, one-row bars that scroll sideways instead of stacking ---- */
+@media (pointer: coarse) {
+  .ws .topbar button, .ws .topbar .seg, .ws .controls button, .ws .controls select, .ws .controls input, .ws .tabs .tab, .ws .tabs button,
+  .ws .pane-head select, .ws .pane-head button, .ws .tool, .ws .chip, .ws .sheet-head button, .ws .tbl .mini { min-height: 40px; min-width: 40px; }
+  .ws .controls .play, .ws .controls .ctl { height: 40px; }
+  .ws .topbar .brand-mark { min-width: 40px; min-height: 40px; display: grid; place-items: center; }
+  .ws .tbl input.lvl { min-height: 36px; }
+  .ws .no-touch { display: none; }
+  .ws button, .ws select { touch-action: manipulation; }
+}
+@media (max-width: 767px) {
+  .ws .topbar, .ws .controls { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .ws .topbar::-webkit-scrollbar, .ws .controls::-webkit-scrollbar { display: none; }
+  .ws .topbar > *, .ws .controls > * { flex: none; }
+  .ws .topbar { gap: 6px; padding: 6px 10px; min-height: 0; }
+  .ws .topbar .spacer { display: none; }
+  .ws .topbar .brand-sm { max-width: 42vw; overflow: hidden; }
+  .ws .topbar .brand-sm b, .ws .topbar .brand-sm small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the trade bar already has play/pause under the thumb */
+  .ws:not(.is-live) .controls .play { display: none; }
+  body:has(.trade-bar) #toasts { top: calc(8px + env(safe-area-inset-top)); bottom: auto; }
+}
+@media (pointer: coarse) {
+  .pane-legend { top: 52px; }
+  /* 16px text stops iOS from zooming the page when a field gets focus */
+  .ws .sheet input, .ws .sheet select { min-height: 44px; font-size: 16px; }
+  .ws .sheet .seg { min-height: 44px; }
+  .ws .sheet .place-btn { min-height: 48px; font-size: 15px; }
+  .ws .sheet .chip { min-height: 40px; min-width: 44px; }
+  .ws .sheet .check input { min-height: 0; width: 20px; height: 20px; }
+}
+@media (pointer: coarse) { .ws .sheet .join select { min-width: 6.75rem; } }
+.live-badge.polling { color: var(--warn-ink); background: color-mix(in srgb, var(--warn-ink) 14%, transparent); }
+.calc .calc-warn { display: block; color: var(--down); font-size: 11.5px; line-height: 1.4; padding-top: 4px; border-top: 1px solid var(--border); }
+@media (max-width: 767px) { .ws.is-live .trade-bar { grid-template-columns: 1fr auto 1fr; } }

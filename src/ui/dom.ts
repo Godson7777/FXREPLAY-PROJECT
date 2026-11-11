@@ -17,6 +17,58 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
   return el;
 }
 
+function sameShape(a: Node, b: Node): boolean {
+  if (a.nodeType !== b.nodeType) return false;
+  if (a.nodeType !== 1) return true;
+  const ea = a as Element, eb = b as Element;
+  if (ea.tagName !== eb.tagName) return false;
+  if (ea.hasAttribute('data-keep')) return true;
+  if (a.childNodes.length !== b.childNodes.length) return false;
+  for (let i = 0; i < a.childNodes.length; i++) if (!sameShape(a.childNodes[i], b.childNodes[i])) return false;
+  return true;
+}
+
+function applyMorph(a: Node, b: Node) {
+  if (a.nodeType !== 1) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return;
+  }
+  const ea = a as HTMLElement, eb = b as HTMLElement;
+  for (const at of Array.from(eb.attributes)) if (ea.getAttribute(at.name) !== at.value) ea.setAttribute(at.name, at.value);
+  for (const at of Array.from(ea.attributes)) if (!eb.hasAttribute(at.name)) ea.removeAttribute(at.name);
+  if (!ea.hasAttribute('data-keep')) for (let i = 0; i < a.childNodes.length; i++) applyMorph(a.childNodes[i], b.childNodes[i]);
+  if (ea !== document.activeElement && (ea instanceof HTMLInputElement || ea instanceof HTMLSelectElement || ea instanceof HTMLTextAreaElement)) {
+    const nb = eb as HTMLInputElement;
+    if (ea.value !== nb.value) ea.value = nb.value;
+    if (ea instanceof HTMLInputElement && ea.checked !== nb.checked) ea.checked = nb.checked;
+  }
+}
+
+/**
+ * Update `old` in place so it shows what `next` shows: text, attributes and form values
+ * are copied over while the elements (and their listeners, focus, open dropdowns, a click
+ * in progress) stay. Returns false and changes nothing when the two trees differ in shape.
+ * Elements marked `data-keep` keep their own children.
+ */
+export function morph(old: Node, next: Node): boolean {
+  if (!sameShape(old, next)) return false;
+  applyMorph(old, next);
+  return true;
+}
+
+/** Morph the children of `root` into `nodes` when `key` (what the listeners depend on) is unchanged; rebuild otherwise. */
+export function patchChildren(root: HTMLElement, key: string, nodes: HTMLElement[]) {
+  const cur = root.children;
+  if (nodes.length && cur.length === nodes.length && (cur[0] as HTMLElement).dataset.pkey === key && nodes.every((n, i) => sameShape(cur[i], n))) {
+    nodes.forEach((n, i) => applyMorph(cur[i], n));
+    (cur[0] as HTMLElement).dataset.pkey = key;
+    return false;
+  }
+  if (nodes.length) nodes[0].dataset.pkey = key;
+  root.replaceChildren(...nodes);
+  return true;
+}
+
 /** Short unique id (time-ordered + random). */
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);

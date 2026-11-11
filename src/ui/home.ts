@@ -11,7 +11,7 @@ import { authModal } from './cloudui';
 import { listSessions, saveSession, deleteSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, dataWindow, checkRange, type Session } from '../engine/replay';
-import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
+import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, coinLabel, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
 import { barsFromRows } from '../core/types';
 import { parseTradeCsv, importedSession, type TradeImport } from '../data/tradeimport';
 import { PRESETS, type ChallengeRules } from '../engine/rules';
@@ -352,7 +352,7 @@ function importTradesModal(nav: (h: string) => void) {
 // ---- live (Hyperliquid) session -----------------------------------------------
 
 function coinPicker(onPick: (c: HlCoin | null) => void) {
-  const search = h('input', { placeholder: 'Search coin (BTC, ETH, SOL…)', autocomplete: 'off' });
+  const search = h('input', { placeholder: 'Search market (BTC, ETH, GOLD, TSLA…)', autocomplete: 'off' });
   const sel = h('select', { size: 6, class: 'coin-list' }) as HTMLSelectElement;
   const status = h('small', { class: 'muted' }, 'Loading Hyperliquid markets…');
   let coins: HlCoin[] = [];
@@ -360,7 +360,7 @@ function coinPicker(onPick: (c: HlCoin | null) => void) {
     const q = search.value.trim().toUpperCase();
     const list = coins.filter((c) => c.name.toUpperCase().includes(q)).slice(0, 300);
     const cur = sel.value;
-    sel.replaceChildren(...list.map((c) => h('option', { value: c.name }, `${c.name}  ·  up to ${c.maxLeverage}×`)));
+    sel.replaceChildren(...list.map((c) => h('option', { value: c.name }, `${coinLabel(c.name)}  ·  up to ${c.maxLeverage}×`)));
     sel.value = list.some((c) => c.name === cur) ? cur : list[0]?.name ?? '';
     onPick(coins.find((c) => c.name === sel.value) ?? null);
   };
@@ -368,7 +368,8 @@ function coinPicker(onPick: (c: HlCoin | null) => void) {
   sel.onchange = () => onPick(coins.find((c) => c.name === sel.value) ?? null);
   const load = () => hlCoins().then((c) => {
     coins = c;
-    status.textContent = `${c.length} perpetual markets`;
+    const own = c.filter((x) => !x.dex).length;
+    status.textContent = `${c.length} perpetual markets${c.length > own ? ` · ${own} crypto, ${c.length - own} builder markets (gold, stocks, indices…)` : ''}`;
     fill();
     if (coins.some((x) => x.name === 'BTC')) { sel.value = 'BTC'; onPick(coins.find((x) => x.name === 'BTC')!); }
   }).catch((e) => {
@@ -390,12 +391,14 @@ function liveSessionModal(done: (s: Session) => void) {
   const name = h('input', { value: `Live ${new Date().toISOString().slice(0, 10)}` });
   const lev = h('input', { type: 'number', value: 10, min: 1, step: 1 });
   const levNote = h('small', { class: 'muted' });
+  const dexNote = h('small', { class: 'muted' });
   const picker = coinPicker((c) => {
     coin = c;
     if (c) {
       lev.max = String(c.maxLeverage);
       if (+lev.value > c.maxLeverage) lev.value = String(c.maxLeverage);
       levNote.textContent = levText(c, +lev.value);
+      dexNote.textContent = c.dex ? `${coinLabel(c.name)} is a builder-deployed market on the "${c.dex}" dex: it follows its own trading hours (it can be quiet or closed at weekends) and its fees can differ from the 0.045% default.` : '';
       if (!name.dataset.touched) name.value = `${c.name} live ${new Date().toISOString().slice(0, 10)}`;
     }
   });
@@ -413,6 +416,7 @@ function liveSessionModal(done: (s: Session) => void) {
     field('Session name', name),
     h('div', { class: 'row2' }, field('Starting balance ($)', bal), field('Leverage (×)', lev)),
     levNote,
+    dexNote,
     h('div', { class: 'row2' }, field('Fee per side (% of notional)', fee, 'Hyperliquid base taker fee is 0.045%. Funding payments are not simulated.'), field('Default risk per trade (%)', risk)),
     field('Chart timezone', tz),
     status, go,
@@ -440,7 +444,9 @@ function liveSessionModal(done: (s: Session) => void) {
       s.state.panes = s.state.panes.map((p, i) => ({ ...p, tf: ['1m', '5m', '15m', '1H'][i] }));
       try {
         const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
-        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value }));
+        // start with a stop about 0.5% from price, so the first order fits the margin
+        const slPips = Math.max(1, Math.round((bars.c[bars.n - 1] * 0.005) / spec.pipSize));
+        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value, slPips }));
       } catch {
         /* ignore */
       }

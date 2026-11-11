@@ -86,3 +86,106 @@ describe('session date range', () => {
     expect(checkRange({ from: 50, to: 40 }, 45, null, fmt)).toMatch(/no overlapping/);
   });
 });
+
+// ---- live feed: fallback to polling, recovery, dead-socket watchdog ----------------------
+import { afterEach, beforeEach, vi } from 'vitest';
+import { LiveFeed, hlCoins as coinsFor, coinLabel, hlSymbol as symFor, type FeedStatus as FS } from '../src/data/hyperliquid';
+
+class FakeWS {
+  static all: FakeWS[] = [];
+  static fail = true;
+  readyState = 0;
+  sent: string[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(public url: string) {
+    FakeWS.all.push(this);
+    setTimeout(() => {
+      if (FakeWS.fail) { this.readyState = 3; this.onerror?.(); this.onclose?.(); } else { this.readyState = 1; this.onopen?.(); }
+    }, 10);
+  }
+  send(m: string) { this.sent.push(m); }
+  close() { if (this.readyState === 3) return; this.readyState = 3; this.onclose?.(); }
+}
+
+describe('live feed resilience', () => {
+  beforeEach(() => { vi.useFakeTimers(); FakeWS.all = []; FakeWS.fail = true; vi.stubGlobal('WebSocket', FakeWS); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  const make = (poll: () => Promise<number[][]>) => {
+    const st: FS[] = [], candles: number[][] = [], trades: number[][] = [];
+    let opened = 0;
+    const feed = new LiveFeed('BTC', { status: (s) => st.push(s), candle: (r) => candles.push(r), trade: (t, px) => trades.push([t, px]), opened: () => opened++ }, { poll, pollMs: 3000 });
+    return { feed, st, candles, trades, opened: () => opened };
+  };
+
+  it('polls over HTTPS when the socket cannot connect, then returns to the socket', async () => {
+    const poll = vi.fn(async () => [[1700000040, 100, 101, 99, 100.5, 3]]);
+    const x = make(poll);
+    await vi.advanceTimersByTimeAsync(1200); // first attempt fails, retry after 1 s fails too
+    expect(x.feed.isPolling).toBe(true);
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(poll).toHaveBeenCalled();
+    expect(x.st).toContain('polling');
+    expect(x.candles.length).toBeGreaterThan(0);
+    expect(x.trades[0][1]).toBe(100.5);
+    FakeWS.fail = false;
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(x.st[x.st.length - 1]).toBe('live');
+    expect(x.feed.isPolling).toBe(false);
+    expect(x.opened()).toBe(1);
+    const calls = poll.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(poll.mock.calls.length).toBe(calls);
+    x.feed.close();
+  });
+
+  it('reports offline when polling fails too', async () => {
+    const x = make(async () => { throw new Error('down'); });
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(x.st).toContain('offline');
+    x.feed.close();
+  });
+
+  it('reconnects a socket that went silent', async () => {
+    FakeWS.fail = false;
+    const x = make(async () => []);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(x.st[x.st.length - 1]).toBe('live');
+    expect(FakeWS.all[0].sent.some((m) => m.includes('"trades"'))).toBe(true);
+    await vi.advanceTimersByTimeAsync(31000); // pings go out, nothing comes back
+    expect(FakeWS.all[0].readyState).toBe(3);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(FakeWS.all.length).toBeGreaterThan(1);
+    x.feed.close();
+  });
+
+  it('wake() reconnects at once', async () => {
+    const x = make(async () => []);
+    await vi.advanceTimersByTimeAsync(5000);
+    const n = FakeWS.all.length;
+    FakeWS.fail = false;
+    x.feed.wake();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(FakeWS.all.length).toBe(n + 1);
+    expect(x.st[x.st.length - 1]).toBe('live');
+    x.feed.close();
+  });
+});
+
+describe('builder-deployed markets', () => {
+  it('lists own perps and builder markets from one request, and names them', async () => {
+    const f = (async () => ({ ok: true, status: 200, json: async () => [
+      { universe: [{ name: 'BTC', szDecimals: 5, maxLeverage: 40 }, { name: 'OLD', szDecimals: 1, maxLeverage: 3, isDelisted: true }] },
+      { universe: [{ name: 'xyz:GOLD', szDecimals: 4, maxLeverage: 20 }] },
+    ] })) as unknown as typeof fetch;
+    const coins = await coinsFor(f);
+    expect(coins.map((c) => c.name)).toEqual(['BTC', 'xyz:GOLD']);
+    expect(coins[1].dex).toBe('xyz');
+    expect(coinLabel('xyz:GOLD')).toBe('GOLD · xyz');
+    expect(coinLabel('BTC')).toBe('BTC');
+    expect(symFor('xyz:GOLD')).toBe('HL-XYZGOLD');
+  });
+});
