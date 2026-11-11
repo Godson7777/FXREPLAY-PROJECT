@@ -94,6 +94,7 @@ async function sample(page, cdp) {
     const total = f.reduce((a, b) => a + b, 0), q = (arr, p) => (arr.length ? arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] : 0);
     const out = { fps: f.length ? Math.round((f.length / total) * 1000) : 0, slowPct: f.length ? +((f.filter((x) => x > 34).length / f.length) * 100).toFixed(1) : 0, worst: Math.round(f[f.length - 1] ?? 0),
       long: m.long.length, longMax: Math.max(0, ...m.long), inP95: Math.round(q(ev, 0.95)), inMax: Math.round(ev[ev.length - 1] ?? 0), cls: +m.cls.toFixed(3) };
+    out.loaf = m.loaf; m.loaf = [];
     m.long = []; m.events = []; m.cls = 0; m.frames = [];
     return out;
   });
@@ -114,6 +115,9 @@ async function open() {
     try { new PerformanceObserver((l) => l.getEntries().forEach((e) => m.long.push(Math.round(e.duration)))).observe({ type: 'longtask' }); } catch {}
     try { new PerformanceObserver((l) => l.getEntries().forEach((e) => m.events.push({ n: e.name, d: Math.round(e.duration) }))).observe({ type: 'event', durationThreshold: 16 }); } catch {}
     try { new PerformanceObserver((l) => l.getEntries().forEach((e) => { if (!e.hadRecentInput) m.cls += e.value; })).observe({ type: 'layout-shift' }); } catch {}
+    // which script made a frame long (Long Animation Frames API), for LOAF=1 runs
+    m.loaf = [];
+    try { new PerformanceObserver((l) => l.getEntries().forEach((e) => { if (e.duration > 50) m.loaf.push({ d: Math.round(e.duration), b: Math.round(e.blockingDuration), s: (e.scripts || []).map((x) => [x.invoker || x.name, x.sourceFunctionName || '', Math.round(x.duration), Math.round(x.forcedStyleAndLayoutDuration || 0)]) }); })).observe({ type: 'long-animation-frame' }); } catch {}
     let last = 0;
     const tick = (t) => { if (last) m.frames.push(t - last); last = t; requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
@@ -242,6 +246,14 @@ async function run(strategy, symbolIndex, rr) {
       const secs = Math.round((Date.now() - blockStart) / 1000);
       blockStart = Date.now();
       blocks.push({ upTo: stats.trades, ...s, secs });
+      if (process.env.LOAF && s.loaf.length) {
+        const agg = new Map();
+        for (const f of s.loaf) {
+          if (!f.s.length) { const k = '(no script: rendering)'; const a = agg.get(k) ?? [0, 0, 0]; a[0]++; a[1] += f.d; agg.set(k, a); }
+          for (const [inv, fn, d, lay] of f.s) { const k = `${inv} ${fn}`; const a = agg.get(k) ?? [0, 0, 0]; a[0]++; a[1] += d; a[2] += lay; agg.set(k, a); }
+        }
+        console.log(`  long frames ${s.loaf.length} (max ${Math.max(...s.loaf.map((f) => f.d))}ms): ` + [...agg].sort((a, b) => b[1][1] - a[1][1]).slice(0, 6).map(([k, v]) => `${k} ×${v[0]} ${v[1]}ms${v[2] ? ` (layout ${v[2]}ms)` : ''}`).join(' · '));
+      }
       console.log(`trades ${String(stats.trades - BLOCK + 1).padStart(4)}–${String(stats.trades).padEnd(4)} | fps ${String(s.fps).padStart(3)} | slow frames ${String(s.slowPct).padStart(4)}% (worst ${String(s.worst).padStart(4)}ms) | long tasks ${String(s.long).padStart(3)} (max ${String(s.longMax).padStart(3)}ms) | input p95 ${String(s.inP95).padStart(3)}ms max ${String(s.inMax).padStart(3)}ms | heap ${String(s.heapMB).padStart(6)}MB | DOM ${String(s.nodes).padStart(6)} | ${secs}s`);
     }
   }

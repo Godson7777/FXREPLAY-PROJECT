@@ -145,6 +145,12 @@ export class Workspace implements PaneHost {
     parent.append(this.root);
     this.buildPanes();
     this.renderAll();
+    // tests read the engine state directly instead of scraping the screen
+    try {
+      if (localStorage.getItem('overflowtrade.debug')) (window as unknown as { __ot?: Workspace }).__ot = this;
+    } catch {
+      /* storage unavailable */
+    }
     if (this.session.live) this.startLive();
     else if (!this.replay.hasFuture()) this.showNoDataBanner();
   }

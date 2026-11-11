@@ -16,10 +16,24 @@ import { h, money, theme, type Theme } from './dom';
  * (43,000 one-minute candles made a step take about 40 ms), so the chart holds a window
  * behind the cursor and loads older candles only when the user scrolls back to them.
  */
-const WINDOW = 8000;
-/** the window is cut back to WINDOW once it has grown to this */
-const WINDOW_MAX = 12000;
+const [WINDOW, WINDOW_MAX, HARD_MAX] = windowSizes();
+
+/**
+ * 8,000 candles, cut back once the window reaches 12,000, and never more than 60,000
+ * however far back the user scrolls. Tests can shrink all three.
+ */
+function windowSizes(): [number, number, number] {
+  try {
+    const m = /^(\d+),(\d+),(\d+)$/.exec(localStorage.getItem('overflowtrade.debug.window') ?? '');
+    if (m && +m[1] >= 100 && +m[2] > +m[1] && +m[3] > +m[2]) return [+m[1], +m[2], +m[3]];
+  } catch {
+    /* storage unavailable */
+  }
+  return [8000, 12000, 60000];
+}
 const IND_WINDOW = 3000;
+/** empty bars kept to the right of the latest candle */
+const RIGHT_OFFSET = 12;
 const aggCache = new Map<string, Agg>();
 
 export function getAgg(sym: string, b: Bars, tf: Timeframe, tz: string): Agg {
@@ -167,7 +181,7 @@ export class ChartPane {
         vertLine: { color: this.th.muted, width: 1, style: LineStyle.Dashed, labelBackgroundColor: this.th.surface },
         horzLine: { color: this.th.muted, width: 1, style: LineStyle.Dashed, labelBackgroundColor: this.th.surface },
       },
-      timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
+      timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: RIGHT_OFFSET, barSpacing: 8 },
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
@@ -407,7 +421,7 @@ export class ChartPane {
     this.priceLines.forEach((l) => this.main.removePriceLine(l));
     this.priceLines.clear();
     this.sync(true);
-    this.chart.timeScale().scrollToRealTime();
+    this.toLatest();
     this.renderHeader();
   }
 
@@ -457,15 +471,29 @@ export class ChartPane {
     return c;
   }
 
-  /** candles loaded beyond the window because the user scrolled back */
+  /**
+   * Put the latest candle back at the right edge. Not the library's animated
+   * scrollToRealTime(): that one stops at its last animation frame, which from far away
+   * is short of the latest candle, and a chart that does not show the latest candle
+   * stops following the replay.
+   */
+  toLatest() {
+    this.chart.timeScale().scrollToPosition(RIGHT_OFFSET, false);
+  }
+
+  /** how far the window may grow past WINDOW_MAX before the next trim (older candles the user loaded or is viewing) */
   private older = 0;
   private rewindowing = false;
 
-  /** Replace the chart's data with candles `start..k`, keeping the same candles in view. */
+  /**
+   * Replace the chart's data with candles `start..k`. The time scale keeps its distance
+   * from the latest candle, so the view stays where it was: following the replay, or on
+   * the same older candles.
+   */
   private rewindow(start: number, k: number, cursor: number) {
     const ts = this.chart.timeScale();
-    const vr = ts.getVisibleLogicalRange();
-    const shift = this.start - start;
+    const pos = ts.scrollPosition(); // bars between the right edge and the latest candle; negative = scrolled back
+    const added = this.k >= 0 ? k - this.k : 0;
     this.rewindowing = true;
     try {
       this.start = start;
@@ -475,7 +503,8 @@ export class ChartPane {
       this.k = k;
       this.times = this.agg.time.subarray(start, k + 1);
       this.rebuildIndicators();
-      if (vr) ts.setVisibleLogicalRange({ from: vr.from + shift, to: vr.to + shift });
+      // scrolled back: stay on exactly the same candles although newer ones were added
+      if (pos < 0 && added > 0) ts.scrollToPosition(pos - added, false);
     } finally {
       this.rewindowing = false;
     }
@@ -484,22 +513,30 @@ export class ChartPane {
   /** Drop the oldest candles once the window has grown, unless the user is looking at them. */
   private trimWindow(k: number, cursor: number): boolean {
     const vr = this.chart.timeScale().getVisibleLogicalRange();
-    const start = Math.max(0, k - WINDOW + 1);
+    let start = Math.max(0, k - WINDOW + 1);
     if (vr && this.start + vr.from < start + 50) {
-      this.older += 2000; // still viewing old candles: leave them and look again later
-      return false;
+      // the view reaches into the candles that would go: leave them, up to the hard limit
+      if (k - this.start + 1 <= HARD_MAX) {
+        this.older += Math.ceil(WINDOW / 4);
+        return false;
+      }
+      start = Math.max(0, k - Math.floor(HARD_MAX * 0.8) + 1);
     }
-    this.older = 0;
+    this.older = Math.max(0, k - start + 1 - WINDOW);
     this.rewindow(start, k, cursor);
     return true;
   }
 
-  /** The view reached the left edge: load an older stretch of candles. */
+  /** The view reached the left edge: load an older stretch of candles (up to the hard limit). */
   private loadOlder() {
     if (this.rewindowing || this.start <= 0 || this.k < 0) return;
+    // enough to cover the view in one go, however far past the loaded candles it reaches
+    const vr = this.chart.timeScale().getVisibleLogicalRange();
+    const missing = vr ? Math.max(0, Math.ceil(-vr.from)) : 0;
+    const start = Math.max(0, this.start - Math.max(WINDOW, missing + Math.ceil(WINDOW / 4)), this.k - HARD_MAX + 1);
+    if (start >= this.start) return;
     const cursor = this.host.replay.cursor[this.cfg.symbol] ?? 0;
-    const start = Math.max(0, this.start - WINDOW);
-    this.older += this.start - start;
+    this.older = Math.max(0, this.k - start + 1 - WINDOW);
     this.rewindow(start, this.k, cursor);
     this.refreshOverlays();
     this.layer.schedule();
@@ -515,10 +552,21 @@ export class ChartPane {
       this.start = Math.max(0, k - WINDOW + 1);
       const data = [];
       for (let j = this.start; j <= k; j++) data.push(this.point(j, cursor));
-      this.main.setData(data);
+      this.rewindowing = true; // no loading of older candles from inside this reset
+      try {
+        this.main.setData(data);
+      } finally {
+        this.rewindowing = false;
+      }
       this.k = k;
       this.times = a.time.subarray(this.start, k + 1);
       this.rebuildIndicators();
+      // a jump while scrolled back can leave the view left of the new window: fill it,
+      // once the caller has had the chance to scroll to the latest candle
+      queueMicrotask(() => {
+        const vr = this.chart.timeScale().getVisibleLogicalRange();
+        if (vr && vr.from < 10) this.loadOlder();
+      });
     } else if (k - this.start + 1 > WINDOW_MAX + this.older && this.trimWindow(k, cursor)) {
       // window cut back; the chart now holds the latest WINDOW candles
     } else {
