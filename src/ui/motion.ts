@@ -88,12 +88,14 @@ export function countUpText(el: HTMLElement, ms = 900, delay = 0) {
   });
 }
 
-/** Brief green/red flash, restartable. */
+/**
+ * Brief green/red flash, restartable. Uses the Web Animations API so it needs no
+ * forced layout (this runs on every price change) and survives in-place DOM updates.
+ */
 export function flash(el: Element, dir: 'up' | 'dn') {
-  if (reduced()) return;
-  el.classList.remove('fx-up', 'fx-dn');
-  void (el as HTMLElement).offsetWidth;
-  el.classList.add(dir === 'up' ? 'fx-up' : 'fx-dn');
+  if (reduced() || typeof el.animate !== 'function') return;
+  const c = dir === 'up' ? '#39db7f' : '#ff8a8f';
+  el.animate([{ color: c, textShadow: `0 0 12px ${c}` }, {}], { duration: 450, easing: 'ease-out' });
 }
 
 const NS = 'http://www.w3.org/2000/svg';

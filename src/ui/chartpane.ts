@@ -11,7 +11,14 @@ import { DrawingLayer, type DragLine, type Drawing, type Zone } from './drawings
 import type { PosEnv, PosSettings } from '../engine/position';
 import { h, money, theme, type Theme } from './dom';
 
-const MAX_DISPLAY = 60000;
+/**
+ * Candles kept on the chart. Every replay step costs time in proportion to this number
+ * (43,000 one-minute candles made a step take about 40 ms), so the chart holds a window
+ * behind the cursor and loads older candles only when the user scrolls back to them.
+ */
+const WINDOW = 8000;
+/** the window is cut back to WINDOW once it has grown to this */
+const WINDOW_MAX = 12000;
 const IND_WINDOW = 3000;
 const aggCache = new Map<string, Agg>();
 
@@ -162,6 +169,9 @@ export class ChartPane {
       },
       timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
+    });
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+      if (r && r.from < 10) this.loadOlder();
     });
     this.createMain();
     this.chartEl.append(this.tagLayer);
@@ -447,19 +457,70 @@ export class ChartPane {
     return c;
   }
 
+  /** candles loaded beyond the window because the user scrolled back */
+  private older = 0;
+  private rewindowing = false;
+
+  /** Replace the chart's data with candles `start..k`, keeping the same candles in view. */
+  private rewindow(start: number, k: number, cursor: number) {
+    const ts = this.chart.timeScale();
+    const vr = ts.getVisibleLogicalRange();
+    const shift = this.start - start;
+    this.rewindowing = true;
+    try {
+      this.start = start;
+      const data = [];
+      for (let j = start; j <= k; j++) data.push(this.point(j, cursor));
+      this.main.setData(data);
+      this.k = k;
+      this.times = this.agg.time.subarray(start, k + 1);
+      this.rebuildIndicators();
+      if (vr) ts.setVisibleLogicalRange({ from: vr.from + shift, to: vr.to + shift });
+    } finally {
+      this.rewindowing = false;
+    }
+  }
+
+  /** Drop the oldest candles once the window has grown, unless the user is looking at them. */
+  private trimWindow(k: number, cursor: number): boolean {
+    const vr = this.chart.timeScale().getVisibleLogicalRange();
+    const start = Math.max(0, k - WINDOW + 1);
+    if (vr && this.start + vr.from < start + 50) {
+      this.older += 2000; // still viewing old candles: leave them and look again later
+      return false;
+    }
+    this.older = 0;
+    this.rewindow(start, k, cursor);
+    return true;
+  }
+
+  /** The view reached the left edge: load an older stretch of candles. */
+  private loadOlder() {
+    if (this.rewindowing || this.start <= 0 || this.k < 0) return;
+    const cursor = this.host.replay.cursor[this.cfg.symbol] ?? 0;
+    const start = Math.max(0, this.start - WINDOW);
+    this.older += this.start - start;
+    this.rewindow(start, this.k, cursor);
+    this.refreshOverlays();
+    this.layer.schedule();
+  }
+
   /** Bring the chart up to the replay cursor (incrementally when possible). */
   sync(full = false) {
     const cursor = this.host.replay.cursor[this.cfg.symbol] ?? 0;
     const a = this.agg;
     const k = a.baseToAgg[cursor];
     if (full || this.k < 0 || k < this.k || k - this.k > 400) {
-      this.start = Math.max(0, k - MAX_DISPLAY + 1);
+      this.older = 0;
+      this.start = Math.max(0, k - WINDOW + 1);
       const data = [];
       for (let j = this.start; j <= k; j++) data.push(this.point(j, cursor));
       this.main.setData(data);
       this.k = k;
       this.times = a.time.subarray(this.start, k + 1);
       this.rebuildIndicators();
+    } else if (k - this.start + 1 > WINDOW_MAX + this.older && this.trimWindow(k, cursor)) {
+      // window cut back; the chart now holds the latest WINDOW candles
     } else {
       if (k > this.k) this.main.update(this.point(this.k, cursor));
       for (let j = Math.max(this.k, this.start); j <= k; j++) this.main.update(this.point(j, cursor));
