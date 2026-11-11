@@ -3,13 +3,15 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Overflow Trade — market replay & backtesting platform with unlimited timeframes and deep analytics.",
+  "description": "Overflow Trade \u2014 market replay & backtesting platform with unlimited timeframes and deep analytics.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:ux": "node tests/e2e/ux-audit.mjs",
+    "audit:live": "node tests/e2e/live.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

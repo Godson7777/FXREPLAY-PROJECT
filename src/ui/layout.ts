@@ -3,6 +3,7 @@ import { cloudButton } from './cloudui';
 import { LOGO } from './logo';
 import { EXPLAIN, type ExplainId } from '../analytics/explain';
 import type { TierId } from '../analytics/score';
+import { idealVisual } from './an-ideal';
 
 export type NavId = 'sessions' | 'strategies' | 'leaderboard' | 'analytics' | 'data' | 'methodology' | '';
 
@@ -86,6 +87,7 @@ export function explainPanel(ref: ExplainRef) {
   const e = typeof ref === 'string' ? base : { ...base, what: `${ref.what} ${base.what}` };
   const part = (t: string, s?: string) => (s ? h('div', {}, h('h6', {}, t), h('p', {}, s)) : null);
   return h('div', { class: 'how', role: 'region', 'aria-label': 'How to read' },
+    idealVisual(id),
     part('What it measures', e.what), part('How to read it', e.read), part('What good looks like', e.good), part('Watch out for', e.watch));
 }
 

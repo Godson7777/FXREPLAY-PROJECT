@@ -14,7 +14,7 @@ import { TOOL_INFO, flipDrawing, isPosTool, posLevels, type DragLine, type Drawi
 import { autoType, lotsFor, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
 import { listDatasets, loadBars } from '../data/store';
 import { indexAtOrBefore } from '../core/types';
-import { h, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton } from './dom';
+import { h, patchChildren, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton } from './dom';
 import { cloudButton } from './cloudui';
 import { LOGO } from './logo';
 
@@ -174,7 +174,7 @@ export class Workspace implements PaneHost {
       h('div', { class: 'segs', title: 'Chart layout' }, ...layoutBtns),
       h('button', { class: 'ghost', onclick: () => this.indicatorsModal() }, 'ƒx Indicators'),
       h('button', { class: 'ghost', onclick: () => this.settingsModal() }, '⚙ Settings'),
-      h('button', { class: 'ghost', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
+      h('button', { class: 'ghost no-touch', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
       cloudButton(),
       themeButton(),
       h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, 'Analytics & score'),
@@ -296,10 +296,11 @@ export class Workspace implements PaneHost {
   private renderLiveBadge() {
     const el = this.liveEl;
     if (!el) return;
-    const age = this.feed?.lastMsg ? Math.round((Date.now() - this.feed.lastMsg) / 1000) : null;
+    const age = this.feed?.lastData ? Math.round((Date.now() - this.feed.lastData) / 1000) : null;
     const st = this.liveStatus;
     el.className = `live-badge ${st}`;
-    el.textContent = st === 'live' ? `● LIVE${age != null && age > 5 ? ` · ${age}s since last update` : ''}` : st === 'connecting' ? '● CONNECTING' : st === 'reconnecting' ? '● RECONNECTING…' : '● OFFLINE — retrying';
+    el.title = st === 'polling' ? 'The streaming connection is unavailable on this network, so prices are fetched every 3 seconds. Stops and targets are checked on each update.' : '';
+    el.textContent = st === 'polling' ? `● LIVE · updates every 3 s${age != null && age > 10 ? ` · ${age}s since last update` : ''}` : st === 'live' ? `● LIVE${age != null && age > 90 ? ' · no trades for a while (quiet or closed market)' : age != null && age > 5 ? ` · ${age}s since last update` : ''}` : st === 'connecting' ? '● CONNECTING' : st === 'reconnecting' ? '● RECONNECTING…' : '● OFFLINE — retrying';
   }
 
   private startLive() {
@@ -312,10 +313,21 @@ export class Workspace implements PaneHost {
       trade: (t, px) => this.onLiveTrade(t, px),
     });
     this.liveAgeTimer = window.setInterval(() => this.renderLiveBadge(), 1000);
+    document.addEventListener('visibilitychange', this.onWake);
+    window.addEventListener('online', this.onWake);
     this.liveSaveTimer = window.setInterval(() => void this.saveLiveBars(), 60000);
   }
 
+  /** back in the foreground or back online: reconnect at once and fill the gap */
+  private onWake = () => {
+    if (document.hidden || !this.feed) return;
+    this.feed.wake();
+    void this.backfill();
+  };
+
   private stopLive() {
+    document.removeEventListener('visibilitychange', this.onWake);
+    window.removeEventListener('online', this.onWake);
     if (!this.feed) return;
     this.feed.close();
     this.feed = null;
@@ -1604,7 +1616,7 @@ export class Workspace implements PaneHost {
     };
     const typeSeg = h('div', { class: 'segs full' },
       ...(['market', 'limit', 'stop'] as OrderType[]).map((t) =>
-        h('button', { class: `seg${this.ticket.type === t ? ' on' : ''}`, 'data-otype': t, onclick: () => { this.ticket.type = t; this.ticket.price = +bid.toFixed(dg); this.syncLinked(); this.renderSide(); this.panes.forEach((p) => p.redraw()); } }, t[0].toUpperCase() + t.slice(1))),
+        h('button', { class: `seg${this.ticket.type === t ? ' on' : ''}`, 'data-otype': t, onclick: () => { this.ticket.type = t; this.ticket.price = +br.bid(sym).toFixed(dg); this.syncLinked(); this.renderSide(); this.panes.forEach((p) => p.redraw()); } }, t[0].toUpperCase() + t.slice(1))),
     );
     const linked = this.linked();
     const sideSeg = h('div', { class: 'segs full side-seg', role: 'group', 'aria-label': 'Order side' },
@@ -1614,7 +1626,7 @@ export class Workspace implements PaneHost {
     const pvToggle = h('label', { class: 'check small', title: 'Draw this order on the chart as a long/short box you can drag' }, h('input', { type: 'checkbox', checked: pr.preview, onchange: (e: Event) => { pr.preview = (e.target as HTMLInputElement).checked; this.savePrefs(); this.panes.forEach((p) => p.redraw()); } }), ' Show on chart');
     const plv = this.ticketLevels(this.ticket.side);
     const placeLabel = `Place ${this.ticket.side === 'long' ? 'BUY' : 'SELL'} ${plv.type.toUpperCase()} ${plv.lots.toFixed(2)}${plv.type === 'market' ? '' : ` @ ${plv.entry.toFixed(dg)}`}`;
-    const place = h('button', { class: `place-btn ${this.ticket.side === 'long' ? 'buy' : 'sell'}`, id: 'placeBtn', onclick: () => (linked ? this.placeFromTool(linked, sym) : this.submit(this.ticket.side)) }, linked ? `${linked.type === 'long' ? 'Buy' : 'Sell'} from the R:R tool` : placeLabel);
+    const place = h('button', { class: `place-btn ${this.ticket.side === 'long' ? 'buy' : 'sell'}`, id: 'placeBtn', onclick: () => { const l = this.linked(); if (l) this.placeFromTool(l, sym); else this.submit(this.ticket.side); } }, linked ? `${linked.type === 'long' ? 'Buy' : 'Sell'} from the R:R tool` : placeLabel);
     const linkNote = linked
       ? h('div', { class: 'callout small' }, h('span', {}, `Linked to the ${linked.type} position tool — the ticket and the box move together.`), h('button', { class: 'ghost sm', onclick: () => { this.active.layer.selected = null; } }, 'Unlink'))
       : null;
@@ -1642,8 +1654,10 @@ export class Workspace implements PaneHost {
       h('button', { class: 'chip', title: 'Any timeframe…', onclick: () => this.tfPrompt(this.active, '') }, '+'),
     );
 
-    this.orderRoot.innerHTML = '';
-    this.orderRoot.append(
+    // what the listeners above close over; while it is unchanged the ticket is updated in
+    // place, so a tick never swallows a click, closes a dropdown or moves the caret
+    const key = [sym, this.active.cfg.tf, this.ticket.type, this.ticket.side, linked?.id ?? '', linked?.type ?? '', pr.sizeMode, pr.tpMode, this.session.state.favTfs.join(','), br.leveraged ? 1 : 0, dg].join('|');
+    const cards = [
       h('section', { class: 'card' },
         h('div', { class: 'card-title' }, h('span', {}, `${sym}`), h('small', { class: 'muted' }, `Active chart · ${this.active.cfg.tf}`)),
         favs,
@@ -1671,11 +1685,11 @@ export class Workspace implements PaneHost {
           field('Auto-BE at R', inp('tBe', this.ticket.be || '', (v) => (this.ticket.be = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
           field('Tags / setup', inp('tTags', this.ticket.tags, (v) => (this.ticket.tags = v), { type: 'text', placeholder: 'breakout, A+' })),
         ),
-        h('div', { class: 'calc', id: 'calc' }),
+        h('div', { class: 'calc', id: 'calc', 'data-keep': '' }),
         place,
         pvToggle,
       ),
-      this.challengeCard() ?? '',
+      this.challengeCard(),
       h('section', { class: 'card acct' },
         h('div', { class: 'card-title' }, h('span', {}, 'Account')),
         kv('Balance', money(br.s.balance)),
@@ -1686,7 +1700,8 @@ export class Workspace implements PaneHost {
         kv('Net P&L', `${money(net, true)} (${num((net / this.session.balance) * 100, 2, true)}%)`, cls(net)),
         kv('Trades · Win rate', `${trades.length} · ${(wr * 100).toFixed(1)}%`),
       ),
-    );
+    ].filter((c): c is HTMLElement => !!c);
+    patchChildren(this.orderRoot, key, cards);
     this.renderTicketCalc();
   }
 
@@ -1737,7 +1752,8 @@ export class Workspace implements PaneHost {
       const margin = br.marginFor(sym, L.lots, L.entry, lev);
       el.insertAdjacentHTML('beforeend', `
       <div><span>Margin</span><b>${money(margin)}</b></div>
-      <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>
+      <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>${br.freeMargin() < margin ? `
+      <div class="lv calc-warn">Too large for the free margin: at ${lev}× the most you can open is ${(Math.floor((L.lots * Math.max(0, br.freeMargin()) / margin) * 100) / 100).toFixed(2)} lots. Widen the stop, lower the risk or raise the leverage.</div>` : ''}
       <div class="lv"><span>Liq. buy / sell</span><b>${br.liqPrice(sym, 'long', L.entry, lev).toFixed(dg)} / ${br.liqPrice(sym, 'short', S.entry, lev).toFixed(dg)}</b></div>`);
     }
   }
@@ -1750,7 +1766,7 @@ export class Workspace implements PaneHost {
           t === 'positions' ? `Positions (${br.s.positions.length})` : t === 'orders' ? `Orders (${br.s.orders.length})` : `History (${br.s.trades.length})`)),
       h('div', { class: 'spacer' }),
       br.s.positions.length ? h('button', { class: 'ghost sm', onclick: () => { br.closeAll(); this.afterTrade(); } }, 'Close all') : null,
-      h('button', { class: 'ghost sm bottom-toggle', type: 'button', onclick: () => this.toggleBottom() }),
+      h('button', { class: 'ghost sm bottom-toggle', type: 'button', title: this.prefs.bottomCollapsed ? 'Show the panel (swipe up or `)' : 'Hide the panel (swipe down or `)', onclick: () => this.toggleBottom() }, this.prefs.bottomCollapsed ? '▴' : '▾'),
     );
     const body = h('div', { class: 'table-wrap' });
     const t = h('table', { class: 'tbl' });
@@ -1816,8 +1832,8 @@ export class Workspace implements PaneHost {
       if (!br.s.trades.length) tb.append(emptyRow(13, 'Closed trades appear here. Every close is auto-screenshotted for your journal.'));
       t.append(tb);
     }
-    this.bottom.innerHTML = '';
-    this.bottom.append(h('div', { class: 'bottom-handle', title: 'Drag or swipe to resize · swipe down to hide' }, h('i', {})), tabs, body);
+    const key = [this.tab, br.s.positions.map((p) => p.id).join(','), br.s.orders.map((o) => o.id).join(','), br.s.trades.length, br.s.trades[br.s.trades.length - 1]?.id ?? ''].join('|');
+    patchChildren(this.bottom, key, [h('div', { class: 'bottom-handle', title: 'Drag or swipe to resize · swipe down to hide' }, h('i', {})), tabs, body]);
     this.applyBottom();
   }
 
