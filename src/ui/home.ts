@@ -18,12 +18,28 @@ import { PRESETS, type ChallengeRules } from '../engine/rules';
 import { idb } from '../data/store';
 import { listStrategies, mergeStrategies } from '../data/strategies';
 import { reportsFor } from '../analytics/service';
+import { heroDemo } from './hero-demo';
+import { revealAll } from './motion';
 import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid } from './dom';
 import { pageHead, pageShell, scoreBadge } from './layout';
 import { addToStrategyModal } from './strategies';
 
 export { LOGO } from './logo';
 export { uid } from './dom';
+
+/** Tiny equity curve of a session's closed trades, for its card. */
+function equitySpark(s: Session) {
+  const tr = s.state.broker.trades;
+  if (tr.length < 2) return null;
+  const ys = [s.balance];
+  for (const t of tr) ys.push(ys[ys.length - 1] + t.pnl);
+  const lo = Math.min(...ys), hi = Math.max(...ys), W = 300, H = 40;
+  const pts = ys.map((v, i) => `${((i / (ys.length - 1)) * W).toFixed(1)},${(H - 3 - ((v - lo) / (hi - lo || 1)) * (H - 6)).toFixed(1)}`).join(' ');
+  const up = ys[ys.length - 1] >= ys[0];
+  const box = h('div', { class: `spark ${up ? 'up' : 'dn'}`, title: `Balance after each of the ${tr.length} closed trades` });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><polygon points="0,${H} ${pts} ${W},${H}"/><polyline points="${pts}" pathLength="1"/></svg>`;
+  return box;
+}
 
 const fmtDate = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -60,6 +76,10 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
           h('div', { class: 'point' }, h('span', { class: 'n' }, '03'), h('h5', {}, 'The Overflow Score'), h('p', {}, 'Sharpe, drawdown, monthly consistency, market regimes, significance, costs and Monte Carlo — summed up in one score and a leaderboard.')),
         ))),
     );
+    const hero = main.querySelector<HTMLElement>('.hero .wrap')!;
+    hero.querySelector('.hero-actions')!.after(heroDemo());
+    revealAll(hero.children, 90);
+    revealAll(main.querySelectorAll('.point'), 110);
     return;
   }
 
@@ -99,6 +119,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
       h('div', { class: 'scard-head' }, h('div', {}, h('h3', {}, s.name, s.live ? h('span', { class: 'live-badge live', style: 'margin-left:.5rem;vertical-align:middle' }, '● LIVE') : null), h('div', { class: 'by' }, `${s.symbols.join(' · ')} · ${s.live ? 'live since' : 'started'} ${fmtDate(s.start).slice(0, 10)}${s.leverage ? ` · ${s.leverage}×` : ''}`)), scoreSlot),
       status ? h('div', { class: 'badges' }, status) : null,
       h('div', { class: 'muted small' }, s.imported ? `${fmtDate(s.start).slice(0, 10)} → ${fmtDate(s.end ?? s.start).slice(0, 10)} · ${s.imported.file}` : `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
+      equitySpark(s),
       h('div', { class: 'scard-stats' },
         h('div', {}, h('span', {}, 'Balance'), h('b', { title: money(bal) }, `$${Math.round(bal).toLocaleString('en-US')}`)),
         h('div', {}, h('span', {}, 'Net'), h('b', { class: cls(bal - s.balance) }, pct((bal - s.balance) / s.balance, 2, true))),
@@ -127,6 +148,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
     grid.append(card);
   }
   body.append(grid);
+  revealAll(grid.children, 60);
   // scores load in the background (regime tagging may need the market data)
   void reportsFor(sessions.map((s) => [s]), sessions).then((reps) => {
     reps.forEach((r, i) => {

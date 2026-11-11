@@ -1,3 +1,4 @@
+import { flash } from './motion';
 import { parseTf } from '../core/timeframe';
 import { fmtLocal, fmtDuration, offsetFn, localToUtc, ZONES } from '../core/tz';
 import { INDICATORS, indicatorDef } from '../core/indicators';
@@ -904,7 +905,7 @@ export class Workspace implements PaneHost {
       if (!alive) return this.endReached();
       if (this.replay.broker.s.trades.length !== trades0 && this.pauseOnClose) {
         this.pause();
-        toast('Paused: a trade was closed', 'info');
+        toast('Paused — press play to continue', 'info');
         return;
       }
       this.rafId = requestAnimationFrame(frame);
@@ -1141,9 +1142,48 @@ export class Workspace implements PaneHost {
     if (a) a.textContent = br.ask(sym).toFixed(dg);
     const play = this.tradeBar.querySelector('.tb-play');
     if (play) play.textContent = this.playing ? '❚❚' : '▶';
+    this.flashPrice(sym, br.bid(sym));
     const ord = this.tradeBar.querySelector('.tb-order');
     if (ord) ord.textContent = this.sheetOpen ? 'Order ▾' : 'Order ▴';
   }
+
+  private lastPx: { sym: string; px: number } | null = null;
+  /** Green/red blink on the quotes when the price moves (not during fast playback, where it would strobe). */
+  private flashPrice(sym: string, px: number) {
+    const last = this.lastPx;
+    this.lastPx = { sym, px };
+    if (!last || last.sym !== sym || last.px === px || (this.playing && this.prefs.speed > 5)) return;
+    const dir = px > last.px ? 'up' : 'dn';
+    queueMicrotask(() => {
+      this.root.querySelectorAll('[data-live=bid], [data-live=ask], [data-tb=bid], [data-tb=ask]').forEach((el) => flash(el, dir));
+    });
+  }
+
+  private seenPos = -1;
+  private seenTrades = -1;
+  /** Say how each newly closed trade ended, and let the new rows announce themselves. */
+  private announce() {
+    const br = this.replay.broker;
+    const maxPos = br.s.positions.reduce((m, p) => Math.max(m, p.id), 0);
+    if (this.seenPos < 0) this.seenPos = maxPos;
+    else if (maxPos > this.seenPos) window.setTimeout(() => (this.seenPos = Math.max(this.seenPos, maxPos)), 1400);
+    const n = br.s.trades.length;
+    if (this.seenTrades < 0) this.seenTrades = n;
+    if (n <= this.seenTrades) return;
+    const fresh = br.s.trades.slice(this.seenTrades);
+    window.setTimeout(() => (this.seenTrades = Math.max(this.seenTrades, n)), 1400);
+    if (this.announced >= n) return;
+    this.announced = n;
+    for (const t of fresh.slice(-2)) {
+      const how = t.exitReason === 'tp' ? 'Target hit' : t.exitReason === 'sl' ? 'Stopped out' : t.exitReason === 'liq' ? 'Liquidated' : 'Closed';
+      toast(`${how} · ${t.symbol} ${t.side === 'long' ? 'long' : 'short'} · ${money(t.pnl, true)}${t.r != null ? ` (${num(t.r, 2, true)}R)` : ''}`, t.pnl >= 0 ? 'ok' : 'err');
+    }
+    queueMicrotask(() => {
+      const tab = Array.from(this.bottom.querySelectorAll('.tab')).find((b) => b.textContent?.startsWith('History'));
+      if (tab) flash(tab, fresh[fresh.length - 1].pnl >= 0 ? 'up' : 'dn');
+    });
+  }
+  private announced = 0;
 
   openSheet() {
     this.sheetOpen = true;
@@ -1188,6 +1228,10 @@ export class Workspace implements PaneHost {
     }
     this.savePrefs();
     this.renderSide();
+    // the newly shown panel fades in
+    this.right.classList.remove('panel-in');
+    void this.right.offsetWidth;
+    this.right.classList.add('panel-in');
     this.panes.forEach((p) => p.redraw());
   }
 
@@ -1760,6 +1804,7 @@ export class Workspace implements PaneHost {
 
   private renderBottom() {
     const br = this.replay.broker;
+    this.announce();
     const tabs = h('div', { class: 'tabs' },
       ...(['positions', 'orders', 'history'] as const).map((t) =>
         h('button', { class: `tab${this.tab === t ? ' on' : ''}`, onclick: () => { this.tab = t; if (this.prefs.bottomCollapsed) this.toggleBottom(true); this.renderBottom(); } },
@@ -1783,7 +1828,7 @@ export class Workspace implements PaneHost {
         const fl = br.floating(p);
         const rNow = p.initialSl != null ? ((p.side === 'long' ? 1 : -1) * (px - p.entry)) / Math.abs(p.entry - p.initialSl) : null;
         const off = offsetFn(this.tz);
-        const tr = h('tr', {},
+        const tr = h('tr', { class: p.id > this.seenPos ? 'row-new' : '' },
           h('td', {}, `${p.id}`), h('td', {}, p.symbol), h('td', { class: p.side === 'long' ? 'up' : 'dn' }, p.side.toUpperCase()), h('td', {}, p.lots.toFixed(2)),
           ...(levd ? [h('td', {}, p.leverage ? `${p.leverage}×` : '—'), h('td', {}, p.margin != null ? money(p.margin) : '—'), h('td', { class: 'warn-ink' }, p.liq != null ? p.liq.toFixed(dg) : '—')] : []),
           h('td', {}, p.entry.toFixed(dg)),
@@ -1819,9 +1864,9 @@ export class Workspace implements PaneHost {
     } else {
       t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Pips</th><th>R</th><th>P&L</th><th>Exit by</th><th>Held</th><th>Tags</th><th></th></tr></thead>`;
       const tb = h('tbody');
-      for (const tr of [...br.s.trades].reverse().slice(0, 200)) {
+      for (const [ti, tr] of [...br.s.trades].reverse().slice(0, 200).entries()) {
         const dg = this.session.specs[tr.symbol]?.digits ?? 5;
-        tb.append(h('tr', {},
+        tb.append(h('tr', { class: br.s.trades.length - 1 - ti >= this.seenTrades ? `row-new ${tr.pnl >= 0 ? 'win' : 'loss'}` : '' },
           h('td', {}, `${tr.id}`), h('td', {}, tr.symbol), h('td', { class: tr.side === 'long' ? 'up' : 'dn' }, tr.side.toUpperCase()), h('td', {}, tr.lots.toFixed(2)),
           h('td', {}, tr.entry.toFixed(dg)), h('td', {}, tr.exit.toFixed(dg)), h('td', { class: cls(tr.pips) }, num(tr.pips, 1, true)),
           h('td', { class: cls(tr.r ?? 0) }, tr.r != null ? num(tr.r, 2, true) : '—'), h('td', { class: cls(tr.pnl) }, money(tr.pnl, true)),

@@ -1,3 +1,5 @@
+import { countUpText, revealAll } from './motion';
+import { setChartIntro } from './charts';
 import type { Session } from '../engine/replay';
 import type { DatasetMeta } from '../core/types';
 import { offsetFn, fmtLocal, fmtDuration, type OffsetFn } from '../core/tz';
@@ -128,7 +130,12 @@ export class AnalyticsView {
       return;
     }
     this.main.append(this.subnav(), this.body);
+    // first view of this report: charts draw in, headline numbers count up, cards rise
+    setChartIntro(true);
     this.renderBody();
+    setChartIntro(false);
+    this.body.querySelectorAll<HTMLElement>('.kpi b').forEach((b) => countUpText(b, 900));
+    revealAll(this.body.querySelectorAll('.sec .card, .sec .kpi'), 40, 240);
   }
 
   private renderBody() {
@@ -295,6 +302,8 @@ export class AnalyticsView {
           if (el && el.getBoundingClientRect().top <= y) cur = id;
         }
         for (const b of btns) b.classList.toggle('on', b.dataset.target === cur);
+        const max = document.documentElement.scrollHeight - innerHeight;
+        bar.style.setProperty('--read', max > 0 ? Math.min(1, scrollY / max).toFixed(4) : '0');
       });
     };
     window.addEventListener('scroll', onScroll, { passive: true });
