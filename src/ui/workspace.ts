@@ -145,6 +145,12 @@ export class Workspace implements PaneHost {
     parent.append(this.root);
     this.buildPanes();
     this.renderAll();
+    // tests read the engine state directly instead of scraping the screen
+    try {
+      if (localStorage.getItem('overflowtrade.debug')) (window as unknown as { __ot?: Workspace }).__ot = this;
+    } catch {
+      /* storage unavailable */
+    }
     if (this.session.live) this.startLive();
     else if (!this.replay.hasFuture()) this.showNoDataBanner();
   }
@@ -928,12 +934,20 @@ export class Workspace implements PaneHost {
   }
 
   pause() {
+    const was = this.playing;
     this.playing = false;
     cancelAnimationFrame(this.rafId);
     if (this.playBtn) {
       this.playBtn.textContent = '▶';
       this.renderTradeBar();
       this.playBtn.classList.remove('on');
+    }
+    // while playing, the ticket and tables refresh only a few times a second; show the
+    // final state now, or a trade that just closed could still be listed as open
+    if (was && this.root.isConnected) {
+      this.lastUi = performance.now();
+      this.renderSide();
+      this.renderBottom();
     }
   }
 

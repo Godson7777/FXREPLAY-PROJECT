@@ -5,39 +5,82 @@
  */
 export const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const seenFns = new WeakMap<Element, () => void>();
-let io: IntersectionObserver | null = null;
-function observer() {
-  if (io || typeof IntersectionObserver !== 'function') return io;
-  io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      io!.unobserve(e.target);
-      const fn = seenFns.get(e.target);
-      seenFns.delete(e.target);
-      fn?.();
+/**
+ * Elements waiting to be seen.
+ *
+ * This is a plain rectangle test on scroll, resize and a slow timer — deliberately not an
+ * IntersectionObserver. An element that is hidden by its own clip-path never counts as
+ * intersecting there, which once left every chart on the analytics page invisible. A
+ * rectangle test cannot be fooled by how an element is painted, and anything that is
+ * removed again (or never added) is finished rather than left in its hidden state.
+ */
+interface Waiting { fn: () => void; attached: boolean; since: number }
+const waiting = new Map<Element, Waiting>();
+let armed = false;
+let queued = 0;
+
+function finish(el: Element, w: Waiting) {
+  waiting.delete(el);
+  try {
+    w.fn();
+  } catch (e) {
+    console.warn('motion: reveal failed', e);
+  }
+}
+
+function sweep() {
+  queued = 0;
+  if (!waiting.size) return;
+  const vw = window.innerWidth, vh = window.innerHeight, now = Date.now();
+  for (const [el, w] of [...waiting]) {
+    if (!el.isConnected) {
+      if (w.attached || now - w.since > 4000) finish(el, w);
+      continue;
     }
-  }, { threshold: 0.01 });
-  return io;
+    w.attached = true;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue; // not laid out yet (hidden tab, display: none)
+    if (r.bottom >= 0 && r.top <= vh && r.right >= 0 && r.left <= vw) finish(el, w);
+  }
 }
 
-/** Run `fn` once, the first time `el` scrolls into view (at once when motion is reduced). */
+function queueSweep() {
+  if (!queued) queued = requestAnimationFrame(sweep);
+}
+
+/** Run `fn` once, the first time `el` is inside the viewport (at once when motion is reduced). */
 export function onSeen(el: Element, fn: () => void) {
-  const o = reduced() ? null : observer();
-  if (!o) return fn();
-  seenFns.set(el, fn);
-  o.observe(el);
+  if (reduced() || typeof requestAnimationFrame !== 'function' || typeof window === 'undefined') return fn();
+  waiting.set(el, { fn, attached: false, since: Date.now() });
+  if (!armed) {
+    armed = true;
+    window.addEventListener('scroll', queueSweep, { passive: true, capture: true });
+    window.addEventListener('resize', queueSweep, { passive: true });
+    // content can move into view without a scroll (a section finishing to load, a tab opening)
+    window.setInterval(() => waiting.size && queueSweep(), 500);
+  }
+  queueSweep();
 }
 
-/** Fade + rise when the element enters the viewport. */
+/** Number of elements still waiting to be seen (for tests). */
+export const waitingCount = () => waiting.size;
+
+/**
+ * Fade + rise when the element enters the viewport.
+ *
+ * The element is never hidden while it waits: the entrance is an animation that starts
+ * from the hidden state at the moment it is seen (the check runs before that frame is
+ * painted, so nothing flashes). If the check never ran, the content would simply be there.
+ */
 export function reveal<T extends HTMLElement>(el: T, delay = 0): T {
-  if (reduced() || !observer()) return el;
-  el.classList.add('rv');
-  if (delay) el.style.setProperty('--rv-d', `${delay}ms`);
+  if (reduced()) return el;
   onSeen(el, () => {
-    el.classList.add('in');
-    // drop the classes afterwards so the transform never interferes with sticky or fixed children
-    setTimeout(() => { el.classList.remove('rv', 'in'); el.style.removeProperty('--rv-d'); }, 900 + delay);
+    if (delay) el.style.setProperty('--rv-d', `${delay}ms`);
+    el.classList.add('rv-in');
+    setTimeout(() => {
+      el.classList.remove('rv-in');
+      el.style.removeProperty('--rv-d');
+    }, 900 + delay);
   });
   return el;
 }
@@ -72,8 +115,10 @@ export function countUpText(el: HTMLElement, ms = 900, delay = 0) {
   const p = splitNumber(final);
   if (!p || reduced() || el.childElementCount) return;
   const draw = (t: number) => (el.textContent = `${p.pre}${formatNumber(p.value * t, p.decimals, p.grouped)}${p.post}`);
-  draw(0);
+  // the real value stays in place until the element is on screen, so text that is never
+  // scrolled to (print, copy, search) is always correct
   onSeen(el, () => {
+    draw(0);
     const t0 = performance.now() + delay;
     const step = (now: number) => {
       if (!el.isConnected) return;
@@ -86,12 +131,14 @@ export function countUpText(el: HTMLElement, ms = 900, delay = 0) {
   });
 }
 
-/** Brief green/red flash, restartable. */
+/**
+ * Brief green/red flash, restartable. Uses the Web Animations API so it needs no
+ * forced layout (this runs on every price change) and survives in-place DOM updates.
+ */
 export function flash(el: Element, dir: 'up' | 'dn') {
-  if (reduced()) return;
-  el.classList.remove('fx-up', 'fx-dn');
-  void (el as HTMLElement).offsetWidth;
-  el.classList.add(dir === 'up' ? 'fx-up' : 'fx-dn');
+  if (reduced() || typeof el.animate !== 'function') return;
+  const c = dir === 'up' ? '#39db7f' : '#ff8a8f';
+  el.animate([{ color: c, textShadow: `0 0 12px ${c}` }, {}], { duration: 450, easing: 'ease-out' });
 }
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -114,7 +161,7 @@ export function scoreRing(score: number | null, inner: Node, animate = true) {
   const fg = circle('ring-fg');
   const target = C * (1 - Math.max(0, Math.min(100, score ?? 0)) / 100);
   fg.setAttribute('stroke-dasharray', C.toFixed(2));
-  fg.setAttribute('stroke-dashoffset', (animate && !reduced() ? C : target).toFixed(2));
+  fg.setAttribute('stroke-dashoffset', target.toFixed(2)); // the finished ring; the fill-in is an animation on top
   svg.append(circle('ring-bg'), fg);
   const box = document.createElement('div');
   box.className = 'score-ring';
@@ -122,6 +169,8 @@ export function scoreRing(score: number | null, inner: Node, animate = true) {
   mid.className = 'ring-mid';
   mid.append(inner);
   box.append(svg, mid);
-  if (animate && !reduced()) onSeen(box, () => requestAnimationFrame(() => fg.setAttribute('stroke-dashoffset', target.toFixed(2))));
+  if (animate && !reduced() && typeof fg.animate === 'function') {
+    onSeen(box, () => fg.animate([{ strokeDashoffset: C.toFixed(2) }, { strokeDashoffset: target.toFixed(2) }], { duration: 1400, easing: 'cubic-bezier(0.3, 0.6, 0.2, 1)' }));
+  }
   return box;
 }

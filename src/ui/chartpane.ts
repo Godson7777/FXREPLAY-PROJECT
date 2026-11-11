@@ -11,8 +11,29 @@ import { DrawingLayer, type DragLine, type Drawing, type Zone } from './drawings
 import type { PosEnv, PosSettings } from '../engine/position';
 import { h, money, theme, type Theme } from './dom';
 
-const MAX_DISPLAY = 60000;
+/**
+ * Candles kept on the chart. Every replay step costs time in proportion to this number
+ * (43,000 one-minute candles made a step take about 40 ms), so the chart holds a window
+ * behind the cursor and loads older candles only when the user scrolls back to them.
+ */
+const [WINDOW, WINDOW_MAX, HARD_MAX] = windowSizes();
+
+/**
+ * 8,000 candles, cut back once the window reaches 12,000, and never more than 60,000
+ * however far back the user scrolls. Tests can shrink all three.
+ */
+function windowSizes(): [number, number, number] {
+  try {
+    const m = /^(\d+),(\d+),(\d+)$/.exec(localStorage.getItem('overflowtrade.debug.window') ?? '');
+    if (m && +m[1] >= 100 && +m[2] > +m[1] && +m[3] > +m[2]) return [+m[1], +m[2], +m[3]];
+  } catch {
+    /* storage unavailable */
+  }
+  return [8000, 12000, 60000];
+}
 const IND_WINDOW = 3000;
+/** empty bars kept to the right of the latest candle */
+const RIGHT_OFFSET = 12;
 const aggCache = new Map<string, Agg>();
 
 export function getAgg(sym: string, b: Bars, tf: Timeframe, tz: string): Agg {
@@ -160,8 +181,11 @@ export class ChartPane {
         vertLine: { color: this.th.muted, width: 1, style: LineStyle.Dashed, labelBackgroundColor: this.th.surface },
         horzLine: { color: this.th.muted, width: 1, style: LineStyle.Dashed, labelBackgroundColor: this.th.surface },
       },
-      timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 8 },
+      timeScale: { borderColor: this.th.grid, timeVisible: true, secondsVisible: false, rightOffset: RIGHT_OFFSET, barSpacing: 8 },
       localization: { locale: 'en-US', timeFormatter: (t: number) => fmtLocal(t, true) },
+    });
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+      if (r && r.from < 10) this.loadOlder();
     });
     this.createMain();
     this.chartEl.append(this.tagLayer);
@@ -337,6 +361,7 @@ export class ChartPane {
     else if (t === 'bars') this.main = this.chart.addSeries(BarSeries, o, 0);
     else this.main = this.chart.addSeries(CandlestickSeries, o, 0);
     this.markers = createSeriesMarkers(this.main, []);
+    this.markerKey = '';
   }
 
   setChartType() {
@@ -396,7 +421,7 @@ export class ChartPane {
     this.priceLines.forEach((l) => this.main.removePriceLine(l));
     this.priceLines.clear();
     this.sync(true);
-    this.chart.timeScale().scrollToRealTime();
+    this.toLatest();
     this.renderHeader();
   }
 
@@ -446,19 +471,104 @@ export class ChartPane {
     return c;
   }
 
+  /**
+   * Put the latest candle back at the right edge. Not the library's animated
+   * scrollToRealTime(): that one stops at its last animation frame, which from far away
+   * is short of the latest candle, and a chart that does not show the latest candle
+   * stops following the replay.
+   */
+  toLatest() {
+    this.chart.timeScale().scrollToPosition(RIGHT_OFFSET, false);
+  }
+
+  /** how far the window may grow past WINDOW_MAX before the next trim (older candles the user loaded or is viewing) */
+  private older = 0;
+  private rewindowing = false;
+
+  /**
+   * Replace the chart's data with candles `start..k`. The time scale keeps its distance
+   * from the latest candle, so the view stays where it was: following the replay, or on
+   * the same older candles.
+   */
+  private rewindow(start: number, k: number, cursor: number) {
+    const ts = this.chart.timeScale();
+    const pos = ts.scrollPosition(); // bars between the right edge and the latest candle; negative = scrolled back
+    const added = this.k >= 0 ? k - this.k : 0;
+    this.rewindowing = true;
+    try {
+      this.start = start;
+      const data = [];
+      for (let j = start; j <= k; j++) data.push(this.point(j, cursor));
+      this.main.setData(data);
+      this.k = k;
+      this.times = this.agg.time.subarray(start, k + 1);
+      this.rebuildIndicators();
+      // scrolled back: stay on exactly the same candles although newer ones were added
+      if (pos < 0 && added > 0) ts.scrollToPosition(pos - added, false);
+    } finally {
+      this.rewindowing = false;
+    }
+  }
+
+  /** Drop the oldest candles once the window has grown, unless the user is looking at them. */
+  private trimWindow(k: number, cursor: number): boolean {
+    const vr = this.chart.timeScale().getVisibleLogicalRange();
+    let start = Math.max(0, k - WINDOW + 1);
+    if (vr && this.start + vr.from < start + 50) {
+      // the view reaches into the candles that would go: leave them, up to the hard limit
+      if (k - this.start + 1 <= HARD_MAX) {
+        this.older += Math.ceil(WINDOW / 4);
+        return false;
+      }
+      start = Math.max(0, k - Math.floor(HARD_MAX * 0.8) + 1);
+    }
+    this.older = Math.max(0, k - start + 1 - WINDOW);
+    this.rewindow(start, k, cursor);
+    return true;
+  }
+
+  /** The view reached the left edge: load an older stretch of candles (up to the hard limit). */
+  private loadOlder() {
+    if (this.rewindowing || this.start <= 0 || this.k < 0) return;
+    // enough to cover the view in one go, however far past the loaded candles it reaches
+    const vr = this.chart.timeScale().getVisibleLogicalRange();
+    const missing = vr ? Math.max(0, Math.ceil(-vr.from)) : 0;
+    const start = Math.max(0, this.start - Math.max(WINDOW, missing + Math.ceil(WINDOW / 4)), this.k - HARD_MAX + 1);
+    if (start >= this.start) return;
+    const cursor = this.host.replay.cursor[this.cfg.symbol] ?? 0;
+    this.older = Math.max(0, this.k - start + 1 - WINDOW);
+    this.rewindow(start, this.k, cursor);
+    this.refreshOverlays();
+    this.layer.schedule();
+  }
+
   /** Bring the chart up to the replay cursor (incrementally when possible). */
   sync(full = false) {
     const cursor = this.host.replay.cursor[this.cfg.symbol] ?? 0;
     const a = this.agg;
     const k = a.baseToAgg[cursor];
     if (full || this.k < 0 || k < this.k || k - this.k > 400) {
-      this.start = Math.max(0, k - MAX_DISPLAY + 1);
+      this.older = 0;
+      this.start = Math.max(0, k - WINDOW + 1);
       const data = [];
       for (let j = this.start; j <= k; j++) data.push(this.point(j, cursor));
-      this.main.setData(data);
+      this.rewindowing = true; // no loading of older candles from inside this reset
+      try {
+        this.main.setData(data);
+      } finally {
+        this.rewindowing = false;
+      }
       this.k = k;
       this.times = a.time.subarray(this.start, k + 1);
       this.rebuildIndicators();
+      // a jump while scrolled back can leave the view left of the new window: fill it,
+      // once the caller has had the chance to scroll to the latest candle
+      queueMicrotask(() => {
+        const vr = this.chart.timeScale().getVisibleLogicalRange();
+        if (vr && vr.from < 10) this.loadOlder();
+      });
+    } else if (k - this.start + 1 > WINDOW_MAX + this.older && this.trimWindow(k, cursor)) {
+      // window cut back; the chart now holds the latest WINDOW candles
     } else {
       if (k > this.k) this.main.update(this.point(this.k, cursor));
       for (let j = Math.max(this.k, this.start); j <= k; j++) this.main.update(this.point(j, cursor));
@@ -626,6 +736,7 @@ export class ChartPane {
     return this.agg.time[j];
   }
 
+  private markerKey = '';
   refreshOverlays() {
     const br = this.host.replay.broker;
     const sym = this.cfg.symbol;
@@ -666,7 +777,11 @@ export class ChartPane {
       if (ex) ex.applyOptions(opts);
       else this.priceLines.set(key, this.main.createPriceLine(opts));
     }
-    // markers: entries & exits of closed trades + open positions (last 300)
+    // markers: entries & exits of closed trades + open positions (last 300).
+    // This runs on every replay step, so rebuild them only when something they depend on changed.
+    const mk = `${sym}|${this.tf.label}|${br.s.trades.length}|${br.s.positions.map((p) => p.id).join(',')}|${this.th.up}|${this.th.dark}|${this.start}`;
+    if (mk === this.markerKey) return;
+    this.markerKey = mk;
     const ms: SeriesMarker<Time>[] = [];
     const trades = br.s.trades.filter((t) => t.symbol === sym).slice(-300);
     for (const t of trades) {
