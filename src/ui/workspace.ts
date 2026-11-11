@@ -928,12 +928,20 @@ export class Workspace implements PaneHost {
   }
 
   pause() {
+    const was = this.playing;
     this.playing = false;
     cancelAnimationFrame(this.rafId);
     if (this.playBtn) {
       this.playBtn.textContent = '▶';
       this.renderTradeBar();
       this.playBtn.classList.remove('on');
+    }
+    // while playing, the ticket and tables refresh only a few times a second; show the
+    // final state now, or a trade that just closed could still be listed as open
+    if (was && this.root.isConnected) {
+      this.lastUi = performance.now();
+      this.renderSide();
+      this.renderBottom();
     }
   }
 

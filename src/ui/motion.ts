@@ -72,8 +72,10 @@ export function countUpText(el: HTMLElement, ms = 900, delay = 0) {
   const p = splitNumber(final);
   if (!p || reduced() || el.childElementCount) return;
   const draw = (t: number) => (el.textContent = `${p.pre}${formatNumber(p.value * t, p.decimals, p.grouped)}${p.post}`);
-  draw(0);
+  // the real value stays in place until the element is on screen, so text that is never
+  // scrolled to (print, copy, search) is always correct
   onSeen(el, () => {
+    draw(0);
     const t0 = performance.now() + delay;
     const step = (now: number) => {
       if (!el.isConnected) return;
