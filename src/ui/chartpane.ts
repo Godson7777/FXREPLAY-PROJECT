@@ -337,6 +337,7 @@ export class ChartPane {
     else if (t === 'bars') this.main = this.chart.addSeries(BarSeries, o, 0);
     else this.main = this.chart.addSeries(CandlestickSeries, o, 0);
     this.markers = createSeriesMarkers(this.main, []);
+    this.markerKey = '';
   }
 
   setChartType() {
@@ -626,6 +627,7 @@ export class ChartPane {
     return this.agg.time[j];
   }
 
+  private markerKey = '';
   refreshOverlays() {
     const br = this.host.replay.broker;
     const sym = this.cfg.symbol;
@@ -666,7 +668,11 @@ export class ChartPane {
       if (ex) ex.applyOptions(opts);
       else this.priceLines.set(key, this.main.createPriceLine(opts));
     }
-    // markers: entries & exits of closed trades + open positions (last 300)
+    // markers: entries & exits of closed trades + open positions (last 300).
+    // This runs on every replay step, so rebuild them only when something they depend on changed.
+    const mk = `${sym}|${this.tf.label}|${br.s.trades.length}|${br.s.positions.map((p) => p.id).join(',')}|${this.th.up}|${this.th.dark}|${this.start}`;
+    if (mk === this.markerKey) return;
+    this.markerKey = mk;
     const ms: SeriesMarker<Time>[] = [];
     const trades = br.s.trades.filter((t) => t.symbol === sym).slice(-300);
     for (const t of trades) {
