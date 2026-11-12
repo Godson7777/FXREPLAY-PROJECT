@@ -1837,6 +1837,12 @@ export class Workspace implements PaneHost {
       <div><span>R:R</span><b>${risk && reward ? (reward / risk).toFixed(2) : '—'}</b></div>
       <div class="lv"><span>Buy SL/TP</span><b>${L.sl?.toFixed(dg) ?? '—'} / ${L.tp?.toFixed(dg) ?? '—'}</b></div>
       <div class="lv"><span>Sell SL/TP</span><b>${S.sl?.toFixed(dg) ?? '—'} / ${S.tp?.toFixed(dg) ?? '—'}</b></div>`;
+    // the button names the order it will place; keep it in step with what is typed
+    const place = this.orderRoot.querySelector<HTMLElement>('#placeBtn');
+    if (place && !this.linked()) {
+      const P = this.ticketLevels(this.ticket.side);
+      place.textContent = `Place ${this.ticket.side === 'long' ? 'BUY' : 'SELL'} ${P.type.toUpperCase()} ${P.lots.toFixed(2)}${P.type === 'market' ? '' : ` @ ${P.entry.toFixed(dg)}`}`;
+    }
     // a pair quoted in neither USD nor with USD as base: say how its results become dollars
     const conv = br.conversion(sym);
     if (conv) {

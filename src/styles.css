@@ -1125,3 +1125,7 @@ span.tree-name { font-size: 12px; }
 }
 /* phone: fields that hold long choices (method, session, strategy) take the full row */
 @media (max-width: 767px) { .an-toolbar .field.wide, .ctl-row .field.wide, .lb-controls .field.wide { width: 100%; } }
+
+/* order ticket: the unit select and its value share a narrow column; both must stay readable */
+.ws .ticket .join > :first-child { width: 4.5rem; padding-left: 6px; padding-right: 0; font-size: 12.5px; }
+.ws .ticket .join > :last-child { min-width: 3.5rem; padding-inline: 7px; }
