@@ -788,9 +788,8 @@ export class AnalyticsView {
     const s = this.all.find((x) => x.id === rt.sessionId);
     const t = s?.state.broker.trades.find((x) => x.id === rt.id);
     if (!s || !t) return toast('This trade is no longer available', 'err');
-    const img = h('img', { class: 'shot', alt: 'Chart when the trade closed' });
-    if (t.shot) void getShot(t.shot).then((u) => (u ? (img.src = u) : img.remove())).catch(() => img.remove());
-    else img.remove();
+    const img = h('img', { class: 'shot', alt: 'Chart when the trade closed', hidden: true });
+    if (t.shot) void getShot(t.shot).then((u) => { if (u) { img.src = u; img.hidden = false; } }).catch(() => {});
     const tags = h('input', { value: t.tags.join(', '), placeholder: 'e.g. breakout, london' });
     const note = h('textarea', { rows: 4 }, t.note);
     const rating = h('select', {}, ...[0, 1, 2, 3, 4, 5].map((x) => h('option', { value: x, selected: (t.rating ?? 0) === x }, x ? '★'.repeat(x) : 'No rating')));

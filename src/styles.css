@@ -738,7 +738,7 @@ input.lvl { width: 90px; height: 1.75rem; padding: 2px 5px; font-size: 12px; }
 .ci-wrap { margin-top: var(--space-2); }
 .ctl-row { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--space-5); }
 .ctl-row .field { width: 9rem; }
-.ctl-row .field.wide { width: 14rem; }
+.ctl-row .field.wide { width: 17.5rem; }
 .stackbar { display: flex; height: 14px; border-radius: 2px; overflow: hidden; background: var(--surface-3); }
 .stackbar > i { display: block; height: 100%; }
 .callout { border: 1px solid var(--border-card); border-left: 3px solid var(--accent); background: var(--bg-alt); border-radius: var(--radius); padding: var(--space-4) var(--space-5); color: var(--text-2); font-size: 13.5px; }
@@ -1129,3 +1129,6 @@ span.tree-name { font-size: 12px; }
 /* order ticket: the unit select and its value share a narrow column; both must stay readable */
 .ws .ticket .join > :first-child { width: 4.5rem; padding-left: 6px; padding-right: 0; font-size: 12.5px; }
 .ws .ticket .join > :last-child { min-width: 3.5rem; padding-inline: 7px; }
+/* watchlist "add a symbol": here the select is the wide part and the button the narrow one */
+.join > #watchAdd { flex: 1 1 auto; width: auto; min-width: 0; padding-right: 1.25rem; }
+.join > #watchAdd + button { flex: 0 0 auto; width: auto; min-width: 0; }

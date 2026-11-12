@@ -849,6 +849,8 @@ export class Workspace implements PaneHost {
     const t0 = performance.now();
     this.replay.jumpTo(utc);
     this.afterStep(true);
+    // a jump that runs out of candles says so, the same way playing to the end does
+    if (!this.replay.hasFuture()) return this.endReached();
     if (performance.now() - t0 > 300) toast(`Jumped to ${fmtLocal(this.replay.clock + offsetFn(this.tz)(this.replay.clock))}`);
   }
 
@@ -1964,9 +1966,8 @@ export class Workspace implements PaneHost {
   }
 
   journalModal(t: Trade) {
-    const img = h('img', { class: 'shot', alt: 'Chart at close' });
-    if (t.shot) void getShot(t.shot).then((u) => (u ? (img.src = u) : img.remove()));
-    else img.remove();
+    const img = h('img', { class: 'shot', alt: 'Chart at close', hidden: true });
+    if (t.shot) void getShot(t.shot).then((u) => { if (u) { img.src = u; img.hidden = false; } }).catch(() => {});
     const tags = h('input', { value: t.tags.join(', '), placeholder: 'setup, mistake, A+ …' });
     const note = h('textarea', { rows: 4, placeholder: 'What did you see? What would you do differently?' }, t.note);
     const rating = h('select', {}, ...[0, 1, 2, 3, 4, 5].map((r) => h('option', { value: r, selected: (t.rating ?? 0) === r }, r ? '★'.repeat(r) : 'No rating')));

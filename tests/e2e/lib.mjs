@@ -23,7 +23,7 @@ export async function open({ width = 1440, height = 900, phone = false, scheme =
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => m.type() === 'error' && !/CERT_|fonts|ERR_/.test(m.text()) && errors.push('console: ' + m.text()));
-  page.on('dialog', (d) => d.accept());
+  page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? d.defaultValue() || 'x' : undefined));
   return { browser, ctx, page, errors };
 }
 
