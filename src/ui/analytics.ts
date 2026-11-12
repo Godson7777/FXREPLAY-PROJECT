@@ -15,7 +15,7 @@ import { h, money, num, cls, modal, field, download, toast } from './dom';
 import { pageShell, pageHead, section, infoCard } from './layout';
 import { scoreHero } from './an-score';
 import { monteCarloCards } from './an-montecarlo';
-import { kpi, stat, statsGrid, hbars, heatmap, ciChart, compactMoney, fmtP, signedUnit, pctTxt, daysTxt } from './an-widgets';
+import { kpi, kpiRow, stat, statsGrid, hbars, heatmap, ciChart, compactMoney, fmtP, signedUnit, pctTxt, daysTxt } from './an-widgets';
 import { addToStrategyModal, strategyModal } from './strategies';
 import type { ExplainId } from '../analytics/explain';
 
@@ -113,6 +113,11 @@ export class AnalyticsView {
         (!f.symbol || t.symbol === f.symbol) && (!f.side || t.side === f.side) && (!f.tag || t.tags.includes(f.tag)) &&
         (!f.reason || t.exitReason === f.reason) && t.exitTime >= from && t.exitTime < to,
     };
+  }
+
+  /** why excursion figures (MAE/MFE) are missing: an imported trade list does not carry them */
+  private noExcursions() {
+    return this.scopeSessions.length && this.scopeSessions.every((s) => s.imported) ? 'not in the imported file' : 'needs trades with a stop loss';
   }
 
   private get filtered() {
@@ -336,7 +341,7 @@ export class AnalyticsView {
 
   private performanceSection(r: Report) {
     const c = r.core;
-    const tiles = h('div', { class: 'kpis' },
+    const tiles = kpiRow('kpis',
       kpi('Net result', money(r.netPnl, true), cls(r.netPnl), `${pctTxt(r.returnPct, 2, true)} on ${money(r.initial)}`),
       kpi('Annualized return', r.cagrReliable && r.cagr != null ? pctTxt(r.cagr, 1, true) : '—', cls(r.cagr ?? 0), r.cagrReliable ? `over ${daysTxt(r.spanDays)}` : 'needs 60+ days of history'),
       kpi('Win rate', pctTxt(c.winRate), '', `${c.wins}W · ${c.losses}L · ${c.breakeven} BE`),
@@ -349,7 +354,7 @@ export class AnalyticsView {
     if (this.scope.kind === 'session' && s0?.rules && s0.state.challenge) {
       const ru = s0.rules, ch = s0.state.challenge;
       const statusTxt = ch.status === 'active' ? 'In progress' : ch.status === 'passed' ? 'Passed' : 'Failed';
-      out.push(infoCard(`Challenge · ${ru.name}`, 'challenge', h('div', { class: 'kpis small' },
+      out.push(infoCard(`Challenge · ${ru.name}`, 'challenge', kpiRow('kpis small',
         kpi('Status', statusTxt, ch.status === 'passed' ? 'up' : ch.status === 'failed' ? 'dn' : '', ch.reason || 'rules are checked on every 1-minute bar'),
         kpi('Profit vs target', pctTxt((s0.state.broker.balance - s0.balance) / s0.balance, 2, true), cls(s0.state.broker.balance - s0.balance), `target +${ru.profitTarget}%`),
         kpi('Worst daily loss', pctTxt(-ch.worstDailyLoss / s0.balance, 2), 'dn', ru.maxDailyLoss ? `limit −${ru.maxDailyLoss}%` : 'no daily limit'),
@@ -364,7 +369,8 @@ export class AnalyticsView {
     const span = xs[xs.length - 1] - xs[0];
     const dFmt = (t: number) => (span < 5 * 86400 ? fmtLocal(t).slice(5) : fmtLocal(t).slice(0, 10));
     const eqSeries = [{ name: 'Closed balance', color: 'var(--series-1)', xs, ys: r.equity.v, area: true }];
-    if (this.scope.kind === 'session' && !this.filtered && s0) {
+    // an imported trade list has no open-trade equity: its second line would only hide the first
+    if (this.scope.kind === 'session' && !this.filtered && s0 && !s0.imported) {
       const e = s0.state.broker.equity;
       if (e.length > 2) {
         const step = Math.ceil(e.length / 1500);
@@ -390,9 +396,9 @@ export class AnalyticsView {
       S('Current streak', c.currentStreak ? `${Math.abs(c.currentStreak)} ${c.currentStreak > 0 ? (c.currentStreak === 1 ? 'win' : 'wins') : c.currentStreak === -1 ? 'loss' : 'losses'}` : '—', cls(c.currentStreak)),
       S('Avg hold', fmtDuration(c.avgHoldSec)), S('Avg hold · winners', fmtDuration(c.avgHoldWinSec)), S('Avg hold · losers', fmtDuration(c.avgHoldLossSec)),
       S('Longs', `${c.longs} · ${pctTxt(c.longWinRate, 0)} win`), S('Shorts', `${c.shorts} · ${pctTxt(c.shortWinRate, 0)} win`),
-      S('Avg MAE', c.avgMaeR != null ? `${num(c.avgMaeR)} R` : '—', '', 'How far trades went against you on average'),
-      S('Avg MFE', c.avgMfeR != null ? `${num(c.avgMfeR)} R` : '—', '', 'How far trades went in your favour on average'),
-      S('Edge ratio', c.edgeRatio != null ? num(c.edgeRatio) : '—', '', 'Avg MFE / avg MAE — above 1 means entries tend to move your way first'),
+      S('Avg MAE', c.avgMaeR != null ? `${num(c.avgMaeR)} R` : '—', '', 'How far trades went against you on average', this.noExcursions()),
+      S('Avg MFE', c.avgMfeR != null ? `${num(c.avgMfeR)} R` : '—', '', 'How far trades went in your favour on average', this.noExcursions()),
+      S('Edge ratio', c.edgeRatio != null ? num(c.edgeRatio) : '—', '', 'Avg MFE / avg MAE — above 1 means entries tend to move your way first', this.noExcursions()),
       S('TP hit rate', pctTxt(c.tpHitRate, 0)), S('SL hit rate', pctTxt(c.slHitRate, 0)),
       S('Best day', money(c.bestDay, true), cls(c.bestDay)), S('Worst day', money(c.worstDay, true), cls(c.worstDay)),
       S('Profitable days', pctTxt(c.profitableDaysPct, 0)), S('Trades / active day', num(c.avgTradesPerDay, 1)),
@@ -404,11 +410,11 @@ export class AnalyticsView {
     const ra = r.ratios, rk = r.risk;
     const S = stat;
     const ratios = infoCard('Risk-adjusted ratios', 'riskAdjusted', statsGrid(
-      S('Sharpe (annualized)', num(ra.sharpe), cls((ra.sharpe ?? 0) - 1 + 1e-9), `Daily returns, ${r.daily.ppy} periods per year`),
-      S('Sortino (annualized)', num(ra.sortino)),
-      S('Calmar', num(ra.calmar), '', 'Annual return / max drawdown (needs 60+ days)'),
-      S('Martin (Ulcer performance)', num(ra.martin), '', 'Annual return / Ulcer index'),
-      S('Gain-to-pain (monthly)', num(ra.gainToPain)),
+      S('Sharpe (annualized)', num(ra.sharpe), cls((ra.sharpe ?? 0) - 1 + 1e-9), `Daily returns, ${r.daily.ppy} periods per year`, 'needs 20 trading days'),
+      S('Sortino (annualized)', num(ra.sortino), '', '', 'needs 20 trading days'),
+      S('Calmar', num(ra.calmar), '', 'Annual return / max drawdown (needs 60+ days)', 'needs 60+ days of history'),
+      S('Martin (Ulcer performance)', num(ra.martin), '', 'Annual return / Ulcer index', 'needs 60+ days of history'),
+      S('Gain-to-pain (monthly)', num(ra.gainToPain), '', '', 'needs a full month'),
       S('Equity smoothness R²', ra.r2 != null ? ra.r2.toFixed(3) : '—'),
       S('Recovery factor', num(r.core.recoveryFactor)),
       S('Return / max DD', rk.maxDD > 0 ? num(r.returnPct / rk.maxDD) : '—'),
@@ -416,8 +422,8 @@ export class AnalyticsView {
     const tail = infoCard('Tail risk', 'tailRisk', statsGrid(
       S('VaR 95% per trade', rk.varPct != null ? pctTxt(rk.varPct, 2) : '—', 'dn', rk.varU != null ? signedUnit(rk.varU, r.unitLabel) : ''),
       S('CVaR 95% per trade', rk.cvarPct != null ? pctTxt(rk.cvarPct, 2) : '—', 'dn', rk.cvarU != null ? signedUnit(rk.cvarU, r.unitLabel) : ''),
-      S('VaR 95% per day', rk.varDay != null ? pctTxt(rk.varDay, 2) : '—', 'dn'),
-      S('CVaR 95% per day', rk.cvarDay != null ? pctTxt(rk.cvarDay, 2) : '—', 'dn'),
+      S('VaR 95% per day', rk.varDay != null ? pctTxt(rk.varDay, 2) : '—', 'dn', '', 'needs 40 trading days'),
+      S('CVaR 95% per day', rk.cvarDay != null ? pctTxt(rk.cvarDay, 2) : '—', 'dn', '', 'needs 40 trading days'),
       S('Worst trade', pctTxt(rk.worstTradePct, 2), 'dn'),
       S('Worst day', rk.worstDayPct != null ? pctTxt(rk.worstDayPct, 2) : '—', 'dn'),
       S('Ulcer index', rk.ulcer != null ? rk.ulcer.toFixed(2) : '—'),
@@ -519,7 +525,7 @@ export class AnalyticsView {
       stat('Probabilistic Sharpe (PSR)', s.psr != null ? pctTxt(s.psr, 1) : '—', (s.psr ?? 0) >= 0.95 ? 'up' : ''),
       stat('Min. track record (MinTRL)', s.minTrl != null ? `${Math.ceil(s.minTrl)} trades` : '—'),
       stat('Trades still needed', s.tradesNeeded != null ? (s.tradesNeeded === 0 ? 'none' : String(s.tradesNeeded)) : '—', s.tradesNeeded === 0 ? 'up' : ''),
-      stat('Deflated Sharpe (DSR)', s.dsr != null ? pctTxt(s.dsr, 1) : '—', '', s.trials ? `${s.trials} backtests counted as trials` : 'needs 2+ sessions with 10+ trades'),
+      stat('Deflated Sharpe (DSR)', s.dsr != null ? pctTxt(s.dsr, 1) : '—', '', s.trials ? `${s.trials} backtests counted as trials` : 'needs 2+ sessions with 10+ trades', 'needs 2+ sessions with 10+ trades'),
       stat('Trials counted', String(s.trials)),
       stat('Skewness', s.skew.toFixed(2), '', 'Positive = occasional big winners'),
       stat('Kurtosis', s.kurt.toFixed(2), '', 'Normal distribution = 3; higher = fat tails'),
@@ -548,12 +554,12 @@ export class AnalyticsView {
           stat('Net return without them', pctTxt(o.netPct, 1, true), cls(o.netPct)))
       : h('p', { class: 'muted' }, 'Needs at least 20 trades.'));
     const ex = infoCard('Execution & discipline', 'execution', statsGrid(
-      stat('Profit capture (winners)', ro.capture != null ? pctTxt(ro.capture, 0) : '—', '', 'Realised R / best open R on winning trades'),
+      stat('Profit capture (winners)', ro.capture != null ? pctTxt(ro.capture, 0) : '—', '', 'Realised R / best open R on winning trades', this.noExcursions() || 'needs 5 winning trades'),
       stat('Trades with a stop loss', pctTxt(ro.slUsage, 0), ro.slUsage >= 0.98 ? 'up' : ro.slUsage < 0.9 ? 'dn' : ''),
       stat('Risk consistency (CV)', ro.riskCV != null ? ro.riskCV.toFixed(2) : '—', '', 'Lower = more consistent position sizing'),
       stat('Median risk per trade', ro.medianRiskPct != null ? pctTxt(ro.medianRiskPct, 2) : '—'),
       stat('TP hit rate', pctTxt(r.core.tpHitRate, 0)), stat('SL hit rate', pctTxt(r.core.slHitRate, 0)),
-      stat('Avg MAE', r.core.avgMaeR != null ? `${num(r.core.avgMaeR)} R` : '—'), stat('Avg MFE', r.core.avgMfeR != null ? `${num(r.core.avgMfeR)} R` : '—'),
+      stat('Avg MAE', r.core.avgMaeR != null ? `${num(r.core.avgMaeR)} R` : '—', '', '', this.noExcursions()), stat('Avg MFE', r.core.avgMfeR != null ? `${num(r.core.avgMfeR)} R` : '—', '', '', this.noExcursions()),
     ));
     return section({ id: 'robustness', eyebrow: 'Robustness', titleHtml: 'Will it survive <em>real</em> trading?', tone: 'alt' },
       h('div', { class: 'grid2' }, fr, out), ex);
@@ -782,9 +788,8 @@ export class AnalyticsView {
     const s = this.all.find((x) => x.id === rt.sessionId);
     const t = s?.state.broker.trades.find((x) => x.id === rt.id);
     if (!s || !t) return toast('This trade is no longer available', 'err');
-    const img = h('img', { class: 'shot', alt: 'Chart when the trade closed' });
-    if (t.shot) void getShot(t.shot).then((u) => (u ? (img.src = u) : img.remove())).catch(() => img.remove());
-    else img.remove();
+    const img = h('img', { class: 'shot', alt: 'Chart when the trade closed', hidden: true });
+    if (t.shot) void getShot(t.shot).then((u) => { if (u) { img.src = u; img.hidden = false; } }).catch(() => {});
     const tags = h('input', { value: t.tags.join(', '), placeholder: 'e.g. breakout, london' });
     const note = h('textarea', { rows: 4 }, t.note);
     const rating = h('select', {}, ...[0, 1, 2, 3, 4, 5].map((x) => h('option', { value: x, selected: (t.rating ?? 0) === x }, x ? '★'.repeat(x) : 'No rating')));

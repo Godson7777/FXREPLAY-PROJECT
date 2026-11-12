@@ -6,11 +6,40 @@ import { TRENDS, TREND_LABEL, VOLS, VOL_LABEL, type Trend, type Vol } from '../a
 /** Small building blocks shared by the analytics, strategy and leaderboard pages. */
 
 export function kpi(label: string, value: string, c: string, sub: string, title = '') {
-  return h('div', { class: 'kpi', title: title || null }, h('span', {}, label), h('b', { class: c }, value), h('small', {}, sub));
+  // data-v keeps the full value for the row's fit and for a tooltip, whatever the count-up is showing
+  return h('div', { class: 'kpi', title: title || null }, h('span', {}, label), h('b', { class: c, 'data-v': value, title: title ? null : value }, value), h('small', {}, sub));
 }
 
-export function stat(label: string, value: string, c = '', title = '') {
-  return h('div', { class: 'stat', title: title || null }, h('span', {}, label), h('b', { class: c }, value));
+/**
+ * A row of KPI tiles. When the longest number would be cut off, all numbers in the row
+ * shrink together (down to half size) so every value can be read in full.
+ */
+export function kpiRow(cls: string, ...items: (HTMLElement | null)[]) {
+  const row = h('div', { class: cls }, ...items);
+  const fit = () => {
+    row.style.removeProperty('--kpi-scale');
+    let scale = 1;
+    for (const b of row.querySelectorAll<HTMLElement>('.kpi > b')) {
+      const shown = b.textContent, full = b.dataset.v;
+      if (full && full !== shown) b.textContent = full; // measure the real value, not a count-up frame
+      if (b.clientWidth > 0 && b.scrollWidth > b.clientWidth) scale = Math.min(scale, b.clientWidth / b.scrollWidth);
+      if (full && full !== shown) b.textContent = shown;
+    }
+    if (scale < 1) row.style.setProperty('--kpi-scale', Math.max(0.5, scale - 0.03).toFixed(3));
+  };
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fit).observe(row);
+  if (typeof MutationObserver === 'function') new MutationObserver(fit).observe(row, { childList: true });
+  return row;
+}
+
+/**
+ * One line of a statistics grid. When the value is not available ("—") and `why` says
+ * what is missing, the reason is shown in its place: a bare dash looks like a fault, and
+ * a tooltip cannot be opened on a phone.
+ */
+export function stat(label: string, value: string, c = '', title = '', why = '') {
+  const na = value === '—' && !!why;
+  return h('div', { class: `stat${na ? ' na' : ''}`, title: title || null }, h('span', {}, label), na ? h('b', { class: 'why' }, why) : h('b', { class: c }, value));
 }
 
 export const statsGrid = (...items: (HTMLElement | null)[]) => h('div', { class: 'stats-grid' }, ...items);

@@ -3,40 +3,13 @@
 // Covers an imported trade list and a replay session, desktop and phone, with and
 // without reduced motion.
 //   npm run build && npm run preview &   then   node tests/e2e/analytics-visible.mjs
-import { open, BASE, demoSession } from './lib.mjs';
+import { open, demoSession, importSample, quickTrades } from './lib.mjs';
 
 let failed = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) { failed++; process.exitCode = 1; } };
 
-/** A trade list in the FX Replay export layout: 160 trades over four months. */
-export function sampleTradesCsv(n = 160) {
-  let s = 'id,dateStart,dateEnd,pair,uPnL,rPnL,side,entryPrice,initialSL,maxTP,idealTP,amount,amountClosed,status,day,tags,avgClosePrice,avgRiskReward,maxRiskReward,exchangeRate,initialBalance,currentRealizedBalance\n';
-  let bal = 100000, t = Date.UTC(2026, 4, 4, 8) / 1000, seed = 7;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const p = (x) => String(x).padStart(2, '0');
-  const f = (u) => { const d = new Date(u * 1000); return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:00`; };
-  for (let i = 0; i < n; i++) {
-    const e = 4000 + rnd() * 400, sl = 6 + rnd() * 6, buy = rnd() < 0.5, win = rnd() < 0.4, r = win ? 1.5 + rnd() * 3 : -1, amt = Math.round(600 / sl);
-    const x = buy ? e + r * sl : e - r * sl, pnl = +(r * sl * amt).toFixed(2);
-    bal += pnl;
-    const d = t + 3600 * (1 + rnd() * 3);
-    s += `${i},${f(t)},${f(d)},XAUUSD,0,${pnl},${buy ? 'buy' : 'sell'},${e.toFixed(3)},${(buy ? e - sl : e + sl).toFixed(3)},,,${amt},${amt},closed,1,${rnd() < 0.5 ? 'breakout' : 'pullback'},${x.toFixed(3)},${r.toFixed(2)},${r.toFixed(2)},1,100000,${bal.toFixed(2)}\n`;
-    t = d + 3600 * (4 + rnd() * 20);
-  }
-  return s;
-}
-
-export async function importSample(page) {
-  await page.goto(BASE);
-  await page.getByRole('button', { name: /Import trades/ }).first().click();
-  await page.locator('.modal input[type=file]').setInputFiles({ name: 'sample-trades.csv', mimeType: 'text/csv', buffer: Buffer.from(sampleTradesCsv()) });
-  await page.locator('.modal .callout').first().waitFor();
-  await page.getByRole('button', { name: 'Import & analyse' }).click();
-  await page.getByText('Does this method have').first().waitFor({ timeout: 30000 });
-}
-
 /** Read the page top to bottom like a person, then report anything that is not visible. */
-export async function audit(page) {
+async function audit(page) {
   await page.waitForTimeout(1200);
   for (let pass = 0; pass < 2; pass++) {
     const H = await page.evaluate(() => document.documentElement.scrollHeight);
@@ -109,12 +82,7 @@ async function scenario(label, opts, setup, must) {
 /** A replay session with a quick run of trades, then its analytics. */
 async function replayThenAnalytics(page) {
   await demoSession(page);
-  for (let i = 0; i < 24; i++) {
-    await page.keyboard.press(i % 2 ? 'Shift+S' : 'Shift+B');
-    for (let k = 0; k < 4; k++) await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('Shift+C');
-  }
-  await page.waitForTimeout(600);
+  await quickTrades(page);
   await page.locator('.ws .topbar .primary').click();
   await page.getByText('Does this method have').first().waitFor({ timeout: 60000 });
 }

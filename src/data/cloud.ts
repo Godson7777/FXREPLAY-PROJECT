@@ -63,8 +63,12 @@ export function friendlyError(e: unknown): string {
 }
 
 export function setCloudConfig(c: CloudConfig | null) {
-  if (c) localStorage.setItem(CFG_KEY, JSON.stringify({ url: normalizeProjectUrl(c.url), key: cleanKey(c.key) }));
-  else localStorage.removeItem(CFG_KEY);
+  try {
+    if (c) localStorage.setItem(CFG_KEY, JSON.stringify({ url: normalizeProjectUrl(c.url), key: cleanKey(c.key) }));
+    else localStorage.removeItem(CFG_KEY);
+  } catch {
+    throw new Error('This browser is not allowing the site to store settings (private mode or storage disabled), so the cloud connection cannot be saved.');
+  }
   client = null;
 }
 
