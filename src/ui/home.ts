@@ -19,6 +19,7 @@ import { idb } from '../data/store';
 import { listStrategies, mergeStrategies } from '../data/strategies';
 import { reportsFor } from '../analytics/service';
 import { heroDemo } from './hero-demo';
+import { compactMoney } from './an-widgets';
 import { revealAll } from './motion';
 import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid } from './dom';
 import { pageHead, pageShell, scoreBadge } from './layout';
@@ -121,7 +122,7 @@ export async function renderHome(root: HTMLElement, nav: (h: string) => void, ta
       h('div', { class: 'muted small' }, s.imported ? `${fmtDate(s.start).slice(0, 10)} → ${fmtDate(s.end ?? s.start).slice(0, 10)} · ${s.imported.file}` : `Replay clock: ${fmtDate(s.state.clock - 1)} UTC`),
       equitySpark(s),
       h('div', { class: 'scard-stats' },
-        h('div', {}, h('span', {}, 'Balance'), h('b', { title: money(bal) }, `$${Math.round(bal).toLocaleString('en-US')}`)),
+        h('div', {}, h('span', {}, 'Balance'), h('b', { title: money(bal) }, Math.abs(bal) >= 100000 ? compactMoney(bal) : `$${Math.round(bal).toLocaleString('en-US')}`)),
         h('div', {}, h('span', {}, 'Net'), h('b', { class: cls(bal - s.balance) }, pct((bal - s.balance) / s.balance, 2, true))),
         h('div', {}, h('span', {}, 'Trades'), h('b', {}, String(st.trades))),
         h('div', {}, h('span', {}, 'Win rate'), h('b', {}, st.trades ? pct(st.winRate) : '—')),

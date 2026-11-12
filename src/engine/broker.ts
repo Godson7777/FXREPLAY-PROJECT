@@ -135,11 +135,37 @@ export interface OrderRequest {
   leverage?: number;
 }
 
-export function quoteToUsd(symbol: string, price: number): number {
+/**
+ * Rough USD value of one unit of a currency, for pairs quoted in neither USD nor with USD
+ * as the base (EURJPY, EURGBP…). Only used when no price of the matching USD pair is at
+ * hand; the ticket says so when it is. Without it a JPY profit would be counted as dollars.
+ */
+const APPROX_USD: Record<string, number> = {
+  EUR: 1.08, GBP: 1.27, AUD: 0.66, NZD: 0.6, CAD: 0.73, CHF: 1.13, JPY: 0.0067, SEK: 0.095, NOK: 0.093, DKK: 0.145,
+  SGD: 0.75, HKD: 0.128, ZAR: 0.054, MXN: 0.055, TRY: 0.029, PLN: 0.25, CZK: 0.043, HUF: 0.0027, CNH: 0.138, CNY: 0.138,
+};
+
+/** How a symbol's prices turn into dollars. */
+export function quoteInfo(symbol: string): { kind: 'usd' | 'inverse' | 'cross' | 'other'; ccy: string | null } {
   const s = symbol.toUpperCase().replace(/[^A-Z]/g, '');
-  if (/(USD|USDT|USDC|BUSD|FDUSD)$/.test(s)) return 1;
-  if (/^USD/.test(s) && price > 0) return 1 / price;
-  return 1;
+  if (/(USD|USDT|USDC|BUSD|FDUSD)$/.test(s)) return { kind: 'usd', ccy: 'USD' };
+  if (/^USD/.test(s)) return { kind: 'inverse', ccy: s.slice(3) || null };
+  const q = s.slice(-3);
+  if (s.length >= 6 && APPROX_USD[q] != null) return { kind: 'cross', ccy: q };
+  return { kind: 'other', ccy: null };
+}
+
+/**
+ * USD value of one unit of the symbol's quote currency. `rate` can supply an exact
+ * figure for a cross pair's quote currency (from the matching USD pair); otherwise an
+ * approximate one is used.
+ */
+export function quoteToUsd(symbol: string, price: number, rate?: (ccy: string) => number | null): number {
+  const q = quoteInfo(symbol);
+  if (q.kind === 'usd' || q.kind === 'other') return 1;
+  if (q.kind === 'inverse') return price > 0 ? 1 / price : 1;
+  const exact = rate?.(q.ccy!);
+  return exact != null && exact > 0 && isFinite(exact) ? exact : APPROX_USD[q.ccy!];
 }
 
 export function newBrokerState(initialBalance: number): BrokerState {
@@ -177,10 +203,36 @@ export class Broker {
     return t;
   }
 
+  /**
+   * Exact USD value of one unit of `ccy` when the session carries the matching USD pair
+   * (USDJPY or JPYUSD for JPY), else null.
+   */
+  private usdRate = (ccy: string): number | null => {
+    for (const k in this.s.last) {
+      const s = k.toUpperCase().replace(/[^A-Z]/g, '');
+      const bid = this.s.last[k].bid;
+      if (!(bid > 0)) continue;
+      if (s === `USD${ccy}`) return 1 / bid;
+      if (s === `${ccy}USD`) return bid;
+    }
+    return null;
+  };
+
+  /**
+   * How a cross pair's results are turned into dollars, for display: null for symbols
+   * that need no conversion.
+   */
+  conversion(sym: string): { ccy: string; rate: number; exact: boolean } | null {
+    const q = quoteInfo(sym);
+    if (q.kind !== 'cross' || !q.ccy) return null;
+    const exact = this.usdRate(q.ccy);
+    return { ccy: q.ccy, rate: exact ?? quoteToUsd(sym, 0), exact: exact != null };
+  }
+
   /** money value of a price move for `lots` */
   value(sym: string, priceDelta: number, lots: number, atPrice: number) {
     const sp = this.spec(sym);
-    return priceDelta * lots * sp.contractSize * quoteToUsd(sym, atPrice);
+    return priceDelta * lots * sp.contractSize * quoteToUsd(sym, atPrice, this.usdRate);
   }
 
   /** lots so that a stop `slDistance` away loses `riskUsd` */
@@ -283,6 +335,7 @@ export class Broker {
       if (req.side === 'long' && px <= ask) return { ok: false, error: 'Buy stop must be above the current ask (use a limit order)' };
       if (req.side === 'short' && px >= bid) return { ok: false, error: 'Sell stop must be below the current bid (use a limit order)' };
     }
+    if (!(round2(req.lots) > 0)) return { ok: false, error: 'Lot size is below the minimum of 0.01' };
     const lev = this.leveraged ? this.levFor(sym, req.leverage) : undefined;
     const common = {
       symbol: sym, side: req.side, lots: round2(req.lots), sl, tp,
@@ -333,14 +386,55 @@ export class Broker {
     this.s.orders = this.s.orders.filter((o) => o.id !== id);
   }
 
-  modifyOrder(id: number, patch: Partial<Pick<Order, 'price' | 'sl' | 'tp' | 'lots'>>) {
+  /**
+   * Change a pending order. Returns why the change is refused (nothing is changed then),
+   * or null. An entry, stop or target that would make the order invalid is refused, the
+   * same way a new order would be.
+   */
+  modifyOrder(id: number, patch: Partial<Pick<Order, 'price' | 'sl' | 'tp' | 'lots'>>): string | null {
     const o = this.s.orders.find((x) => x.id === id);
-    if (o) Object.assign(o, patch);
+    if (!o) return null;
+    const next = { ...o, ...patch };
+    const dg = this.spec(o.symbol).digits;
+    if (!(next.price > 0) || !isFinite(next.price)) return 'Enter a valid price';
+    if (!(next.lots > 0)) return 'Lot size must be > 0';
+    const bid = this.bid(o.symbol), ask = this.ask(o.symbol);
+    const buy = o.side === 'long';
+    if (next.sl != null && (buy ? next.sl >= next.price : next.sl <= next.price)) return `Stop loss must be ${buy ? 'below' : 'above'} the entry for a ${buy ? 'buy' : 'sell'}`;
+    if (next.tp != null && (buy ? next.tp <= next.price : next.tp >= next.price)) return `Take profit must be ${buy ? 'above' : 'below'} the entry for a ${buy ? 'buy' : 'sell'}`;
+    if (patch.price !== undefined && isFinite(bid)) {
+      if (o.type === 'limit' && (buy ? next.price >= ask : next.price <= bid)) return `A ${buy ? 'buy' : 'sell'} limit must stay ${buy ? 'below' : 'above'} the current price (${(buy ? ask : bid).toFixed(dg)})`;
+      if (o.type === 'stop' && (buy ? next.price <= ask : next.price >= bid)) return `A ${buy ? 'buy' : 'sell'} stop must stay ${buy ? 'above' : 'below'} the current price (${(buy ? ask : bid).toFixed(dg)})`;
+    }
+    Object.assign(o, patch);
+    return null;
   }
 
-  modifyPosition(id: number, patch: { sl?: number | null; tp?: number | null; trailPips?: number | null; note?: string; tags?: string[] }) {
+  /** Why a stop or target at `price` cannot be set on this position right now, or null when it can. */
+  levelError(id: number, kind: 'sl' | 'tp', price: number | null): string | null {
     const p = this.s.positions.find((x) => x.id === id);
-    if (!p) return;
+    if (!p || price == null) return null;
+    if (!(price > 0) || !isFinite(price)) return 'Enter a valid price';
+    const buy = p.side === 'long';
+    const px = buy ? this.bid(p.symbol) : this.ask(p.symbol); // the price this position would close at
+    if (!isFinite(px)) return null;
+    const at = px.toFixed(this.spec(p.symbol).digits);
+    if (kind === 'sl') {
+      if (buy ? price >= px : price <= px) return `Stop loss must be ${buy ? 'below' : 'above'} the current price (${at}) for a ${buy ? 'buy' : 'sell'} — there it would close the trade on the next bar`;
+      if (p.liq != null && (buy ? price <= p.liq : price >= p.liq)) return `Stop loss is past the liquidation price (${p.liq.toFixed(this.spec(p.symbol).digits)})`;
+    } else if (buy ? price <= px : price >= px) return `Take profit must be ${buy ? 'above' : 'below'} the current price (${at}) for a ${buy ? 'buy' : 'sell'}`;
+    return null;
+  }
+
+  /**
+   * Change a position's stop, target, trail or notes. Returns why a level is refused
+   * (nothing is changed then), or null.
+   */
+  modifyPosition(id: number, patch: { sl?: number | null; tp?: number | null; trailPips?: number | null; note?: string; tags?: string[] }): string | null {
+    const p = this.s.positions.find((x) => x.id === id);
+    if (!p) return null;
+    const err = (patch.sl !== undefined ? this.levelError(id, 'sl', patch.sl) : null) ?? (patch.tp !== undefined ? this.levelError(id, 'tp', patch.tp) : null);
+    if (err) return err;
     if (patch.sl !== undefined) {
       if (p.initialSl == null && patch.sl != null) p.initialSl = patch.sl;
       p.sl = patch.sl;
@@ -349,21 +443,38 @@ export class Broker {
     if (patch.trailPips !== undefined) p.trailPips = patch.trailPips;
     if (patch.note !== undefined) p.note = patch.note;
     if (patch.tags !== undefined) p.tags = patch.tags;
+    return null;
   }
 
-  breakeven(id: number) {
+  /**
+   * Move the stop to the entry price. Only possible while the trade is in profit: on a
+   * losing trade the entry is on the wrong side of the price and the stop would be hit
+   * on the next bar. Returns the reason when refused, or null.
+   */
+  breakeven(id: number): string | null {
     const p = this.s.positions.find((x) => x.id === id);
-    if (!p) return;
+    if (!p) return null;
+    const err = this.levelError(id, 'sl', p.entry);
+    if (err) return `Not in profit yet: a stop at the entry (${p.entry.toFixed(this.spec(p.symbol).digits)}) would close the trade on the next bar`;
     p.sl = p.entry;
     p.slMoved = 'be';
+    return null;
   }
 
-  reverse(id: number) {
+  /**
+   * Close the position and open the opposite one with the same size. When the new order
+   * cannot be placed (not enough margin, trading locked) the position is still closed and
+   * the reason is returned.
+   */
+  reverse(id: number): { ok: true; id: number } | { ok: false; error: string } {
     const p = this.s.positions.find((x) => x.id === id);
-    if (!p) return;
+    if (!p) return { ok: false, error: 'Position not found' };
+    const block = this.blocked?.();
+    if (block) return { ok: false, error: block };
     const { symbol, lots, side, leverage } = p;
     this.close(id, 1, 'manual');
-    this.place({ symbol, side: side === 'long' ? 'short' : 'long', type: 'market', lots, leverage });
+    const r = this.place({ symbol, side: side === 'long' ? 'short' : 'long', type: 'market', lots, leverage });
+    return r.ok ? r : { ok: false, error: `Position closed, but the opposite order was refused: ${r.error}` };
   }
 
   /** Close a fraction (0..1] of a position at market. */

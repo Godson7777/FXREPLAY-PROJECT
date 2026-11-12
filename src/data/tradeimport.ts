@@ -1,5 +1,5 @@
 import { guessSpec, type InstrumentSpec } from '../core/types';
-import { newBrokerState, quoteToUsd, type ExitReason, type Side, type Trade } from '../engine/broker';
+import { newBrokerState, quoteInfo, quoteToUsd, type ExitReason, type Side, type Trade } from '../engine/broker';
 import { newSession, type Session } from '../engine/replay';
 
 /**
@@ -145,9 +145,16 @@ export function parseTradeCsv(text: string, opts: { utcOffsetHours?: number } = 
       continue;
     }
     if (!isFinite(exit)) exit = entry + (dir * pnl) / (units * q);
+    // the trade's own P&L gives the real conversion rate of the quote currency; it replaces
+    // the rough built-in one when the two agree to within a factor of two
+    let qTrade = q;
+    if (quoteInfo(symbol).kind !== 'usd' && exit !== entry && pnl !== 0) {
+      const implied = Math.abs(pnl / ((exit - entry) * units));
+      if (isFinite(implied) && implied > q / 2 && implied < q * 2) qTrade = implied;
+    }
     const sl = num(get('sl'));
     const hasSl = isFinite(sl) && sl > 0 && dir * (entry - sl) > 0;
-    const risk = hasSl ? Math.abs(entry - sl) * units * q : null;
+    const risk = hasSl ? Math.abs(entry - sl) * units * qTrade : null;
     const rCol = num(get('r'));
     const r = risk ? pnl / risk : isFinite(rCol) ? rCol : null;
     const commission = Math.abs(num(get('commission')) || 0) + Math.max(0, -(num(get('swap')) || 0));

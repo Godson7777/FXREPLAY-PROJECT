@@ -798,7 +798,11 @@ export class ChartPane {
     this.markers.setMarkers(ms);
   }
 
-  screenshot(): string {
+  /**
+   * A picture of the chart with its drawings, as a JPEG data URL. The encoding runs off
+   * the main thread (toBlob), so taking a journal screenshot does not hold up a frame.
+   */
+  screenshot(): Promise<string> {
     const c = this.chart.takeScreenshot(true, false);
     const ctx = c.getContext('2d');
     if (ctx) ctx.drawImage(this.layer.canvas, 0, 0, c.width, c.height);
@@ -808,6 +812,14 @@ export class ChartPane {
     out.width = Math.round(c.width * scale);
     out.height = Math.round(c.height * scale);
     out.getContext('2d')!.drawImage(c, 0, 0, out.width, out.height);
-    return out.toDataURL('image/jpeg', 0.72);
+    return new Promise((resolve, reject) => {
+      out.toBlob((blob) => {
+        if (!blob) return reject(new Error('The chart could not be captured'));
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.onerror = () => reject(fr.error ?? new Error('The chart could not be captured'));
+        fr.readAsDataURL(blob);
+      }, 'image/jpeg', 0.72);
+    });
   }
 }

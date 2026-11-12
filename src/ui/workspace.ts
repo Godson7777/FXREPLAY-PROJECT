@@ -52,7 +52,12 @@ const PREF_KEY = 'overflowtrade.prefs';
 function loadPrefs(): Prefs {
   const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false, panel: 'order', sideCollapsed: false, preview: true, toolsOpen: typeof window === 'undefined' || window.innerWidth >= 768 };
   try {
-    return { ...def, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') };
+    const saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}') as Record<string, unknown>;
+    const out = { ...def, ...saved } as Prefs;
+    // a value saved while a field was empty or half-typed must not survive a reload as null/NaN
+    const o = out as unknown as Record<string, unknown>, d = def as unknown as Record<string, unknown>;
+    for (const k of Object.keys(d)) if (typeof d[k] === 'number' && !(typeof o[k] === 'number' && isFinite(o[k] as number) && (o[k] as number) >= 0)) o[k] = d[k];
+    return out;
   } catch {
     return def;
   }
@@ -688,20 +693,19 @@ export class Workspace implements PaneHost {
     const dg = this.session.specs[sym]?.digits ?? 5;
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
-      const valid = (price: number, kind: 'sl' | 'tp') => {
-        const bid = br.bid(sym);
-        const above = price > bid;
-        if (p.side === 'long') return kind === 'sl' ? !above : above;
-        return kind === 'sl' ? above : !above;
-      };
-      if (p.sl != null) out.push({ key: `s${p.id}`, price: p.sl, color: '#e0605a', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }, valid(px, 'sl')) });
-      if (p.tp != null) out.push({ key: `t${p.id}`, price: p.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }, valid(px, 'tp')) });
+      if (p.sl != null) out.push({ key: `s${p.id}`, price: p.sl, color: '#e0605a', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }) });
+      if (p.tp != null) out.push({ key: `t${p.id}`, price: p.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }) });
     }
     for (const o of br.s.orders) {
       if (o.symbol !== sym) continue;
-      out.push({ key: `o${o.id}`, price: o.price, color: '#d4a24c', label: 'Entry', onDrop: (px) => { br.modifyOrder(o.id, { price: +px.toFixed(dg) }); this.afterTrade(); } });
-      if (o.sl != null) out.push({ key: `os${o.id}`, price: o.sl, color: '#e0605a', label: 'SL', onDrop: (px) => { br.modifyOrder(o.id, { sl: +px.toFixed(dg) }); this.afterTrade(); } });
-      if (o.tp != null) out.push({ key: `ot${o.id}`, price: o.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => { br.modifyOrder(o.id, { tp: +px.toFixed(dg) }); this.afterTrade(); } });
+      const drop = (patch: { price?: number; sl?: number; tp?: number }) => {
+        const err = br.modifyOrder(o.id, patch);
+        if (err) toast(err, 'err');
+        this.afterTrade();
+      };
+      out.push({ key: `o${o.id}`, price: o.price, color: '#d4a24c', label: 'Entry', onDrop: (px) => drop({ price: +px.toFixed(dg) }) });
+      if (o.sl != null) out.push({ key: `os${o.id}`, price: o.sl, color: '#e0605a', label: 'SL', onDrop: (px) => drop({ sl: +px.toFixed(dg) }) });
+      if (o.tp != null) out.push({ key: `ot${o.id}`, price: o.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => drop({ tp: +px.toFixed(dg) }) });
     }
     return out;
   }
@@ -722,9 +726,10 @@ export class Workspace implements PaneHost {
     this.afterTrade();
   }
 
-  private modifyPos(id: number, patch: { sl?: number | null; tp?: number | null }, valid = true) {
-    if (!valid) return toast('That level is on the wrong side of the current price', 'err');
-    this.replay.broker.modifyPosition(id, patch);
+  /** Set a stop or target on a position; a level the broker refuses is explained and nothing changes. */
+  private modifyPos(id: number, patch: { sl?: number | null; tp?: number | null }) {
+    const err = this.replay.broker.modifyPosition(id, patch);
+    if (err) toast(err, 'err');
     this.afterTrade();
   }
 
@@ -891,6 +896,7 @@ export class Workspace implements PaneHost {
     this.acc = 0;
     const frame = (now: number) => {
       if (!this.playing) return;
+      this.uiFresh = false;
       this.acc += ((now - this.lastFrame) / 1000) * this.prefs.speed;
       this.lastFrame = now;
       let steps = Math.floor(this.acc);
@@ -920,6 +926,8 @@ export class Workspace implements PaneHost {
   }
 
   private pauseOnClose = true;
+  /** the ticket and tables were already rendered in this frame */
+  private uiFresh = false;
 
   private stepCandleSilent() {
     const p = this.active;
@@ -944,11 +952,12 @@ export class Workspace implements PaneHost {
     }
     // while playing, the ticket and tables refresh only a few times a second; show the
     // final state now, or a trade that just closed could still be listed as open
-    if (was && this.root.isConnected) {
+    if (was && this.root.isConnected && !this.uiFresh) {
       this.lastUi = performance.now();
       this.renderSide();
       this.renderBottom();
     }
+    this.uiFresh = false;
   }
 
   private afterStep(full = false) {
@@ -961,6 +970,7 @@ export class Workspace implements PaneHost {
       this.lastUi = now;
       this.renderSide();
       this.renderBottom();
+      this.uiFresh = true;
     }
     this.handleChallenge();
     this.scheduleSave();
@@ -1006,19 +1016,32 @@ export class Workspace implements PaneHost {
     this.scheduleSave();
   }
 
+  private shotQueued = false;
+  /**
+   * Journal screenshots for trades that just closed. Rendering a copy of the chart is the
+   * slowest part of a close, so it waits until the frame that shows the close is on screen.
+   */
   private flushShots() {
-    if (!this.pendingShots.length) return;
-    const shots = this.pendingShots.splice(0);
-    const pane = this.panes.find((p) => p.cfg.symbol === shots[shots.length - 1].symbol) ?? this.active;
-    try {
-      const url = pane.screenshot();
-      for (const t of shots) {
-        t.shot = `${this.session.id}-${t.id}`;
-        void saveShot(t.shot, url);
+    if (!this.pendingShots.length || this.shotQueued) return;
+    this.shotQueued = true;
+    requestAnimationFrame(() => setTimeout(() => {
+      this.shotQueued = false;
+      const shots = this.pendingShots.splice(0);
+      if (!shots.length || !this.root.isConnected) return;
+      const pane = this.panes.find((p) => p.cfg.symbol === shots[shots.length - 1].symbol) ?? this.active;
+      // screenshots are best-effort: a failure must never get in the way of trading
+      try {
+        void pane.screenshot().then((url) => {
+          for (const t of shots) {
+            t.shot = `${this.session.id}-${t.id}`;
+            void saveShot(t.shot, url);
+          }
+          this.scheduleSave();
+        }).catch(() => {});
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* screenshots are best-effort */
-    }
+    }, 0));
   }
 
   // ---- sizing & orders ----------------------------------------------------------
@@ -1054,6 +1077,11 @@ export class Workspace implements PaneHost {
   }
 
   private submit(side: Side, o?: { type: OrderType; price: number; sym: string }) {
+    // an empty or zero size must not quietly become the 0.01-lot minimum
+    if (!(this.prefs.sizeVal > 0)) {
+      const what = this.prefs.sizeMode === 'lots' ? 'a lot size' : this.prefs.sizeMode === 'risk%' ? 'the risk in %' : 'the risk in $';
+      return toast(`Enter ${what} in the Size field first`, 'err');
+    }
     const lv = this.ticketLevels(side, o);
     const dg = this.session.specs[lv.sym]?.digits ?? 5;
     const r = this.replay.broker.place({
@@ -1173,8 +1201,13 @@ export class Workspace implements PaneHost {
     });
   }
 
+  /** highest position id already shown (rows above it get the "new" highlight) */
   private seenPos = -1;
+  /** trades already shown in History (rows beyond it get the highlight) */
   private seenTrades = -1;
+  /** trades whose result has been announced */
+  private announced = -1;
+
   /** Say how each newly closed trade ended, and let the new rows announce themselves. */
   private announce() {
     const br = this.replay.broker;
@@ -1182,14 +1215,14 @@ export class Workspace implements PaneHost {
     if (this.seenPos < 0) this.seenPos = maxPos;
     else if (maxPos > this.seenPos) window.setTimeout(() => (this.seenPos = Math.max(this.seenPos, maxPos)), 1400);
     const n = br.s.trades.length;
-    if (this.seenTrades < 0) this.seenTrades = n;
-    if (n <= this.seenTrades) return;
-    const fresh = br.s.trades.slice(this.seenTrades);
-    window.setTimeout(() => (this.seenTrades = Math.max(this.seenTrades, n)), 1400);
-    if (this.announced >= n) return;
+    if (this.seenTrades < 0) this.seenTrades = this.announced = n; // what was there when the session opened is not news
+    if (n < this.announced) this.seenTrades = this.announced = n; // trades were replaced (sync, restore)
+    if (n > this.seenTrades) window.setTimeout(() => (this.seenTrades = Math.max(this.seenTrades, n)), 1400);
+    if (n <= this.announced) return;
+    const fresh = br.s.trades.slice(Math.max(this.announced, n - 2)); // each trade once; at most two toasts at a time
     this.announced = n;
-    for (const t of fresh.slice(-2)) {
-      const how = t.exitReason === 'tp' ? 'Target hit' : t.exitReason === 'sl' ? 'Stopped out' : t.exitReason === 'liq' ? 'Liquidated' : 'Closed';
+    for (const t of fresh) {
+      const how = t.exitReason === 'tp' ? 'Target hit' : t.exitReason === 'sl' ? 'Stopped out' : t.exitReason === 'liq' ? 'Liquidated' : t.exitReason === 'be' ? 'Stopped at breakeven' : t.exitReason === 'trail' ? 'Trailing stop hit' : 'Closed';
       toast(`${how} · ${t.symbol} ${t.side === 'long' ? 'long' : 'short'} · ${money(t.pnl, true)}${t.r != null ? ` (${num(t.r, 2, true)}R)` : ''}`, t.pnl >= 0 ? 'ok' : 'err');
     }
     queueMicrotask(() => {
@@ -1197,7 +1230,6 @@ export class Workspace implements PaneHost {
       if (tab) flash(tab, fresh[fresh.length - 1].pnl >= 0 ? 'up' : 'dn');
     });
   }
-  private announced = 0;
 
   openSheet() {
     this.sheetOpen = true;
@@ -1805,6 +1837,20 @@ export class Workspace implements PaneHost {
       <div><span>R:R</span><b>${risk && reward ? (reward / risk).toFixed(2) : '—'}</b></div>
       <div class="lv"><span>Buy SL/TP</span><b>${L.sl?.toFixed(dg) ?? '—'} / ${L.tp?.toFixed(dg) ?? '—'}</b></div>
       <div class="lv"><span>Sell SL/TP</span><b>${S.sl?.toFixed(dg) ?? '—'} / ${S.tp?.toFixed(dg) ?? '—'}</b></div>`;
+    // a pair quoted in neither USD nor with USD as base: say how its results become dollars
+    const conv = br.conversion(sym);
+    if (conv) {
+      el.insertAdjacentHTML('beforeend', `<div class="lv calc-note">${conv.ccy} amounts are converted at ${conv.rate.toPrecision(4)} USD per ${conv.ccy}${conv.exact ? '' : ` — an approximate rate. Add USD${conv.ccy} (or ${conv.ccy}USD) to this session for the exact one`}.</div>`);
+    }
+    // sizing by risk has two silent traps: no stop to size from, and the 0.01-lot minimum
+    const pr = this.prefs;
+    const want = pr.sizeMode === 'risk%' ? (br.s.balance * pr.sizeVal) / 100 : pr.sizeMode === 'risk$' ? pr.sizeVal : null;
+    if (want != null && want > 0) {
+      if (risk == null) el.insertAdjacentHTML('beforeend', `<div class="lv calc-warn">No stop loss: the size cannot be worked out from the risk, so the minimum of 0.01 lots is used.</div>`);
+      else if (L.lots <= 0.01 && risk > want * 1.15) {
+        el.insertAdjacentHTML('beforeend', `<div class="lv calc-warn">The smallest size is 0.01 lots, so this trade risks ${money(risk)} (${((risk / br.s.balance) * 100).toFixed(2)}% of the balance) — more than the ${money(want)} you set. Tighten the stop or accept the larger risk.</div>`);
+      }
+    }
     const lev = this.ticketLev(sym);
     if (lev) {
       const margin = br.marginFor(sym, L.lots, L.entry, lev);
@@ -1850,9 +1896,9 @@ export class Workspace implements PaneHost {
           h('td', { class: cls(pips) }, num(pips, 1, true)), h('td', { class: cls(rNow ?? 0) }, rNow != null ? num(rNow, 2, true) : '—'),
           h('td', { class: cls(fl) }, money(fl, true)), h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
           h('td', { class: 'acts' },
-            h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { br.breakeven(p.id); this.afterTrade(); } }, 'BE'),
+            h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { const err = br.breakeven(p.id); if (err) toast(err, 'err'); this.afterTrade(); } }, 'BE'),
             h('button', { class: 'mini', title: 'Close half', onclick: () => { br.close(p.id, 0.5); this.afterTrade(); } }, '½'),
-            h('button', { class: 'mini', title: 'Reverse position', onclick: () => { br.reverse(p.id); this.afterTrade(); } }, '⇄'),
+            h('button', { class: 'mini', title: 'Reverse position', onclick: () => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); } }, '⇄'),
             h('button', { class: 'mini danger', title: 'Close', onclick: () => { br.close(p.id); this.afterTrade(); } }, '✕'),
           ),
         );
@@ -1900,7 +1946,12 @@ export class Workspace implements PaneHost {
     const i = h('input', { class: 'lvl', type: 'number', step: Math.pow(10, -dg), value: v != null ? v.toFixed(dg) : '', placeholder: '—' });
     i.onchange = () => {
       const x = i.value === '' ? null : +i.value;
-      this.replay.broker.modifyPosition(id, { [kind]: x });
+      const err = this.replay.broker.modifyPosition(id, { [kind]: x });
+      if (err) {
+        toast(err, 'err');
+        i.value = v != null ? v.toFixed(dg) : ''; // back to what is actually set
+        i.blur();
+      }
       this.afterTrade();
     };
     return i;

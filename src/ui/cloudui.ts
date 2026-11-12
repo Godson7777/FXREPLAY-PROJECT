@@ -52,7 +52,11 @@ export function setupModal() {
   ), { wide: true });
   save.onclick = () => {
     if (!/^https?:\/\/.+/.test(url.value) || key.value.length < 20) return toast('Paste the Project URL and the anon key', 'err');
-    setCloudConfig({ url: url.value, key: key.value });
+    try {
+      setCloudConfig({ url: url.value, key: key.value });
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     close();
     location.reload();
   };
@@ -131,7 +135,11 @@ function accountModal() {
     ? h('button', { class: 'ghost danger', onclick: async () => {
         if (!confirm('Disconnect this browser from the cloud project? Local data is kept.')) return;
         await signOut();
-        setCloudConfig(null);
+        try {
+          setCloudConfig(null);
+        } catch (e) {
+          return toast((e as Error).message, 'err');
+        }
         location.reload();
       } }, 'Disconnect project')
     : null;

@@ -4,7 +4,7 @@ import { PRESETS } from '../engine/rules';
 import { lineChart, barChart } from './charts';
 import { h, money, toast } from './dom';
 import { infoCard } from './layout';
-import { kpi, pctTxt, stackBar } from './an-widgets';
+import { kpi, kpiRow, pctTxt, stackBar } from './an-widgets';
 
 /** Monte Carlo settings live at module level so re-renders (filters, sync) keep them. */
 const mc: Pick<PathSimOptions, 'mode' | 'runs' | 'horizon' | 'skip' | 'friction'> = { mode: 'bootstrap', runs: 1000, horizon: 100, skip: 0, friction: 0 };
@@ -45,7 +45,7 @@ export function monteCarloCards(r: Report): HTMLElement[] {
     runBtn,
   );
 
-  const tiles = h('div', { class: 'kpis' });
+  const tiles = kpiRow('kpis');
   const shuffleNote = h('p', { class: 'callout hidden', style: 'margin-top:1rem' }, 'Shuffle mode replays exactly your trades in a random order, so every path ends at the same result. What changes is the route: the drawdowns and losing streaks you could have faced.');
   const fan = h('div', {});
   const ddBox = h('div', {});
@@ -187,7 +187,7 @@ export function monteCarloCards(r: Report): HTMLElement[] {
       return;
     }
     propOut.append(
-      h('div', { class: 'kpis small' },
+      kpiRow('kpis small',
         kpi('Pass', pctTxt(res.pass, 0), res.pass >= 0.5 ? 'up' : 'dn', res.medianDays != null ? `median ${Math.round(res.medianDays)} days (${Math.round(res.p25Days ?? 0)}–${Math.round(res.p75Days ?? 0)})` : 'never reached the target'),
         kpi('Fail: daily loss', pctTxt(res.failDaily, 0), res.failDaily > 0.2 ? 'dn' : '', prop.daily ? `limit −${prop.daily}% in a day` : 'no daily limit'),
         kpi('Fail: max loss', pctTxt(res.failTotal, 0), res.failTotal > 0.2 ? 'dn' : '', `limit −${prop.total}%${prop.trailing ? ' (trailing)' : ''}`),
