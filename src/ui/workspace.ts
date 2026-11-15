@@ -15,7 +15,7 @@ import { TOOL_INFO, flipDrawing, isPosTool, posLevels, type DragLine, type Drawi
 import { autoType, lotsFor, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
 import { listDatasets, loadBars } from '../data/store';
 import { indexAtOrBefore } from '../core/types';
-import { h, patchChildren, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton } from './dom';
+import { h, patchChildren, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton, numField } from './dom';
 import { cloudButton } from './cloudui';
 import { LOGO } from './logo';
 
@@ -81,6 +81,19 @@ export class Workspace implements PaneHost {
   private lastFrame = 0;
   private acc = 0;
   private saveTimer = 0;
+  private lastRowAct = 0;
+  /**
+   * Closing or reversing a row makes the rows below slide up under the cursor, so the second
+   * click of a double click would land on a different position. One row action per 450 ms.
+   */
+  private rowAct(fn: () => void) {
+    return () => {
+      const now = performance.now();
+      if (now - this.lastRowAct < 450) return;
+      this.lastRowAct = now;
+      fn();
+    };
+  }
   /** unsaved changes made in this tab */
   private dirty = false;
   /** the stored session as this tab last read or wrote it */
@@ -1095,13 +1108,15 @@ export class Workspace implements PaneHost {
       const what = this.prefs.sizeMode === 'lots' ? 'a lot size' : this.prefs.sizeMode === 'risk%' ? 'the risk in %' : 'the risk in $';
       return toast(`Enter ${what} in the Size field first`, 'err');
     }
+    if (this.prefs.sizeMode === 'risk%' && this.prefs.sizeVal > 100) return toast('Risk is above 100% of the account — the Size field is in %', 'err');
+    if (this.prefs.sizeMode === 'risk$' && this.prefs.sizeVal > this.replay.broker.s.balance) return toast('The risk in $ is larger than the account balance', 'err');
     const lv = this.ticketLevels(side, o);
     const dg = this.session.specs[lv.sym]?.digits ?? 5;
     const r = this.replay.broker.place({
       symbol: lv.sym, side, type: lv.type, lots: lv.lots, price: lv.entry,
       sl: lv.sl != null ? +lv.sl.toFixed(dg) : null, tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
       tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), note: this.ticket.note,
-      trailPips: this.ticket.trail || null, beAtR: this.ticket.be || null,
+      trailPips: this.ticket.trail > 0 ? this.ticket.trail : null, beAtR: this.ticket.be > 0 ? this.ticket.be : null,
       leverage: this.ticketLev(lv.sym),
     });
     if (!r.ok) return toast(r.error, 'err');
@@ -1916,9 +1931,9 @@ export class Workspace implements PaneHost {
           h('td', { class: cls(fl) }, money(fl, true)), h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
           h('td', { class: 'acts' },
             h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { const err = br.breakeven(p.id); if (err) toast(err, 'err'); this.afterTrade(); } }, 'BE'),
-            h('button', { class: 'mini', title: 'Close half', onclick: () => { br.close(p.id, 0.5); this.afterTrade(); } }, '½'),
-            h('button', { class: 'mini', title: 'Reverse position', onclick: () => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); } }, '⇄'),
-            h('button', { class: 'mini danger', title: 'Close', onclick: () => { br.close(p.id); this.afterTrade(); } }, '✕'),
+            h('button', { class: 'mini', title: 'Close half', onclick: this.rowAct(() => { br.close(p.id, 0.5); this.afterTrade(); }) }, '½'),
+            h('button', { class: 'mini', title: 'Reverse position', onclick: this.rowAct(() => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); }) }, '⇄'),
+            h('button', { class: 'mini danger', title: 'Close', onclick: this.rowAct(() => { br.close(p.id); this.afterTrade(); }) }, '✕'),
           ),
         );
         tb.append(tr);
@@ -1935,7 +1950,7 @@ export class Workspace implements PaneHost {
           h('td', {}, `${o.id}`), h('td', {}, o.symbol), h('td', {}, o.type), h('td', { class: o.side === 'long' ? 'up' : 'dn' }, o.side.toUpperCase()), h('td', {}, o.lots.toFixed(2)),
           h('td', {}, o.price.toFixed(dg)), h('td', {}, o.sl?.toFixed(dg) ?? '—'), h('td', {}, o.tp?.toFixed(dg) ?? '—'),
           h('td', { class: 'muted' }, fmtLocal(o.createdAt + off(o.createdAt))),
-          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: () => { br.cancelOrder(o.id); this.afterTrade(); } }, 'Cancel')),
+          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: this.rowAct(() => { br.cancelOrder(o.id); this.afterTrade(); }) }, 'Cancel')),
         ));
       }
       if (!br.s.orders.length) tb.append(emptyRow(10, 'No pending orders. Drag order/SL/TP lines on the chart to adjust them.'));
@@ -2066,14 +2081,26 @@ export class Workspace implements PaneHost {
       save,
     ), { wide: true });
     save.onclick = () => {
+      // a pip size of 0 or "−1 digits" would stop this session from ever opening again: check before anything is changed
+      let commission: number;
+      const next: { sym: string; spread: number; pipSize: number; contractSize: number; digits: number }[] = [];
+      try {
+        commission = numField(comm, 'Commission', 0, 1000);
+        for (const r of specRows) next.push({
+          sym: r.sym, spread: numField(r.spread, `${r.sym} spread`, 0, 10000), pipSize: numField(r.pip, `${r.sym} pip size`, 1e-9, 1e6),
+          contractSize: numField(r.cs, `${r.sym} contract size`, 1e-9, 1e9), digits: numField(r.dg, `${r.sym} digits`, 0, 10, true),
+        });
+      } catch (e) {
+        return toast((e as Error).message, 'err');
+      }
       s.timezone = tz.value;
-      s.commissionPerLot = +comm.value;
+      s.commissionPerLot = commission;
       s.slFirst = slFirst.checked;
       this.prefs.autoShot = autoShot.checked;
       this.pauseOnClose = pauseClose.checked;
-      for (const r of specRows) {
-        s.spreadPips[r.sym] = +r.spread.value;
-        s.specs[r.sym] = { ...s.specs[r.sym], pipSize: +r.pip.value, contractSize: +r.cs.value, digits: +r.dg.value };
+      for (const r of next) {
+        s.spreadPips[r.sym] = r.spread;
+        s.specs[r.sym] = { ...s.specs[r.sym], pipSize: r.pipSize, contractSize: r.contractSize, digits: r.digits };
       }
       Object.assign(this.replay.broker.cfg, { commissionPerLot: s.commissionPerLot, slFirst: s.slFirst, spreadPips: s.spreadPips });
       this.savePrefs();

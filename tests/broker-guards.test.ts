@@ -143,3 +143,24 @@ describe('dollar value of pairs not quoted in USD', () => {
     expect(quoteToUsd('EURUSD', 1.1)).toBe(1);
   });
 });
+
+describe('sizes nobody means', () => {
+  it('an order worth more than 100,000× the account is refused, pending orders too', () => {
+    const br = mk();
+    for (const lots of [1e12, 1e30, Infinity, 20000]) {
+      const r = br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots, sl: null, tp: null });
+      expect(r.ok, `${lots} lots`).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/the account/);
+    }
+    const lim = br.place({ symbol: 'EURUSD', side: 'long', type: 'limit', lots: 1e9, price: 1.09, sl: null, tp: null });
+    expect(lim.ok).toBe(false);
+    expect(br.s.positions.length + br.s.orders.length).toBe(0);
+  });
+  it('large but real sizes still go through', () => {
+    const br = mk();
+    // 100 lots of EURUSD on $10,000 is 1,100× the account: reckless, but a real order
+    expect(br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 100, sl: null, tp: null }).ok).toBe(true);
+    const tiny = mk({}, 1);
+    expect(tiny.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 0.01, sl: null, tp: null }).ok).toBe(true);
+  });
+});

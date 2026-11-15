@@ -21,7 +21,7 @@ import { reportsFor } from '../analytics/service';
 import { heroDemo } from './hero-demo';
 import { compactMoney } from './an-widgets';
 import { revealAll } from './motion';
-import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid } from './dom';
+import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid, numField } from './dom';
 import { pageHead, pageShell, scoreBadge } from './layout';
 import { addToStrategyModal } from './strategies';
 
@@ -278,23 +278,33 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     const e0 = end.value ? parseDateInput(end.value) : null;
     const bad = checkRange(dataWindow(syms), s0, e0, (t) => fmtDate(t).slice(0, 16));
     if (bad) return toast(bad, 'err');
-    const rules: ChallengeRules | null = preset.value
-      ? {
+    // an account of $0, a negative spread or a 0% loss limit would make every later number meaningless
+    let balance: number, riskPct: number, commission: number, spreadPips: number, rules: ChallengeRules | null = null;
+    try {
+      balance = numField(bal, 'Starting balance', 1, 1e9);
+      riskPct = numField(risk, 'Risk per trade (%)', 0.01, 100);
+      commission = numField(comm, 'Commission', 0, 1000);
+      spreadPips = numField(spread, 'Spread (pips)', 0, 1000);
+      if (preset.value)
+        rules = {
           name: preset.value === 'custom' ? 'Custom challenge' : PRESETS[+preset.value].name,
-          profitTarget: +target.value, maxDailyLoss: +daily.value, maxTotalLoss: +total.value, minTradingDays: +days.value,
+          profitTarget: numField(target, 'Profit target (%)', 0.1, 1000), maxDailyLoss: numField(daily, 'Max daily loss (%) — 0 for none', 0, 100),
+          maxTotalLoss: numField(total, 'Max total loss (%)', 0.1, 100), minTradingDays: numField(days, 'Min trading days', 0, 365, true),
           trailingDrawdown: trailing.checked, stopOnBreach: stop.checked,
-        }
-      : null;
+        };
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     const s = newSession({
       rules,
-      id: uid(), name: name.value || 'Session', description: '', symbols: syms.map((d) => d.id), start: s0,
-      end: e0, balance: +bal.value, commissionPerLot: +comm.value, ...(lev.value ? { leverage: +lev.value } : {}),
-      spreadPips: { '*': +spread.value }, slFirst: true, timezone: tz.value, riskPct: +risk.value, createdAt: Date.now(),
+      id: uid(), name: name.value.trim().slice(0, 80) || 'Session', description: '', symbols: syms.map((d) => d.id), start: s0,
+      end: e0, balance, commissionPerLot: commission, ...(lev.value ? { leverage: +lev.value } : {}),
+      spreadPips: { '*': spreadPips }, slFirst: true, timezone: tz.value, riskPct, createdAt: Date.now(),
       specs: Object.fromEntries(syms.map((d) => [d.id, d.spec])),
     });
     try {
       const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
-      localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value }));
+      localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: riskPct }));
     } catch {
       /* ignore */
     }
@@ -362,9 +372,9 @@ function importTradesModal(nav: (h: string) => void) {
   go.onclick = async () => {
     if (!parsed) return;
     const b = +bal.value;
-    if (!(b > 0)) return toast('Enter the starting balance', 'err');
+    if (!(b > 0) || !isFinite(b) || b > 1e12) return toast('Enter the starting balance (a number above 0)', 'err');
     go.disabled = true;
-    const s = importedSession(parsed, { id: uid(), name: name.value.trim() || 'Imported trades', balance: b, file: file.files?.[0]?.name ?? 'trades.csv', timezone: tz.value });
+    const s = importedSession(parsed, { id: uid(), name: name.value.trim().slice(0, 80) || 'Imported trades', balance: b, file: file.files?.[0]?.name ?? 'trades.csv', timezone: tz.value });
     await saveSession(s);
     toast(`${parsed.trades.length} trades imported — crunching the numbers…`, 'ok');
     close();
@@ -448,6 +458,14 @@ function liveSessionModal(done: (s: Session) => void) {
     if (!coin) return toast('Pick a market first', 'err');
     const c = coin;
     const leverage = Math.max(1, Math.min(c.maxLeverage, Math.round(+lev.value || 1)));
+    let balance: number, riskPct: number;
+    try {
+      balance = numField(bal, 'Starting balance', 1, 1e9);
+      riskPct = numField(risk, 'Risk per trade (%)', 0.01, 100);
+      numField(fee, 'Fee per side (%)', 0, 5);
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     go.disabled = true;
     status.textContent = `Loading recent ${c.name} candles…`;
     try {
@@ -459,8 +477,8 @@ function liveSessionModal(done: (s: Session) => void) {
       const spec = hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]);
       await storeBars(id, bars, 'hyperliquid', true, spec, { provider: 'hyperliquid', symbol: c.name });
       const s = newSession({
-        id: uid(), name: name.value || `${c.name} live`, description: '', symbols: [id], start: now, end: null,
-        balance: +bal.value, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz.value, riskPct: +risk.value,
+        id: uid(), name: name.value.trim().slice(0, 80) || `${c.name} live`, description: '', symbols: [id], start: now, end: null,
+        balance, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz.value, riskPct,
         createdAt: Date.now(), specs: { [id]: spec }, leverage, maxLeverage: { [id]: c.maxLeverage }, feePct: Math.max(0, +fee.value || 0),
         live: { venue: 'hyperliquid', coin: c.name },
       });
@@ -469,7 +487,7 @@ function liveSessionModal(done: (s: Session) => void) {
         const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
         // start with a stop about 0.5% from price, so the first order fits the margin
         const slPips = Math.max(1, Math.round((bars.c[bars.n - 1] * 0.005) / spec.pipSize));
-        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value, slPips }));
+        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: riskPct, slPips }));
       } catch {
         /* ignore */
       }
@@ -799,12 +817,27 @@ function syntheticModal(refresh: () => void) {
     go,
   ));
   go.onclick = async () => {
+    // "days" is one-minute bars × 1,440: an unchecked typo here would freeze the tab
+    let cfg: Parameters<typeof generateSynthetic>[0];
+    const symbol = sym.value.trim().toUpperCase().replace(/[^A-Z0-9:._/-]/g, '');
+    try {
+      if (!symbol) throw new Error('Type a symbol name');
+      const t0 = Date.parse(start.value) / 1000;
+      if (!isFinite(t0) || t0 < 0 || t0 > Date.now() / 1000) throw new Error('Pick a start date in the past');
+      cfg = { start: t0, days: numField(days, 'Days', 1, 1500, true), price: numField(price, 'Start price', 0.000001, 1e7), annualVol: numField(vol, 'Annual volatility (%)', 0.1, 500) / 100, seed: Math.floor(Math.abs(+seed.value)) || 1 };
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     go.disabled = true;
-    const bars = generateSynthetic({ start: Date.parse(start.value) / 1000, days: +days.value, price: +price.value, annualVol: +vol.value / 100, seed: +seed.value });
-    await storeBars(sym.value, bars, 'synthetic');
-    toast('Generated', 'ok');
-    close();
-    refresh();
+    try {
+      await storeBars(symbol, generateSynthetic(cfg), 'synthetic');
+      toast('Generated', 'ok');
+      close();
+      refresh();
+    } catch (e) {
+      go.disabled = false;
+      toast(String((e as Error).message ?? e), 'err');
+    }
   };
 }
 

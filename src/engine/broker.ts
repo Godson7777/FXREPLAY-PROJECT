@@ -60,6 +60,9 @@ export interface Position {
   liq?: number | null;
 }
 
+/** A single order may not be worth more than this many times the account's equity. */
+export const MAX_NOTIONAL_X = 100000;
+
 export interface Trade {
   id: number;
   symbol: string;
@@ -336,6 +339,11 @@ export class Broker {
       if (req.side === 'short' && px >= bid) return { ok: false, error: 'Sell stop must be below the current bid (use a limit order)' };
     }
     if (!(round2(req.lots) > 0)) return { ok: false, error: 'Lot size is below the minimum of 0.01' };
+    // a slipped decimal or a stop of a fraction of a pip: nothing real is this large, and the
+    // results would be too big to add up exactly
+    const notional = this.notional(sym, req.lots, px), cap = Math.max(1, this.equity()) * MAX_NOTIONAL_X;
+    if (!isFinite(req.lots) || !isFinite(notional) || notional > cap)
+      return { ok: false, error: `That is ${isFinite(req.lots) && req.lots < 1e9 ? round2(req.lots).toLocaleString('en-US') : 'far too many'} lots — over ${MAX_NOTIONAL_X.toLocaleString('en-US')}× the account. Check the size and the stop distance.` };
     const lev = this.leveraged ? this.levFor(sym, req.leverage) : undefined;
     const common = {
       symbol: sym, side: req.side, lots: round2(req.lots), sl, tp,
