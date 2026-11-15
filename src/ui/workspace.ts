@@ -9,7 +9,7 @@ import { LiveFeed, applyCandle, applyTick, hlCandles, HL_MAX_CANDLES, type FeedS
 import { getDatasetMeta, saveDataset } from '../data/store';
 import { canRefresh, refreshDataset } from '../data/ingest';
 import type { ChallengeState } from '../engine/rules';
-import { saveSession, saveShot, getShot } from '../data/sessions';
+import { saveSession, saveShot, getShot, saveReplaySession, savedStateOf, type SavedState } from '../data/sessions';
 import { ChartPane, IND_COLORS, type CrosshairInfo, type LineAction, type PaneHost } from './chartpane';
 import { TOOL_INFO, flipDrawing, isPosTool, posLevels, type DragLine, type Drawing, type DrawingType, type Zone } from './drawings';
 import { autoType, lotsFor, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
@@ -81,6 +81,14 @@ export class Workspace implements PaneHost {
   private lastFrame = 0;
   private acc = 0;
   private saveTimer = 0;
+  /** unsaved changes made in this tab */
+  private dirty = false;
+  /** the stored session as this tab last read or wrote it */
+  private saved: SavedState = { versions: [], sig: '' };
+  /** trades whose journal was edited here since the last save */
+  private journalDirty = new Set<number>();
+  /** the stored session is newer than this tab: saving is off */
+  private conflict = false;
   private prefs = loadPrefs();
   private tab: 'positions' | 'orders' | 'history' = 'positions';
   private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0, lev: 0, side: 'long' as Side, link: null as string | null };
@@ -122,6 +130,7 @@ export class Workspace implements PaneHost {
     data: Record<string, Bars>,
     private nav: (hash: string) => void,
   ) {
+    this.saved = savedStateOf(session);
     this.replay = new Replay(session, data);
     this.replay.broker.onTradeClosed = (t) => {
       if (this.prefs.autoShot) this.pendingShots.push(t);
@@ -139,8 +148,10 @@ export class Workspace implements PaneHost {
     this.mq.addEventListener('change', this.onMq);
     this.initBottomGestures();
     document.addEventListener('keydown', this.onKey);
-    window.addEventListener('beforeunload', this.flushSave);
+    window.addEventListener('beforeunload', this.onUnload);
   }
+
+  private onUnload = () => this.flushSave(true);
 
   get tz() {
     return this.session.timezone;
@@ -166,7 +177,7 @@ export class Workspace implements PaneHost {
     this.stopLive();
     this.flushSave();
     document.removeEventListener('keydown', this.onKey);
-    window.removeEventListener('beforeunload', this.flushSave);
+    window.removeEventListener('beforeunload', this.onUnload);
     this.panes.forEach((p) => p.destroy());
     this.root.remove();
   }
@@ -1987,6 +1998,7 @@ export class Workspace implements PaneHost {
       t.tags = tags.value.split(',').map((x) => x.trim()).filter(Boolean);
       t.note = note.value;
       t.rating = +rating.value || undefined;
+      this.journalDirty.add(t.id);
       this.scheduleSave();
       this.renderBottom();
       close();
@@ -2125,15 +2137,57 @@ export class Workspace implements PaneHost {
   }
 
   scheduleSave() {
+    this.dirty = true;
     clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(this.flushSave, 800);
+    this.saveTimer = window.setTimeout(() => this.flushSave(), 800);
   }
 
-  flushSave = () => {
+  /**
+   * Write the session if this tab changed it. The write is refused when the stored copy
+   * was played on somewhere else in the meantime (another tab, another device), so an
+   * idle tab can never wipe newer trades; journal entries saved from the analytics page
+   * are merged in instead of overwritten.
+   */
+  flushSave = (unloading = false) => {
     clearTimeout(this.saveTimer);
-    this.session.state.updatedAt = Date.now();
-    void saveSession(this.session).catch((e) => toast('Could not save session: ' + e, 'err'));
+    if (!this.dirty || this.conflict) return;
+    this.dirty = false;
+    const s = this.session;
+    if (unloading === true) {
+      // the page is going away: one direct write is all the browser will finish
+      s.state.updatedAt = Date.now();
+      void saveSession(s).catch(() => {});
+      return;
+    }
+    const dirtyJournal = new Set(this.journalDirty);
+    this.journalDirty.clear();
+    void saveReplaySession(s, this.saved, dirtyJournal).then((res) => {
+      if (res === 'saved') return;
+      for (const id of dirtyJournal) this.journalDirty.add(id);
+      this.showConflict(res);
+    }).catch((e) => {
+      this.dirty = true;
+      for (const id of dirtyJournal) this.journalDirty.add(id);
+      toast('Could not save session: ' + e, 'err');
+    });
   };
+
+  /** The stored session moved on without this tab: stop, say so, and never overwrite it. */
+  private showConflict(why: 'conflict' | 'deleted') {
+    if (this.conflict) return;
+    this.conflict = true;
+    this.pause();
+    this.bannerEl?.remove();
+    const reload = h('button', { class: 'primary' }, why === 'deleted' ? 'Back to sessions' : 'Reload this tab');
+    reload.onclick = () => (why === 'deleted' ? this.nav('#/') : location.reload());
+    this.bannerEl = h('div', { class: 'nodata' }, h('div', { class: 'nodata-card conflict-card' },
+      h('h3', {}, why === 'deleted' ? 'This session was deleted' : 'This session was continued somewhere else'),
+      h('p', {}, why === 'deleted'
+        ? 'It was removed in another tab or on another device, so nothing more is saved from here.'
+        : 'It is open in another tab or was synced from another device, and that copy is newer. To protect it, this tab has stopped saving — reload to pick up the latest state.'),
+      h('div', { class: 'row-btns' }, reload)));
+    this.center.append(this.bannerEl);
+  }
 }
 
 function kv(k: string, v: string, c = '') {

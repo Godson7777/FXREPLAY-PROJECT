@@ -8,7 +8,7 @@ import { storeBars, canRefresh, refreshDataset } from '../data/ingest';
 import { PROVIDERS, providerInfo, fetchCandles, datasetId, sourceOf, getTdKey, setTdKey, refreshSource, type ProviderId } from '../data/providers';
 import { cloudState, uploadDataset, listCloudDatasets, downloadDataset, deleteCloudDataset } from '../data/cloud';
 import { authModal } from './cloudui';
-import { listSessions, saveSession, deleteSession } from '../data/sessions';
+import { listSessions, saveSession, deleteSession, isSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, dataWindow, checkRange, type Session } from '../engine/replay';
 import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, coinLabel, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
@@ -561,7 +561,14 @@ function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => v
     const cs = h('input', { type: 'number', step: 'any', value: d.spec.contractSize, class: 'sm' });
     const dg = h('input', { type: 'number', step: 1, value: d.spec.digits, class: 'sm' });
     const upd = async () => {
-      d.spec = { ...d.spec, pipSize: +pip.value, contractSize: +cs.value, digits: +dg.value };
+      const ps = +pip.value, c = +cs.value, g = +dg.value;
+      if (!(ps > 0) || !isFinite(ps) || !(c > 0) || !isFinite(c) || !Number.isInteger(g) || g < 0 || g > 10) {
+        pip.value = String(d.spec.pipSize);
+        cs.value = String(d.spec.contractSize);
+        dg.value = String(d.spec.digits);
+        return toast('Pip size and contract size must be above zero; digits a whole number from 0 to 10', 'err');
+      }
+      d.spec = { ...d.spec, pipSize: ps, contractSize: c, digits: g };
       await updateDatasetMeta(d);
       toast(`${d.symbol} spec saved (applies to new sessions)`, 'ok');
     };
@@ -639,11 +646,22 @@ function importCsvModal(refresh: () => void) {
     if (!files.length) return toast('Choose a file', 'err');
     go.disabled = true;
     try {
+      const offHours = +off.value;
+      if (!isFinite(offHours) || Math.abs(offHours) > 14) throw new Error('The UTC offset must be between −14 and +14 hours');
+      const seen = new Set<string>();
       for (const f of files) {
         status.textContent = `Parsing ${f.name}…`;
-        const bars = parseCsv(await f.text(), +off.value);
-        const symbol = (sym.value || f.name.replace(/\.[^.]+$/, '').replace(/^DAT_ASCII_|_M1.*$/gi, '').split(/[_\s-]/)[0]).toUpperCase();
-        const meta = await storeBars(symbol, bars, 'csv', merge.checked);
+        const symbol = (sym.value.trim() || f.name.replace(/\.[^.]+$/, '').replace(/^DAT_ASCII_|_M1.*$/gi, '').split(/[_\s-]/)[0]).toUpperCase().replace(/[^A-Z0-9:._/-]/g, '');
+        if (!symbol) throw new Error(`Type a symbol name for ${f.name}`);
+        let bars;
+        try {
+          bars = parseCsv(await f.text(), offHours);
+        } catch (e) {
+          throw new Error(`${f.name}: ${(e as Error).message}`);
+        }
+        // several files for one symbol are parts of the same history, whatever the tick box says
+        const meta = await storeBars(symbol, bars, 'csv', merge.checked || seen.has(symbol));
+        seen.add(symbol);
         status.textContent = `${meta.symbol}: ${meta.count.toLocaleString('en-US')} bars`;
       }
       toast('Import complete', 'ok');
@@ -651,8 +669,9 @@ function importCsvModal(refresh: () => void) {
       refresh();
     } catch (e) {
       toast(String((e as Error).message ?? e), 'err');
-      status.textContent = String(e);
+      status.textContent = String((e as Error).message ?? e);
       go.disabled = false;
+      refresh(); // files before the failing one are already stored
     }
   };
 }
@@ -811,13 +830,26 @@ function importBackup(done: () => void) {
     try {
       const data = JSON.parse(await f.text()) as { app?: string; sessions?: Session[]; strategies?: unknown[]; shots?: Record<string, string> };
       if (!['overflowtrade', 'replaylab'].includes(data.app ?? '') || !Array.isArray(data.sessions)) throw new Error('Not an Overflow Trade backup file');
-      for (const [k, v] of Object.entries(data.shots ?? {})) await idb.put('shots', k, v);
-      for (const s of data.sessions) await saveSession(s);
+      const good = data.sessions.filter(isSession);
+      const damaged = data.sessions.length - good.length;
+      if (!good.length && data.sessions.length) throw new Error('This backup holds no readable sessions');
+      // a backup is a snapshot: a session that was continued since then is newer on this device
+      const local = new Map((await listSessions()).map((s) => [s.id, s]));
+      const older = good.filter((s) => (local.get(s.id)?.state.updatedAt ?? 0) > s.state.updatedAt);
+      const replaceNewer = older.length > 0 && confirm(
+        `${older.length} session${older.length === 1 ? '' : 's'} in this backup ${older.length === 1 ? 'is' : 'are'} older than the copy on this device:\n\n${older.slice(0, 8).map((s) => `• ${s.name} (${s.state.broker.trades.length} trades in the backup, ${local.get(s.id)!.state.broker.trades.length} on this device)`).join('\n')}${older.length > 8 ? '\n…' : ''}\n\nOK = go back to the backup copy.\nCancel = keep the newer copy on this device.`);
+      const take = good.filter((s) => replaceNewer || !older.includes(s));
+      for (const [k, v] of Object.entries(data.shots ?? {})) if (typeof v === 'string') await idb.put('shots', k, v);
+      for (const s of take) await saveSession(s);
       const nStrat = Array.isArray(data.strategies) ? await mergeStrategies(data.strategies) : 0;
-      const missing = [...new Set(data.sessions.flatMap((s) => s.symbols))];
+      const missing = [...new Set(take.flatMap((s) => s.symbols))];
       const have = new Set((await listDatasets()).map((d) => d.id));
       const need = missing.filter((m) => !have.has(m));
-      toast(`Restored ${data.sessions.length} session${data.sessions.length === 1 ? '' : 's'}${nStrat ? ` and ${nStrat} strateg${nStrat === 1 ? 'y' : 'ies'}` : ''}${need.length ? ` — import data for ${need.join(', ')} to open them` : ''}`, need.length ? 'info' : 'ok');
+      const kept = good.length - take.length;
+      toast(`Restored ${take.length} session${take.length === 1 ? '' : 's'}${nStrat ? ` and ${nStrat} strateg${nStrat === 1 ? 'y' : 'ies'}` : ''}`
+        + (kept ? ` — kept ${kept} newer cop${kept === 1 ? 'y' : 'ies'} on this device` : '')
+        + (damaged ? ` — skipped ${damaged} damaged entr${damaged === 1 ? 'y' : 'ies'}` : '')
+        + (need.length ? ` — import data for ${need.join(', ')} to open them` : ''), need.length || damaged ? 'info' : 'ok');
       done();
     } catch (e) {
       toast(String((e as Error).message ?? e), 'err');
