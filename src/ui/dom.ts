@@ -233,6 +233,39 @@ export function modal(title: string, body: HTMLElement, opts: { wide?: boolean; 
   return close;
 }
 
+/** Outline a field as wrong until the person types in it again. */
+export function markInvalid(input: HTMLInputElement) {
+  input.classList.add('invalid');
+  input.setAttribute('aria-invalid', 'true');
+  const clear = () => {
+    input.classList.remove('invalid');
+    input.removeAttribute('aria-invalid');
+    input.removeEventListener('input', clear);
+  };
+  input.addEventListener('input', clear);
+}
+
+/** Ask for a line of text in the app's own dialog. Resolves to null when it is closed without OK. */
+export function askText(title: string, value = '', placeholder = ''): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const input = h('input', { type: 'text', value, placeholder, maxlength: 200 });
+    const ok = h('button', { class: 'primary', type: 'button' }, 'OK');
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+      close();
+    };
+    const close = modal(title, h('div', { class: 'stack' }, input, h('div', { class: 'row-btns' }, ok)), { onClose: () => finish(null) });
+    ok.onclick = () => finish(input.value);
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') finish(input.value);
+    };
+    input.select();
+  });
+}
+
 export function field(label: string, input: HTMLElement, hint?: string) {
   return h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('small', {}, hint) : null);
 }
@@ -251,6 +284,7 @@ export function parseDateInput(v: string): number {
 export function numField(input: HTMLInputElement, label: string, lo: number, hi: number, whole = false): number {
   const v = input.value.trim() === '' ? NaN : +input.value;
   if (!isFinite(v) || v < lo || v > hi || (whole && !Number.isInteger(v))) {
+    markInvalid(input);
     input.focus();
     const f = (x: number) => (Math.abs(x) >= 1e6 ? x.toExponential().replace('e+', 'e') : String(x));
     throw new Error(`${label}: enter ${whole ? 'a whole number' : 'a number'} from ${f(lo)} to ${f(hi)}`);

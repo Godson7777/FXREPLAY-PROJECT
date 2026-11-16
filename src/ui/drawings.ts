@@ -1,3 +1,4 @@
+import { askText } from './dom';
 import type { IChartApi, ISeriesApi, Logical, SeriesType } from 'lightweight-charts';
 import { firstHit, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
 
@@ -297,15 +298,21 @@ export class DrawingLayer {
       const d: Drawing = { id: Math.random().toString(36).slice(2, 10), type, pts: [pt, { ...pt }], color: DEFAULT_COLOR[type] ?? '#22c96a' };
       if (ONE_POINT.includes(type)) {
         d.pts = [pt];
+        const add = () => {
+          this.host.drawings().push(d);
+          this.selected = d;
+          this.host.changed();
+          this.toolDone();
+        };
         if (type === 'text') {
-          const txt = prompt('Text', 'Note');
-          if (!txt) return;
-          d.text = txt;
+          void askText('Text note', 'Note', 'What to write on the chart').then((txt) => {
+            if (!txt?.trim()) return this.toolDone();
+            d.text = txt.trim();
+            add();
+          });
+          return;
         }
-        this.host.drawings().push(d);
-        this.selected = d;
-        this.host.changed();
-        this.toolDone();
+        add();
         return;
       }
       if (type === 'long' || type === 'short') {
@@ -440,11 +447,11 @@ export class DrawingLayer {
     if (d.preview) return;
     if (isPosTool(d)) return this.host.onSettings?.(d);
     if (d.type === 'text') {
-      const txt = prompt('Text', d.text);
-      if (txt != null) {
+      void askText('Text note', d.text ?? '').then((txt) => {
+        if (txt == null) return;
         d.text = txt;
         this.host.changed();
-      }
+      });
     }
   }
 
@@ -458,11 +465,12 @@ export class DrawingLayer {
     }
     if (hit && 'd' in hit && hit.d.type === 'text') {
       e.stopPropagation();
-      const txt = prompt('Text', hit.d.text);
-      if (txt != null) {
-        hit.d.text = txt;
+      const d = hit.d;
+      void askText('Text note', d.text ?? '').then((txt) => {
+        if (txt == null) return;
+        d.text = txt;
         this.host.changed();
-      }
+      });
     }
   };
 

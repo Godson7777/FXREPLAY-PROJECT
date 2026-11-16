@@ -126,6 +126,7 @@ export function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => v
       field('Session name', name),
       field('Symbols (all stay time-synchronised)', symList),
       h('div', { class: 'row2' }, field('Start (UTC) — history before this is visible', start), field('End (optional, UTC)', end)),
+      h('small', { class: 'muted' }, 'Start and end are typed in UTC. Inside the replay, the chart and the trade log use the chart timezone chosen below.'),
       h('div', { class: 'row-btns' }, winNote, getNew),
       h('div', { class: 'row2' }, field('Starting balance ($)', bal), field('Default risk per trade (%)', risk)),
       h('div', { class: 'row2' }, field('Commission / lot / side ($)', comm), field('Spread (pips, editable per symbol later)', spread)),

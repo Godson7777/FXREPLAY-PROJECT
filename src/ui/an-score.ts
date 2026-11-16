@@ -94,13 +94,13 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
   const strengths = h(
     'div',
     { class: 'score-box good' },
-    h('h5', {}, 'Strengths'),
+    h('h5', { 'aria-level': 3 }, 'Strengths'),
     sc.strengths.length ? h('ul', {}, ...sc.strengths.map((s) => li(s))) : h('p', { class: 'empty' }, 'No standout pillar yet (80+ points).'),
   );
   const todo = h(
     'div',
     { class: 'score-box todo' },
-    h('h5', {}, 'What to improve'),
+    h('h5', { 'aria-level': 3 }, 'What to improve'),
     sc.suggestions.length ? h('ul', {}, ...sc.suggestions.map((s) => li(s))) : h('p', { class: 'empty' }, 'Nothing urgent — keep collecting trades.'),
   );
   const hit = sc.gates.filter((g) => g.hit);
@@ -112,7 +112,7 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
     h(
       'div',
       { class: 'card-title' },
-      h('h5', {}, 'Caps & flags'),
+      h('h5', { 'aria-level': 3 }, 'Caps & flags'),
       h(
         'div',
         { class: 'tools-r' },
@@ -159,7 +159,7 @@ export function scoreHero(r: Report, o: { filtered?: boolean; combined?: number;
       h(
         'div',
         { class: 'card-title' },
-        h('h5', {}, 'Score breakdown'),
+        h('h5', { 'aria-level': 3 }, 'Score breakdown'),
         h(
           'div',
           { class: 'tools-r' },

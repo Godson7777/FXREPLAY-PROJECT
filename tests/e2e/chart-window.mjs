@@ -136,4 +136,15 @@ for (const tf of ['5m', '1H', '1m']) {
   ok(s.len >= 1 && s.len <= 400 && s.lastVisible, `${tf}: window ${s.len}, latest candle in view`);
 }
 ok(!errors.length, `no console errors${errors.length ? ' — ' + errors.slice(0, 3).join(' | ') : ''}`);
+// the "back to the latest candle" button: only there when the newest candle is out of view
+await toRealTime();
+await page.waitForTimeout(300);
+ok(await page.locator('.pane-latest').first().isHidden(), 'at the latest candle there is no "back to latest" button');
+await drag(700);
+await page.waitForTimeout(300);
+ok(await page.locator('.pane-latest').first().isVisible(), 'after scrolling into the past the button appears');
+await page.locator('.pane-latest').first().click();
+await page.waitForTimeout(400);
+const sEnd = await state();
+ok(sEnd.lastVisible && (await page.locator('.pane-latest').first().isHidden()), 'one click returns to the latest candle and the button goes away');
 await browser.close();

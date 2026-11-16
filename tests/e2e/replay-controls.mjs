@@ -281,7 +281,13 @@ for (let i = 0; i < tools.length; i++) {
   await page.mouse.move(x + 70, y + 50, { steps: 6 });
   await page.mouse.up();
   await page.waitForTimeout(150);
-  if ((await st()).drawings === before) {
+  // the Text note tool asks for its text in the app's own dialog
+  if (await page.locator('.modal input[type=text]').count()) {
+    await page.locator('.modal input[type=text]').fill('A note');
+    await page.locator('.modal button', { hasText: /^OK$/ }).click();
+    await page.waitForTimeout(200);
+  }
+  if ((await st()).drawings === before && !(await page.locator('.modal').count())) {
     await page.mouse.click(x + 70, y + 50);
     await page.waitForTimeout(150);
   }

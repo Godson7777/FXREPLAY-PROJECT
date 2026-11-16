@@ -187,7 +187,13 @@ export class ChartPane {
     this.legend = h('div', { class: 'pane-legend' });
     this.chartEl = h('div', { class: 'pane-chart' });
     this.tagLayer = h('div', { class: 'line-tags' });
-    this.el = h('div', { class: 'pane' }, this.header, this.chartEl, this.legend);
+    this.latestBtn = h(
+      'button',
+      { class: 'pane-latest', type: 'button', title: 'Back to the latest candle', 'aria-label': 'Back to the latest candle', hidden: true },
+      '⇥',
+    );
+    this.latestBtn.onclick = () => this.toLatest();
+    this.el = h('div', { class: 'pane' }, this.header, this.chartEl, this.legend, this.latestBtn);
     this.el.addEventListener('pointerdown', () => host.activate(this), true);
     this.chart = createChart(this.chartEl, {
       autoSize: true,
@@ -202,6 +208,8 @@ export class ChartPane {
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
       if (r && r.from < 10) this.loadOlder();
+      // more than a few candles away from the newest one: offer the way back
+      this.updateLatestBtn();
     });
     this.createMain();
     this.chartEl.append(this.tagLayer);
@@ -412,14 +420,18 @@ export class ChartPane {
   renderHeader() {
     const syms = this.host.replay.session.symbols;
     this.header.innerHTML = '';
-    const sel = h('select', { class: 'pane-sym', title: 'Symbol' }, ...syms.map((s) => h('option', { value: s, selected: s === this.cfg.symbol }, s)));
+    const sel = h(
+      'select',
+      { class: 'pane-sym', title: 'Symbol', 'aria-label': 'Symbol' },
+      ...syms.map((s) => h('option', { value: s, selected: s === this.cfg.symbol }, s)),
+    );
     sel.onchange = () => this.setSymbol(sel.value);
     const tfBtn = h('button', { class: 'pane-tf', title: 'Change timeframe (type any: 7m, 2H, 3D…)' }, this.cfg.tf);
     tfBtn.onclick = () => this.host.onTfRequest(this);
     const ct = this.chartType();
     const typeSel = h(
       'select',
-      { class: 'pane-type', title: 'Chart type' },
+      { class: 'pane-type', title: 'Chart type', 'aria-label': 'Chart type' },
       ...CHART_TYPES.map((c) => h('option', { value: c.type, selected: c.type === ct }, c.label)),
     );
     typeSel.onchange = () => this.host.setChartType(this, typeSel.value as ChartType);
@@ -506,6 +518,15 @@ export class ChartPane {
     return c;
   }
 
+  private latestBtn!: HTMLButtonElement;
+  /** Shown only when the newest candle has been scrolled out of view (checked a frame later: the range settles after data changes). */
+  private updateLatestBtn() {
+    requestAnimationFrame(() => {
+      const r = this.chart.timeScale().getVisibleLogicalRange();
+      this.latestBtn.hidden = !r || r.to >= this.k - this.start - 1;
+    });
+  }
+
   /**
    * Put the latest candle back at the right edge. Not the library's animated
    * scrollToRealTime(): that one stops at its last animation frame, which from far away
@@ -579,6 +600,7 @@ export class ChartPane {
 
   /** Bring the chart up to the replay cursor (incrementally when possible). */
   sync(full = false) {
+    this.updateLatestBtn();
     const cursor = this.host.replay.cursor[this.cfg.symbol] ?? 0;
     const a = this.agg;
     const k = a.baseToAgg[cursor];
