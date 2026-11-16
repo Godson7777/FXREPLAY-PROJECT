@@ -1109,7 +1109,10 @@ span.tree-name { font-size: 12px; }
 .site-header, .subnav { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
 /* positions / orders / history: the action buttons stay in reach when the table is wider than
    the panel (a 1280 px laptop, three charts open) — the Close button used to be off screen */
-.ws .bottom .tbl td.acts { position: sticky; right: 0; background: var(--surface); white-space: nowrap; box-shadow: -10px 0 10px -10px rgba(0, 0, 0, 0.35); }
+@media (min-width: 1100px) {
+  .ws .bottom .tbl td.acts { position: sticky; right: 0; background: var(--surface); white-space: nowrap; box-shadow: -10px 0 10px -10px rgba(0, 0, 0, 0.35); }
+}
+/* on a phone or a small tablet the four buttons would cover the stop and target fields: there the table scrolls sideways instead */
 /* in the replay, notices sit over the top of the chart, not over the positions table they report on */
 @media (min-width: 768px) {
   body:has(.ws) #toasts { top: 62px; bottom: auto; flex-direction: column-reverse; }
@@ -1152,3 +1155,14 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--bad); box-
   background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); box-shadow: var(--shadow-menu); cursor: pointer; font-size: 15px; line-height: 1; }
 .pane-latest:hover { border-color: var(--accent); color: var(--accent); }
 .pane-latest[hidden] { display: none; }
+
+/* tick boxes keep one size whatever the length of their label */
+.check input[type='checkbox'] { flex: none; width: 18px; height: 18px; margin: 0; }
+
+/* touch screens: everything in the replay side panels and on the chart can be hit with a thumb */
+@media (pointer: coarse) {
+  .ws .sheet button.ghost, .ws .sheet button.primary, .ws .sheet button.ghost.sm,
+  .ws .side button.ghost.sm, .ws .side button.ghost, .ws .side button.primary { min-height: 40px; min-width: 44px; }
+  .ws .sheet input.jump, .ws .sheet #watchAdd, .ws .side input.jump, .ws .side #watchAdd { min-height: 44px; font-size: 16px; }
+  .pane-latest { width: 40px; height: 40px; right: 70px; }
+}
