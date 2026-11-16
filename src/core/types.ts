@@ -61,12 +61,14 @@ export function barsFromRows(rows: number[][]): Bars {
   const b = emptyBars(rows.length);
   let n = 0;
   for (const r of rows) {
-    if (!(r[0] > 0) || !isFinite(r[1]) || !isFinite(r[4])) continue;
+    // a bar needs a time, an open and a close; a missing or broken high/low falls back to them
+    if (!(r[0] > 0) || !(r[1] > 0) || !(r[4] > 0) || !isFinite(r[1]) || !isFinite(r[4])) continue;
+    const hi = r[2] > 0 && isFinite(r[2]) ? r[2] : r[1], lo = r[3] > 0 && isFinite(r[3]) ? r[3] : r[1];
     const i = n > 0 && b.t[n - 1] === r[0] ? n - 1 : n++;
     b.t[i] = r[0];
     b.o[i] = r[1];
-    b.h[i] = Math.max(r[1], r[2], r[3], r[4]);
-    b.l[i] = Math.min(r[1], r[2], r[3], r[4]);
+    b.h[i] = Math.max(r[1], hi, lo, r[4]);
+    b.l[i] = Math.min(r[1], hi, lo, r[4]);
     b.c[i] = r[4];
     b.v[i] = r[5] || 0;
   }

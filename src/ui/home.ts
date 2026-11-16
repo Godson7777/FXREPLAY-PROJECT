@@ -8,7 +8,7 @@ import { storeBars, canRefresh, refreshDataset } from '../data/ingest';
 import { PROVIDERS, providerInfo, fetchCandles, datasetId, sourceOf, getTdKey, setTdKey, refreshSource, type ProviderId } from '../data/providers';
 import { cloudState, uploadDataset, listCloudDatasets, downloadDataset, deleteCloudDataset } from '../data/cloud';
 import { authModal } from './cloudui';
-import { listSessions, saveSession, deleteSession } from '../data/sessions';
+import { listSessions, saveSession, deleteSession, isSession } from '../data/sessions';
 import { computeStats } from '../analytics/stats';
 import { newSession, dataWindow, checkRange, type Session } from '../engine/replay';
 import { hlCoins, hlCandles, hlSpec, hlSymbol, pickInterval, coinLabel, HL_TAKER_FEE, HL_MAX_CANDLES, type HlCoin } from '../data/hyperliquid';
@@ -21,7 +21,7 @@ import { reportsFor } from '../analytics/service';
 import { heroDemo } from './hero-demo';
 import { compactMoney } from './an-widgets';
 import { revealAll } from './motion';
-import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid } from './dom';
+import { h, money, pct, cls, toast, modal, field, dateInputValue, parseDateInput, download, uid, numField } from './dom';
 import { pageHead, pageShell, scoreBadge } from './layout';
 import { addToStrategyModal } from './strategies';
 
@@ -278,23 +278,33 @@ function newSessionModal(datasets: DatasetMeta[], done: (s: Session) => void) {
     const e0 = end.value ? parseDateInput(end.value) : null;
     const bad = checkRange(dataWindow(syms), s0, e0, (t) => fmtDate(t).slice(0, 16));
     if (bad) return toast(bad, 'err');
-    const rules: ChallengeRules | null = preset.value
-      ? {
+    // an account of $0, a negative spread or a 0% loss limit would make every later number meaningless
+    let balance: number, riskPct: number, commission: number, spreadPips: number, rules: ChallengeRules | null = null;
+    try {
+      balance = numField(bal, 'Starting balance', 1, 1e9);
+      riskPct = numField(risk, 'Risk per trade (%)', 0.01, 100);
+      commission = numField(comm, 'Commission', 0, 1000);
+      spreadPips = numField(spread, 'Spread (pips)', 0, 1000);
+      if (preset.value)
+        rules = {
           name: preset.value === 'custom' ? 'Custom challenge' : PRESETS[+preset.value].name,
-          profitTarget: +target.value, maxDailyLoss: +daily.value, maxTotalLoss: +total.value, minTradingDays: +days.value,
+          profitTarget: numField(target, 'Profit target (%)', 0.1, 1000), maxDailyLoss: numField(daily, 'Max daily loss (%) — 0 for none', 0, 100),
+          maxTotalLoss: numField(total, 'Max total loss (%)', 0.1, 100), minTradingDays: numField(days, 'Min trading days', 0, 365, true),
           trailingDrawdown: trailing.checked, stopOnBreach: stop.checked,
-        }
-      : null;
+        };
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     const s = newSession({
       rules,
-      id: uid(), name: name.value || 'Session', description: '', symbols: syms.map((d) => d.id), start: s0,
-      end: e0, balance: +bal.value, commissionPerLot: +comm.value, ...(lev.value ? { leverage: +lev.value } : {}),
-      spreadPips: { '*': +spread.value }, slFirst: true, timezone: tz.value, riskPct: +risk.value, createdAt: Date.now(),
+      id: uid(), name: name.value.trim().slice(0, 80) || 'Session', description: '', symbols: syms.map((d) => d.id), start: s0,
+      end: e0, balance, commissionPerLot: commission, ...(lev.value ? { leverage: +lev.value } : {}),
+      spreadPips: { '*': spreadPips }, slFirst: true, timezone: tz.value, riskPct, createdAt: Date.now(),
       specs: Object.fromEntries(syms.map((d) => [d.id, d.spec])),
     });
     try {
       const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
-      localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value }));
+      localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: riskPct }));
     } catch {
       /* ignore */
     }
@@ -362,9 +372,9 @@ function importTradesModal(nav: (h: string) => void) {
   go.onclick = async () => {
     if (!parsed) return;
     const b = +bal.value;
-    if (!(b > 0)) return toast('Enter the starting balance', 'err');
+    if (!(b > 0) || !isFinite(b) || b > 1e12) return toast('Enter the starting balance (a number above 0)', 'err');
     go.disabled = true;
-    const s = importedSession(parsed, { id: uid(), name: name.value.trim() || 'Imported trades', balance: b, file: file.files?.[0]?.name ?? 'trades.csv', timezone: tz.value });
+    const s = importedSession(parsed, { id: uid(), name: name.value.trim().slice(0, 80) || 'Imported trades', balance: b, file: file.files?.[0]?.name ?? 'trades.csv', timezone: tz.value });
     await saveSession(s);
     toast(`${parsed.trades.length} trades imported — crunching the numbers…`, 'ok');
     close();
@@ -448,6 +458,14 @@ function liveSessionModal(done: (s: Session) => void) {
     if (!coin) return toast('Pick a market first', 'err');
     const c = coin;
     const leverage = Math.max(1, Math.min(c.maxLeverage, Math.round(+lev.value || 1)));
+    let balance: number, riskPct: number;
+    try {
+      balance = numField(bal, 'Starting balance', 1, 1e9);
+      riskPct = numField(risk, 'Risk per trade (%)', 0.01, 100);
+      numField(fee, 'Fee per side (%)', 0, 5);
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     go.disabled = true;
     status.textContent = `Loading recent ${c.name} candles…`;
     try {
@@ -459,8 +477,8 @@ function liveSessionModal(done: (s: Session) => void) {
       const spec = hlSpec(c.name, c.szDecimals, bars.c[bars.n - 1]);
       await storeBars(id, bars, 'hyperliquid', true, spec, { provider: 'hyperliquid', symbol: c.name });
       const s = newSession({
-        id: uid(), name: name.value || `${c.name} live`, description: '', symbols: [id], start: now, end: null,
-        balance: +bal.value, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz.value, riskPct: +risk.value,
+        id: uid(), name: name.value.trim().slice(0, 80) || `${c.name} live`, description: '', symbols: [id], start: now, end: null,
+        balance, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz.value, riskPct,
         createdAt: Date.now(), specs: { [id]: spec }, leverage, maxLeverage: { [id]: c.maxLeverage }, feePct: Math.max(0, +fee.value || 0),
         live: { venue: 'hyperliquid', coin: c.name },
       });
@@ -469,7 +487,7 @@ function liveSessionModal(done: (s: Session) => void) {
         const p = JSON.parse(localStorage.getItem('overflowtrade.prefs') || '{}');
         // start with a stop about 0.5% from price, so the first order fits the margin
         const slPips = Math.max(1, Math.round((bars.c[bars.n - 1] * 0.005) / spec.pipSize));
-        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: +risk.value, slPips }));
+        localStorage.setItem('overflowtrade.prefs', JSON.stringify({ ...p, sizeMode: 'risk%', sizeVal: riskPct, slPips }));
       } catch {
         /* ignore */
       }
@@ -561,7 +579,14 @@ function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: () => v
     const cs = h('input', { type: 'number', step: 'any', value: d.spec.contractSize, class: 'sm' });
     const dg = h('input', { type: 'number', step: 1, value: d.spec.digits, class: 'sm' });
     const upd = async () => {
-      d.spec = { ...d.spec, pipSize: +pip.value, contractSize: +cs.value, digits: +dg.value };
+      const ps = +pip.value, c = +cs.value, g = +dg.value;
+      if (!(ps > 0) || !isFinite(ps) || !(c > 0) || !isFinite(c) || !Number.isInteger(g) || g < 0 || g > 10) {
+        pip.value = String(d.spec.pipSize);
+        cs.value = String(d.spec.contractSize);
+        dg.value = String(d.spec.digits);
+        return toast('Pip size and contract size must be above zero; digits a whole number from 0 to 10', 'err');
+      }
+      d.spec = { ...d.spec, pipSize: ps, contractSize: c, digits: g };
       await updateDatasetMeta(d);
       toast(`${d.symbol} spec saved (applies to new sessions)`, 'ok');
     };
@@ -639,11 +664,22 @@ function importCsvModal(refresh: () => void) {
     if (!files.length) return toast('Choose a file', 'err');
     go.disabled = true;
     try {
+      const offHours = +off.value;
+      if (!isFinite(offHours) || Math.abs(offHours) > 14) throw new Error('The UTC offset must be between −14 and +14 hours');
+      const seen = new Set<string>();
       for (const f of files) {
         status.textContent = `Parsing ${f.name}…`;
-        const bars = parseCsv(await f.text(), +off.value);
-        const symbol = (sym.value || f.name.replace(/\.[^.]+$/, '').replace(/^DAT_ASCII_|_M1.*$/gi, '').split(/[_\s-]/)[0]).toUpperCase();
-        const meta = await storeBars(symbol, bars, 'csv', merge.checked);
+        const symbol = (sym.value.trim() || f.name.replace(/\.[^.]+$/, '').replace(/^DAT_ASCII_|_M1.*$/gi, '').split(/[_\s-]/)[0]).toUpperCase().replace(/[^A-Z0-9:._/-]/g, '');
+        if (!symbol) throw new Error(`Type a symbol name for ${f.name}`);
+        let bars;
+        try {
+          bars = parseCsv(await f.text(), offHours);
+        } catch (e) {
+          throw new Error(`${f.name}: ${(e as Error).message}`);
+        }
+        // several files for one symbol are parts of the same history, whatever the tick box says
+        const meta = await storeBars(symbol, bars, 'csv', merge.checked || seen.has(symbol));
+        seen.add(symbol);
         status.textContent = `${meta.symbol}: ${meta.count.toLocaleString('en-US')} bars`;
       }
       toast('Import complete', 'ok');
@@ -651,8 +687,9 @@ function importCsvModal(refresh: () => void) {
       refresh();
     } catch (e) {
       toast(String((e as Error).message ?? e), 'err');
-      status.textContent = String(e);
+      status.textContent = String((e as Error).message ?? e);
       go.disabled = false;
+      refresh(); // files before the failing one are already stored
     }
   };
 }
@@ -780,12 +817,27 @@ function syntheticModal(refresh: () => void) {
     go,
   ));
   go.onclick = async () => {
+    // "days" is one-minute bars × 1,440: an unchecked typo here would freeze the tab
+    let cfg: Parameters<typeof generateSynthetic>[0];
+    const symbol = sym.value.trim().toUpperCase().replace(/[^A-Z0-9:._/-]/g, '');
+    try {
+      if (!symbol) throw new Error('Type a symbol name');
+      const t0 = Date.parse(start.value) / 1000;
+      if (!isFinite(t0) || t0 < 0 || t0 > Date.now() / 1000) throw new Error('Pick a start date in the past');
+      cfg = { start: t0, days: numField(days, 'Days', 1, 1500, true), price: numField(price, 'Start price', 0.000001, 1e7), annualVol: numField(vol, 'Annual volatility (%)', 0.1, 500) / 100, seed: Math.floor(Math.abs(+seed.value)) || 1 };
+    } catch (e) {
+      return toast((e as Error).message, 'err');
+    }
     go.disabled = true;
-    const bars = generateSynthetic({ start: Date.parse(start.value) / 1000, days: +days.value, price: +price.value, annualVol: +vol.value / 100, seed: +seed.value });
-    await storeBars(sym.value, bars, 'synthetic');
-    toast('Generated', 'ok');
-    close();
-    refresh();
+    try {
+      await storeBars(symbol, generateSynthetic(cfg), 'synthetic');
+      toast('Generated', 'ok');
+      close();
+      refresh();
+    } catch (e) {
+      go.disabled = false;
+      toast(String((e as Error).message ?? e), 'err');
+    }
   };
 }
 
@@ -811,13 +863,26 @@ function importBackup(done: () => void) {
     try {
       const data = JSON.parse(await f.text()) as { app?: string; sessions?: Session[]; strategies?: unknown[]; shots?: Record<string, string> };
       if (!['overflowtrade', 'replaylab'].includes(data.app ?? '') || !Array.isArray(data.sessions)) throw new Error('Not an Overflow Trade backup file');
-      for (const [k, v] of Object.entries(data.shots ?? {})) await idb.put('shots', k, v);
-      for (const s of data.sessions) await saveSession(s);
+      const good = data.sessions.filter(isSession);
+      const damaged = data.sessions.length - good.length;
+      if (!good.length && data.sessions.length) throw new Error('This backup holds no readable sessions');
+      // a backup is a snapshot: a session that was continued since then is newer on this device
+      const local = new Map((await listSessions()).map((s) => [s.id, s]));
+      const older = good.filter((s) => (local.get(s.id)?.state.updatedAt ?? 0) > s.state.updatedAt);
+      const replaceNewer = older.length > 0 && confirm(
+        `${older.length} session${older.length === 1 ? '' : 's'} in this backup ${older.length === 1 ? 'is' : 'are'} older than the copy on this device:\n\n${older.slice(0, 8).map((s) => `• ${s.name} (${s.state.broker.trades.length} trades in the backup, ${local.get(s.id)!.state.broker.trades.length} on this device)`).join('\n')}${older.length > 8 ? '\n…' : ''}\n\nOK = go back to the backup copy.\nCancel = keep the newer copy on this device.`);
+      const take = good.filter((s) => replaceNewer || !older.includes(s));
+      for (const [k, v] of Object.entries(data.shots ?? {})) if (typeof v === 'string') await idb.put('shots', k, v);
+      for (const s of take) await saveSession(s);
       const nStrat = Array.isArray(data.strategies) ? await mergeStrategies(data.strategies) : 0;
-      const missing = [...new Set(data.sessions.flatMap((s) => s.symbols))];
+      const missing = [...new Set(take.flatMap((s) => s.symbols))];
       const have = new Set((await listDatasets()).map((d) => d.id));
       const need = missing.filter((m) => !have.has(m));
-      toast(`Restored ${data.sessions.length} session${data.sessions.length === 1 ? '' : 's'}${nStrat ? ` and ${nStrat} strateg${nStrat === 1 ? 'y' : 'ies'}` : ''}${need.length ? ` — import data for ${need.join(', ')} to open them` : ''}`, need.length ? 'info' : 'ok');
+      const kept = good.length - take.length;
+      toast(`Restored ${take.length} session${take.length === 1 ? '' : 's'}${nStrat ? ` and ${nStrat} strateg${nStrat === 1 ? 'y' : 'ies'}` : ''}`
+        + (kept ? ` — kept ${kept} newer cop${kept === 1 ? 'y' : 'ies'} on this device` : '')
+        + (damaged ? ` — skipped ${damaged} damaged entr${damaged === 1 ? 'y' : 'ies'}` : '')
+        + (need.length ? ` — import data for ${need.join(', ')} to open them` : ''), need.length || damaged ? 'info' : 'ok');
       done();
     } catch (e) {
       toast(String((e as Error).message ?? e), 'err');

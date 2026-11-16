@@ -252,6 +252,20 @@ export function parseDateInput(v: string): number {
   return Math.floor(Date.parse(v + (v.length <= 16 ? ':00Z' : 'Z')) / 1000);
 }
 
+/**
+ * Read a number field. Throws a message a person can act on when the field is empty,
+ * not a number, or outside `lo`…`hi` — callers show it and leave the dialog open.
+ */
+export function numField(input: HTMLInputElement, label: string, lo: number, hi: number, whole = false): number {
+  const v = input.value.trim() === '' ? NaN : +input.value;
+  if (!isFinite(v) || v < lo || v > hi || (whole && !Number.isInteger(v))) {
+    input.focus();
+    const f = (x: number) => (Math.abs(x) >= 1e6 ? x.toExponential().replace('e+', 'e') : String(x));
+    throw new Error(`${label}: enter ${whole ? 'a whole number' : 'a number'} from ${f(lo)} to ${f(hi)}`);
+  }
+  return v;
+}
+
 export function download(name: string, content: string, type = 'text/csv') {
   const a = h('a', { href: URL.createObjectURL(new Blob([content], { type })), download: name });
   document.body.append(a);

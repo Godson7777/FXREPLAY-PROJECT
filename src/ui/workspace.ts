@@ -9,13 +9,13 @@ import { LiveFeed, applyCandle, applyTick, hlCandles, HL_MAX_CANDLES, type FeedS
 import { getDatasetMeta, saveDataset } from '../data/store';
 import { canRefresh, refreshDataset } from '../data/ingest';
 import type { ChallengeState } from '../engine/rules';
-import { saveSession, saveShot, getShot } from '../data/sessions';
+import { saveSession, saveShot, getShot, saveReplaySession, savedStateOf, type SavedState } from '../data/sessions';
 import { ChartPane, IND_COLORS, type CrosshairInfo, type LineAction, type PaneHost } from './chartpane';
 import { TOOL_INFO, flipDrawing, isPosTool, posLevels, type DragLine, type Drawing, type DrawingType, type Zone } from './drawings';
 import { autoType, lotsFor, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
 import { listDatasets, loadBars } from '../data/store';
 import { indexAtOrBefore } from '../core/types';
-import { h, patchChildren, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton } from './dom';
+import { h, patchChildren, money, num, cls, toast, modal, field, esc, parseDateInput, dateInputValue, themeButton, numField } from './dom';
 import { cloudButton } from './cloudui';
 import { LOGO } from './logo';
 
@@ -81,6 +81,33 @@ export class Workspace implements PaneHost {
   private lastFrame = 0;
   private acc = 0;
   private saveTimer = 0;
+  private lastShift = 0;
+  private lastRowKey = '';
+  private lastRowAt = 0;
+  /**
+   * Row buttons and double clicks. Closing or reversing a row makes the rows below slide up
+   * under the cursor, so for 400 ms after such an action no row button reacts — the second
+   * click of a double click would otherwise land on a different position. An action that
+   * leaves the rows in place (`shifts` false) only ignores a repeat of itself.
+   */
+  private rowAct(key: string, shifts: boolean, fn: () => void) {
+    return () => {
+      const now = performance.now();
+      if (now - this.lastShift < 400 || (key === this.lastRowKey && now - this.lastRowAt < 400)) return;
+      this.lastRowKey = key;
+      this.lastRowAt = now;
+      if (shifts) this.lastShift = now;
+      fn();
+    };
+  }
+  /** unsaved changes made in this tab */
+  private dirty = false;
+  /** the stored session as this tab last read or wrote it */
+  private saved: SavedState = { versions: [], sig: '' };
+  /** trades whose journal was edited here since the last save */
+  private journalDirty = new Set<number>();
+  /** the stored session is newer than this tab: saving is off */
+  private conflict = false;
   private prefs = loadPrefs();
   private tab: 'positions' | 'orders' | 'history' = 'positions';
   private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0, lev: 0, side: 'long' as Side, link: null as string | null };
@@ -122,6 +149,7 @@ export class Workspace implements PaneHost {
     data: Record<string, Bars>,
     private nav: (hash: string) => void,
   ) {
+    this.saved = savedStateOf(session);
     this.replay = new Replay(session, data);
     this.replay.broker.onTradeClosed = (t) => {
       if (this.prefs.autoShot) this.pendingShots.push(t);
@@ -139,8 +167,10 @@ export class Workspace implements PaneHost {
     this.mq.addEventListener('change', this.onMq);
     this.initBottomGestures();
     document.addEventListener('keydown', this.onKey);
-    window.addEventListener('beforeunload', this.flushSave);
+    window.addEventListener('beforeunload', this.onUnload);
   }
+
+  private onUnload = () => this.flushSave(true);
 
   get tz() {
     return this.session.timezone;
@@ -166,7 +196,7 @@ export class Workspace implements PaneHost {
     this.stopLive();
     this.flushSave();
     document.removeEventListener('keydown', this.onKey);
-    window.removeEventListener('beforeunload', this.flushSave);
+    window.removeEventListener('beforeunload', this.onUnload);
     this.panes.forEach((p) => p.destroy());
     this.root.remove();
   }
@@ -1084,13 +1114,15 @@ export class Workspace implements PaneHost {
       const what = this.prefs.sizeMode === 'lots' ? 'a lot size' : this.prefs.sizeMode === 'risk%' ? 'the risk in %' : 'the risk in $';
       return toast(`Enter ${what} in the Size field first`, 'err');
     }
+    if (this.prefs.sizeMode === 'risk%' && this.prefs.sizeVal > 100) return toast('Risk is above 100% of the account — the Size field is in %', 'err');
+    if (this.prefs.sizeMode === 'risk$' && this.prefs.sizeVal > this.replay.broker.s.balance) return toast('The risk in $ is larger than the account balance', 'err');
     const lv = this.ticketLevels(side, o);
     const dg = this.session.specs[lv.sym]?.digits ?? 5;
     const r = this.replay.broker.place({
       symbol: lv.sym, side, type: lv.type, lots: lv.lots, price: lv.entry,
       sl: lv.sl != null ? +lv.sl.toFixed(dg) : null, tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
       tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), note: this.ticket.note,
-      trailPips: this.ticket.trail || null, beAtR: this.ticket.be || null,
+      trailPips: this.ticket.trail > 0 ? this.ticket.trail : null, beAtR: this.ticket.be > 0 ? this.ticket.be : null,
       leverage: this.ticketLev(lv.sym),
     });
     if (!r.ok) return toast(r.error, 'err');
@@ -1861,7 +1893,7 @@ export class Workspace implements PaneHost {
     }
     const lev = this.ticketLev(sym);
     if (lev) {
-      const margin = br.marginFor(sym, L.lots, L.entry, lev);
+      const margin = br.marginFor(sym, L.lots, L.entry, lev) + br.fee(sym, L.lots, L.entry); // what the order ties up, fee included
       el.insertAdjacentHTML('beforeend', `
       <div><span>Margin</span><b>${money(margin)}</b></div>
       <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>${br.freeMargin() < margin ? `
@@ -1905,9 +1937,9 @@ export class Workspace implements PaneHost {
           h('td', { class: cls(fl) }, money(fl, true)), h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
           h('td', { class: 'acts' },
             h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { const err = br.breakeven(p.id); if (err) toast(err, 'err'); this.afterTrade(); } }, 'BE'),
-            h('button', { class: 'mini', title: 'Close half', onclick: () => { br.close(p.id, 0.5); this.afterTrade(); } }, '½'),
-            h('button', { class: 'mini', title: 'Reverse position', onclick: () => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); } }, '⇄'),
-            h('button', { class: 'mini danger', title: 'Close', onclick: () => { br.close(p.id); this.afterTrade(); } }, '✕'),
+            h('button', { class: 'mini', title: 'Close half', onclick: this.rowAct(`half${p.id}`, false, () => { br.close(p.id, 0.5); this.afterTrade(); }) }, '½'),
+            h('button', { class: 'mini', title: 'Reverse position', onclick: this.rowAct(`rev${p.id}`, true, () => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); }) }, '⇄'),
+            h('button', { class: 'mini danger', title: 'Close', onclick: this.rowAct(`close${p.id}`, true, () => { br.close(p.id); this.afterTrade(); }) }, '✕'),
           ),
         );
         tb.append(tr);
@@ -1924,7 +1956,7 @@ export class Workspace implements PaneHost {
           h('td', {}, `${o.id}`), h('td', {}, o.symbol), h('td', {}, o.type), h('td', { class: o.side === 'long' ? 'up' : 'dn' }, o.side.toUpperCase()), h('td', {}, o.lots.toFixed(2)),
           h('td', {}, o.price.toFixed(dg)), h('td', {}, o.sl?.toFixed(dg) ?? '—'), h('td', {}, o.tp?.toFixed(dg) ?? '—'),
           h('td', { class: 'muted' }, fmtLocal(o.createdAt + off(o.createdAt))),
-          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: () => { br.cancelOrder(o.id); this.afterTrade(); } }, 'Cancel')),
+          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: this.rowAct(`cancel${o.id}`, true, () => { br.cancelOrder(o.id); this.afterTrade(); }) }, 'Cancel')),
         ));
       }
       if (!br.s.orders.length) tb.append(emptyRow(10, 'No pending orders. Drag order/SL/TP lines on the chart to adjust them.'));
@@ -1987,6 +2019,7 @@ export class Workspace implements PaneHost {
       t.tags = tags.value.split(',').map((x) => x.trim()).filter(Boolean);
       t.note = note.value;
       t.rating = +rating.value || undefined;
+      this.journalDirty.add(t.id);
       this.scheduleSave();
       this.renderBottom();
       close();
@@ -2054,14 +2087,26 @@ export class Workspace implements PaneHost {
       save,
     ), { wide: true });
     save.onclick = () => {
+      // a pip size of 0 or "−1 digits" would stop this session from ever opening again: check before anything is changed
+      let commission: number;
+      const next: { sym: string; spread: number; pipSize: number; contractSize: number; digits: number }[] = [];
+      try {
+        commission = numField(comm, 'Commission', 0, 1000);
+        for (const r of specRows) next.push({
+          sym: r.sym, spread: numField(r.spread, `${r.sym} spread`, 0, 10000), pipSize: numField(r.pip, `${r.sym} pip size`, 1e-9, 1e6),
+          contractSize: numField(r.cs, `${r.sym} contract size`, 1e-9, 1e9), digits: numField(r.dg, `${r.sym} digits`, 0, 10, true),
+        });
+      } catch (e) {
+        return toast((e as Error).message, 'err');
+      }
       s.timezone = tz.value;
-      s.commissionPerLot = +comm.value;
+      s.commissionPerLot = commission;
       s.slFirst = slFirst.checked;
       this.prefs.autoShot = autoShot.checked;
       this.pauseOnClose = pauseClose.checked;
-      for (const r of specRows) {
-        s.spreadPips[r.sym] = +r.spread.value;
-        s.specs[r.sym] = { ...s.specs[r.sym], pipSize: +r.pip.value, contractSize: +r.cs.value, digits: +r.dg.value };
+      for (const r of next) {
+        s.spreadPips[r.sym] = r.spread;
+        s.specs[r.sym] = { ...s.specs[r.sym], pipSize: r.pipSize, contractSize: r.contractSize, digits: r.digits };
       }
       Object.assign(this.replay.broker.cfg, { commissionPerLot: s.commissionPerLot, slFirst: s.slFirst, spreadPips: s.spreadPips });
       this.savePrefs();
@@ -2125,15 +2170,57 @@ export class Workspace implements PaneHost {
   }
 
   scheduleSave() {
+    this.dirty = true;
     clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(this.flushSave, 800);
+    this.saveTimer = window.setTimeout(() => this.flushSave(), 800);
   }
 
-  flushSave = () => {
+  /**
+   * Write the session if this tab changed it. The write is refused when the stored copy
+   * was played on somewhere else in the meantime (another tab, another device), so an
+   * idle tab can never wipe newer trades; journal entries saved from the analytics page
+   * are merged in instead of overwritten.
+   */
+  flushSave = (unloading = false) => {
     clearTimeout(this.saveTimer);
-    this.session.state.updatedAt = Date.now();
-    void saveSession(this.session).catch((e) => toast('Could not save session: ' + e, 'err'));
+    if (!this.dirty || this.conflict) return;
+    this.dirty = false;
+    const s = this.session;
+    if (unloading === true) {
+      // the page is going away: one direct write is all the browser will finish
+      s.state.updatedAt = Date.now();
+      void saveSession(s).catch(() => {});
+      return;
+    }
+    const dirtyJournal = new Set(this.journalDirty);
+    this.journalDirty.clear();
+    void saveReplaySession(s, this.saved, dirtyJournal).then((res) => {
+      if (res === 'saved') return;
+      for (const id of dirtyJournal) this.journalDirty.add(id);
+      this.showConflict(res);
+    }).catch((e) => {
+      this.dirty = true;
+      for (const id of dirtyJournal) this.journalDirty.add(id);
+      toast('Could not save session: ' + e, 'err');
+    });
   };
+
+  /** The stored session moved on without this tab: stop, say so, and never overwrite it. */
+  private showConflict(why: 'conflict' | 'deleted') {
+    if (this.conflict) return;
+    this.conflict = true;
+    this.pause();
+    this.bannerEl?.remove();
+    const reload = h('button', { class: 'primary' }, why === 'deleted' ? 'Back to sessions' : 'Reload this tab');
+    reload.onclick = () => (why === 'deleted' ? this.nav('#/') : location.reload());
+    this.bannerEl = h('div', { class: 'nodata' }, h('div', { class: 'nodata-card conflict-card' },
+      h('h3', {}, why === 'deleted' ? 'This session was deleted' : 'This session was continued somewhere else'),
+      h('p', {}, why === 'deleted'
+        ? 'It was removed in another tab or on another device, so nothing more is saved from here.'
+        : 'It is open in another tab or was synced from another device, and that copy is newer. To protect it, this tab has stopped saving — reload to pick up the latest state.'),
+      h('div', { class: 'row-btns' }, reload)));
+    this.center.append(this.bannerEl);
+  }
 }
 
 function kv(k: string, v: string, c = '') {

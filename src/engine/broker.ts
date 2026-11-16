@@ -60,6 +60,9 @@ export interface Position {
   liq?: number | null;
 }
 
+/** A single order may not be worth more than this many times the account's equity. */
+export const MAX_NOTIONAL_X = 100000;
+
 export interface Trade {
   id: number;
   symbol: string;
@@ -301,7 +304,7 @@ export class Broker {
   freeMargin() {
     return this.equity() - this.usedMargin() - this.reservedMargin();
   }
-  private fee(sym: string, lots: number, px: number) {
+  fee(sym: string, lots: number, px: number) {
     const pct = this.cfg.feePct ?? 0;
     return this.cfg.commissionPerLot * lots + (pct > 0 ? (pct / 100) * this.notional(sym, lots, px) : 0);
   }
@@ -336,6 +339,11 @@ export class Broker {
       if (req.side === 'short' && px >= bid) return { ok: false, error: 'Sell stop must be below the current bid (use a limit order)' };
     }
     if (!(round2(req.lots) > 0)) return { ok: false, error: 'Lot size is below the minimum of 0.01' };
+    // a slipped decimal or a stop of a fraction of a pip: nothing real is this large, and the
+    // results would be too big to add up exactly
+    const notional = this.notional(sym, req.lots, px), cap = Math.max(1, this.equity()) * MAX_NOTIONAL_X;
+    if (!isFinite(req.lots) || !isFinite(notional) || notional > cap)
+      return { ok: false, error: `That is ${isFinite(req.lots) && req.lots < 1e9 ? round2(req.lots).toLocaleString('en-US') : 'far too many'} lots — over ${MAX_NOTIONAL_X.toLocaleString('en-US')}× the account. Check the size and the stop distance.` };
     const lev = this.leveraged ? this.levFor(sym, req.leverage) : undefined;
     const common = {
       symbol: sym, side: req.side, lots: round2(req.lots), sl, tp,
@@ -344,10 +352,13 @@ export class Broker {
     };
     if (lev) {
       const need = this.marginFor(sym, common.lots, px, lev);
+      // the entry fee comes out of the same money: without it a full-size position would
+      // start with less in the account than its own margin, and a liquidation would go below zero
+      const fee = this.fee(sym, common.lots, px);
       const free = this.freeMargin();
-      if (need > free) {
-        const max = Math.floor((common.lots * Math.max(0, free) / need) * 100) / 100;
-        return { ok: false, error: `Not enough margin: needs $${need.toFixed(2)}, free $${Math.max(0, free).toFixed(2)} at ${lev}×. ${max > 0 ? `The most you can open is ${max.toFixed(2)} lots — ` : ''}widen the stop, lower the risk or raise the leverage.` };
+      if (need + fee > free) {
+        const max = Math.floor((common.lots * Math.max(0, free) / (need + fee)) * 100) / 100;
+        return { ok: false, error: `Not enough margin: needs $${need.toFixed(2)}${fee > 0 ? ` plus $${fee.toFixed(2)} in fees` : ''}, free $${Math.max(0, free).toFixed(2)} at ${lev}×. ${max > 0 ? `The most you can open is ${max.toFixed(2)} lots — ` : ''}widen the stop, lower the risk or raise the leverage.` };
       }
       const liq = this.liqPrice(sym, req.side, px, lev);
       if (sl != null && (req.side === 'long' ? sl <= liq : sl >= liq)) return { ok: false, error: `Stop loss is past the liquidation price (${liq.toFixed(this.spec(sym).digits)}) — lower the leverage or tighten the stop` };
@@ -478,7 +489,7 @@ export class Broker {
   }
 
   /** Close a fraction (0..1] of a position at market. */
-  close(id: number, fraction = 1, reason: ExitReason = 'manual', price?: number, time?: number): Trade | null {
+  close(id: number, fraction = 1, reason: ExitReason = 'manual', price?: number, time?: number, noFee = false): Trade | null {
     const p = this.s.positions.find((x) => x.id === id);
     if (!p) return null;
     const px = price ?? (p.side === 'long' ? this.bid(p.symbol) : this.ask(p.symbol));
@@ -487,7 +498,7 @@ export class Broker {
     if (lots <= 0) return null;
     if (lots >= p.lots - 1e-9) lots = p.lots;
     const gross = this.value(p.symbol, (p.side === 'long' ? 1 : -1) * (px - p.entry), lots, px);
-    const comm = this.fee(p.symbol, lots, px);
+    const comm = noFee ? 0 : this.fee(p.symbol, lots, px);
     this.s.balance += gross - comm;
     if (p.margin) p.margin *= (p.lots - lots) / p.lots;
     p.commission += comm;
@@ -527,7 +538,8 @@ export class Broker {
   private liquidate(p: Position, t: number) {
     const lev = p.leverage ?? 1;
     const px = p.side === 'long' ? p.entry * (1 - 1 / lev) : p.entry * (1 + 1 / lev);
-    this.close(p.id, 1, 'liq', px, t);
+    // the margin is lost and nothing more: the venue's liquidation costs come out of it, not on top
+    this.close(p.id, 1, 'liq', px, t, true);
   }
 
   closeAll(reason: ExitReason = 'manual') {

@@ -79,7 +79,10 @@ a = await st();
 await page.locator('input.jump').fill(iso(a.clock - 86400));
 await page.locator('.controls button', { hasText: /^Go$/ }).click(); await page.waitForTimeout(300);
 ok(/only move forward/.test(await toast()) && (await st()).clock === a.clock, 'jumping back in time is refused with a message');
-await page.locator('input.jump').fill(iso(a.clock + 2 * 86400));
+// aim at a weekday: a target inside the weekend gap rightly stops at Friday's close
+let target = a.clock + 2 * 86400;
+while ([5, 6, 0].includes(new Date(target * 1000).getUTCDay())) target += 86400;
+await page.locator('input.jump').fill(iso(target));
 await page.locator('.controls button', { hasText: /^Go$/ }).click(); await page.waitForTimeout(700);
 b = await st();
 ok(b.clock > a.clock + 86400, `jumping two days ahead works (+${((b.clock - a.clock) / 86400).toFixed(2)} days)`);

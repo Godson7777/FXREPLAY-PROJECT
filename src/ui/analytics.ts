@@ -105,13 +105,13 @@ export class AnalyticsView {
   private filterSpec(): ReportFilter | undefined {
     const f = this.filters;
     if (!Object.values(f).some(Boolean)) return undefined;
-    const from = f.from ? Date.parse(f.from + 'T00:00:00Z') / 1000 : -Infinity;
-    const to = f.to ? Date.parse(f.to + 'T00:00:00Z') / 1000 + 86400 : Infinity;
+    // the dates mean the calendar day shown in the trade log's Exit column (the session's chart timezone)
+    const day = (t: TradeRecord) => localDate(t.exitTime, t.tz).slice(0, 10);
     return {
       key: JSON.stringify(f),
       test: (t: TradeRecord) =>
         (!f.symbol || t.symbol === f.symbol) && (!f.side || t.side === f.side) && (!f.tag || t.tags.includes(f.tag)) &&
-        (!f.reason || t.exitReason === f.reason) && t.exitTime >= from && t.exitTime < to,
+        (!f.reason || t.exitReason === f.reason) && (!f.from || day(t) >= f.from) && (!f.to || day(t) <= f.to),
     };
   }
 

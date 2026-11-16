@@ -23,6 +23,8 @@ export interface ChallengeState {
   worstDailyLoss: number; // $ (positive)
   maxDrawdown: number; // $ from start/high-water (positive)
   todayLoss: number; // $ (positive) right now
+  /** equity at the previous check: the closest thing to the equity at the day boundary */
+  prevEq?: number;
 }
 
 export const PRESETS: ChallengeRules[] = [
@@ -60,10 +62,22 @@ export function evaluate(rules: ChallengeRules, st: ChallengeState, br: Broker, 
   const bal = br.s.balance;
   const d = dayKeyOf(utc, off);
   if (d !== st.dayKey) {
+    // A day starts from where the account stood at the day boundary — not from the account
+    // after this bar, or a loss in the day's first minute (or a trade closed before the first
+    // bar of the session) would not count. That is the balance without anything closed today
+    // so far, or the equity at the last check if that was higher.
+    let closedToday = 0;
+    for (let i = br.s.trades.length - 1; i >= 0; i--) {
+      const t = br.s.trades[i];
+      const td = dayKeyOf(t.exitTime, off);
+      if (td < d) break;
+      if (td === d) closedToday += t.pnl;
+    }
+    st.dayStartRef = Math.max(bal - closedToday, st.prevEq ?? eq);
     st.dayKey = d;
-    st.dayStartRef = Math.max(bal, eq);
     st.todayLoss = 0;
   }
+  st.prevEq = eq;
   st.todayLoss = Math.max(0, st.dayStartRef - eq);
   st.worstDailyLoss = Math.max(st.worstDailyLoss, st.todayLoss);
   st.highWater = Math.max(st.highWater, eq);

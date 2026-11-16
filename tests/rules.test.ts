@@ -17,6 +17,26 @@ function setup(r = rules) {
 }
 
 describe('challenge rules', () => {
+  it('counts a loss taken before the first bar of the session', () => {
+    const { br, st, ev } = setup();
+    br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 1 });
+    br.setPrice('EURUSD', D, 1.0945);
+    br.closeAll(); // -550$ realised before any bar was checked
+    expect(ev(D + 60)).toBe('failed');
+    expect(st.reason).toMatch(/Daily loss/);
+  });
+
+  it('counts a loss in the first minute of a new day against that day', () => {
+    const { br, st, ev } = setup();
+    ev(D + 60);
+    br.setPrice('EURUSD', 2 * D - 60, 1.1);
+    br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 1 });
+    expect(ev(2 * D - 60)).toBeNull(); // 23:59, flat result so far
+    br.onBar('EURUSD', 2 * D, 1.1, 1.1, 1.0945, 1.0945); // 00:00 next day: -550$ in one bar
+    expect(ev(2 * D)).toBe('failed');
+    expect(st.reason).toMatch(/Daily loss/);
+  });
+
   it('fails on daily loss measured on equity (floating included)', () => {
     const { br, st, ev } = setup();
     ev(D);

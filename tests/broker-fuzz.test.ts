@@ -41,6 +41,8 @@ function run(seed: number, cfg: Partial<BrokerConfig>, sym: 'EURUSD' | 'BTC', st
     }
     for (const p of s.positions) if (ids.has(p.id)) throw new Error(`${what}: open position reuses closed id ${p.id}`);
     expect(isFinite(s.balance), `${what}: finite balance`).toBe(true);
+    // isolated margin: a position can lose its margin, never more
+    if (cfg.leverage) expect(s.balance, `${what}: balance below zero on a margin account`).toBeGreaterThanOrEqual(-1e-6);
   };
   for (let i = 0; i < steps; i++) {
     const a = rand();
