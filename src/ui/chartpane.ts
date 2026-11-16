@@ -523,7 +523,8 @@ export class ChartPane {
   private updateLatestBtn() {
     requestAnimationFrame(() => {
       const r = this.chart.timeScale().getVisibleLogicalRange();
-      this.latestBtn.hidden = !r || r.to >= this.k - this.start - 1;
+      // hidden while the newest candle is on screen (a narrow chart keeps almost no gap to its right)
+      this.latestBtn.hidden = !r || r.to >= this.k - this.start - 2.5;
     });
   }
 

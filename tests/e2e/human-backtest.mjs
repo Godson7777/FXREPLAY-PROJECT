@@ -47,6 +47,7 @@ class Hand {
   }
   async target(sel) {
     const loc = typeof sel === 'string' ? this.page.locator(sel).first() : sel;
+    await loc.scrollIntoViewIfNeeded().catch(() => {}); // a person scrolls a long dialog before tapping its last button
     const b = await loc.boundingBox();
     if (!b) throw new Error(`not on screen: ${sel}`);
     return { x: b.x + b.width * rnd(0.3, 0.7), y: b.y + b.height * rnd(0.35, 0.65) };
@@ -212,7 +213,9 @@ async function open() {
   });
   const page = await ctx.newPage();
   const errors = [];
-  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  page.on('pageerror', (e) =>
+    errors.push('pageerror: ' + e.message + ' @ ' + (e.stack ?? '').split('\n').slice(1, 4).join(' < ').replace(/\s+/g, ' ').slice(0, 260)),
+  );
   page.on('console', (m) => m.type() === 'error' && !/CERT_|fonts|ERR_/.test(m.text()) && errors.push('console: ' + m.text()));
   page.on('dialog', (d) => d.accept());
   if (process.env.DEBUG)

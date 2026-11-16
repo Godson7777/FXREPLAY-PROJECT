@@ -785,6 +785,7 @@ export class DrawingLayer {
     const x1 = P[1].x,
       w = x1 - e.x;
     const lv = posLevels(d);
+    if (![lv.entry, lv.sl, lv.tp].every((x) => typeof x === 'number' && isFinite(x))) return; // not placed on prices yet
     const env = this.host.posEnv?.();
     const calc = env ? posCalc(lv, d.pos ?? this.host.posDefaults?.() ?? { riskMode: 'pct', risk: 1 }, env) : null;
     // outcome on revealed bars only

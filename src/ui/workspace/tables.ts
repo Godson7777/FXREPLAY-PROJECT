@@ -269,7 +269,14 @@ export function renderBottom(ws: Workspace) {
       tb.append(tr);
     }
     if (!br.s.positions.length)
-      tb.append(emptyRow(levd ? 15 : 12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
+      tb.append(
+        emptyRow(
+          levd ? 15 : 12,
+          ws.mobile
+            ? 'No open positions — tap BUY or SELL below, or Order for the full ticket.'
+            : 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.',
+        ),
+      );
     t.append(tb);
   } else if (ws.tab === 'orders') {
     t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Type</th><th>Side</th><th>Lots</th><th>Price</th><th>SL</th><th>TP</th><th>Placed</th><th aria-label="Actions"></th></tr></thead>`;
