@@ -144,6 +144,8 @@ export function ticketFromLevels(ws: Workspace, lv: PosLevels, sym: string) {
   const sp = ws.session.specs[sym];
   const pip = sp?.pipSize ?? 0.0001,
     dg = sp?.digits ?? 5;
+  // a box whose corners could not be turned into prices (chart not laid out yet) must not reach the ticket
+  if (![lv.entry, lv.sl, lv.tp].every((x) => typeof x === 'number' && isFinite(x))) return;
   const dir = lv.side === 'long' ? 1 : -1;
   ws.ticket.side = lv.side;
   const type = autoType(lv.side, lv.entry, br.bid(sym), br.ask(sym), pip / 2);
