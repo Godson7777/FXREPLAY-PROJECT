@@ -1887,7 +1887,7 @@ export class Workspace implements PaneHost {
     }
     const lev = this.ticketLev(sym);
     if (lev) {
-      const margin = br.marginFor(sym, L.lots, L.entry, lev);
+      const margin = br.marginFor(sym, L.lots, L.entry, lev) + br.fee(sym, L.lots, L.entry); // what the order ties up, fee included
       el.insertAdjacentHTML('beforeend', `
       <div><span>Margin</span><b>${money(margin)}</b></div>
       <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>${br.freeMargin() < margin ? `

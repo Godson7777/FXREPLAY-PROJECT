@@ -85,4 +85,26 @@ describe('leverage & isolated margin', () => {
     br.onBar('BTC', 60, 99000, 99500, 50000, 60000);
     expect(br.s.positions.length).toBe(1);
   });
+
+  it('a full-size position cannot leave the account below zero when it is liquidated', () => {
+    const EUR = { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 5 };
+    const br = new Broker({ initialBalance: 10000, commissionPerLot: 3.5, spreadPips: { '*': 0 }, slFirst: true, leverage: 500 }, { EURUSD: EUR }, newBrokerState(10000));
+    br.setPrice('EURUSD', 0, 1.1);
+    // 45.45 lots need $9,999 of margin and $159 in commission: more than the account holds
+    const all = br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 45.45 });
+    expect(all.ok).toBe(false);
+    if (!all.ok) expect(all.error).toMatch(/plus \$159\.\d\d in fees/);
+    const most = +(/most you can open is ([\d.]+)/.exec(all.ok ? '' : all.error)?.[1] ?? 0);
+    expect(most).toBeGreaterThan(40);
+    expect(br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: most }).ok).toBe(true);
+    const p = br.s.positions[0];
+    const margin = p.margin!;
+    expect(br.s.balance).toBeGreaterThanOrEqual(margin);
+    br.onBar('EURUSD', 60, 1.1, 1.1, 1.09, 1.09); // far through the liquidation price
+    expect(br.s.positions.length).toBe(0);
+    expect(br.s.trades[0].exitReason).toBe('liq');
+    expect(br.s.balance).toBeGreaterThanOrEqual(0);
+    // lost: the margin and the entry commission, nothing on top
+    expect(-br.s.trades[0].pnl).toBeCloseTo(margin + 3.5 * most, 1);
+  });
 });
