@@ -3,7 +3,11 @@ import { Broker, newBrokerState, type BrokerConfig } from '../src/engine/broker'
 
 const BTC = { symbol: 'BTC', pipSize: 1, contractSize: 1, digits: 1 };
 const mk = (cfg: Partial<BrokerConfig> = {}, bal = 10000) => {
-  const br = new Broker({ initialBalance: bal, commissionPerLot: 0, spreadPips: {}, slFirst: true, leverage: 10, maxLeverage: { BTC: 40 }, ...cfg }, { BTC }, newBrokerState(bal));
+  const br = new Broker(
+    { initialBalance: bal, commissionPerLot: 0, spreadPips: {}, slFirst: true, leverage: 10, maxLeverage: { BTC: 40 }, ...cfg },
+    { BTC },
+    newBrokerState(bal),
+  );
   br.setPrice('BTC', 0, 100000);
   return br;
 };
@@ -88,7 +92,11 @@ describe('leverage & isolated margin', () => {
 
   it('a full-size position cannot leave the account below zero when it is liquidated', () => {
     const EUR = { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 5 };
-    const br = new Broker({ initialBalance: 10000, commissionPerLot: 3.5, spreadPips: { '*': 0 }, slFirst: true, leverage: 500 }, { EURUSD: EUR }, newBrokerState(10000));
+    const br = new Broker(
+      { initialBalance: 10000, commissionPerLot: 3.5, spreadPips: { '*': 0 }, slFirst: true, leverage: 500 },
+      { EURUSD: EUR },
+      newBrokerState(10000),
+    );
     br.setPrice('EURUSD', 0, 1.1);
     // 45.45 lots need $9,999 of margin and $159 in commission: more than the account holds
     const all = br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 45.45 });

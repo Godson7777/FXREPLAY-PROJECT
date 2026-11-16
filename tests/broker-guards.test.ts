@@ -73,7 +73,11 @@ describe('levels that would close the trade at once are refused', () => {
 
 describe('reverse and size guards', () => {
   it('reverse reports when the opposite order is refused', () => {
-    const br = new Broker({ initialBalance: 1000, commissionPerLot: 0, spreadPips: {}, slFirst: true, leverage: 10, maxLeverage: { '*': 20 } }, { EURUSD: EUR }, newBrokerState(1000));
+    const br = new Broker(
+      { initialBalance: 1000, commissionPerLot: 0, spreadPips: {}, slFirst: true, leverage: 10, maxLeverage: { '*': 20 } },
+      { EURUSD: EUR },
+      newBrokerState(1000),
+    );
     br.setPrice('EURUSD', 0, 1.1);
     const r0 = br.place({ symbol: 'EURUSD', side: 'long', type: 'market', lots: 0.09 }); // margin 990 of 1000
     expect(r0.ok).toBe(true);

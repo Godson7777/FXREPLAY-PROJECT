@@ -8,14 +8,31 @@ import { removeSessionFromStrategies } from './strategies';
 export function isSession(x: unknown): x is Session {
   const s = x as Session | null;
   const b = s?.state?.broker;
-  return !!s && typeof s.id === 'string' && !!s.id && typeof s.name === 'string' && Array.isArray(s.symbols) && s.symbols.every((y) => typeof y === 'string')
-    && isFinite(s.balance) && s.balance > 0 && isFinite(s.start) && !!s.state && isFinite(s.state.updatedAt) && isFinite(s.state.clock)
-    && !!b && isFinite(b.balance) && Array.isArray(b.trades) && Array.isArray(b.positions) && Array.isArray(b.orders)
-    && b.trades.every((t) => !!t && isFinite(t.pnl) && isFinite(t.entryTime) && isFinite(t.exitTime) && typeof t.symbol === 'string');
+  return (
+    !!s &&
+    typeof s.id === 'string' &&
+    !!s.id &&
+    typeof s.name === 'string' &&
+    Array.isArray(s.symbols) &&
+    s.symbols.every((y) => typeof y === 'string') &&
+    isFinite(s.balance) &&
+    s.balance > 0 &&
+    isFinite(s.start) &&
+    !!s.state &&
+    isFinite(s.state.updatedAt) &&
+    isFinite(s.state.clock) &&
+    !!b &&
+    isFinite(b.balance) &&
+    Array.isArray(b.trades) &&
+    Array.isArray(b.positions) &&
+    Array.isArray(b.orders) &&
+    b.trades.every((t) => !!t && isFinite(t.pnl) && isFinite(t.entryTime) && isFinite(t.exitTime) && typeof t.symbol === 'string')
+  );
 }
 
 /** Every stored session, newest first. A damaged record is left out: one bad entry must not take the whole app down. */
-export const listSessions = () => idb.all<Session>('sessions').then((s) => s.filter(readable).sort((a, b) => (b.state.updatedAt || 0) - (a.state.updatedAt || 0)));
+export const listSessions = () =>
+  idb.all<Session>('sessions').then((s) => s.filter(readable).sort((a, b) => (b.state.updatedAt || 0) - (a.state.updatedAt || 0)));
 /** Enough of a session for the list pages to draw it (looser than `isSession`, so nothing a page can show is hidden). */
 const readable = (s: Session | null | undefined): s is Session =>
   !!s && typeof s.id === 'string' && Array.isArray(s.symbols) && !!s.state?.broker && Array.isArray(s.state.broker.trades) && isFinite(s.balance);
@@ -25,7 +42,7 @@ export async function saveSession(s: Session) {
   scheduleSync();
 }
 /** What the replay itself changes: if this differs, the session was played somewhere else. */
-export const replaySig = (s: Session) => {
+const replaySig = (s: Session) => {
   const b = s.state.broker;
   return `${s.state.clock}:${b.trades.length}:${b.positions.length}:${b.orders.length}:${b.balance}`;
 };

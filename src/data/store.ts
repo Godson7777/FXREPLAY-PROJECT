@@ -64,13 +64,24 @@ export const idb = {
 // ---- datasets --------------------------------------------------------------
 
 interface StoredBars {
-  t: ArrayBuffer; o: ArrayBuffer; h: ArrayBuffer; l: ArrayBuffer; c: ArrayBuffer; v: ArrayBuffer; n: number;
+  t: ArrayBuffer;
+  o: ArrayBuffer;
+  h: ArrayBuffer;
+  l: ArrayBuffer;
+  c: ArrayBuffer;
+  v: ArrayBuffer;
+  n: number;
 }
 
 export async function saveDataset(meta: DatasetMeta, bars: Bars) {
   const sb: StoredBars = {
-    t: bars.t.slice(0, bars.n).buffer, o: bars.o.slice(0, bars.n).buffer, h: bars.h.slice(0, bars.n).buffer,
-    l: bars.l.slice(0, bars.n).buffer, c: bars.c.slice(0, bars.n).buffer, v: bars.v.slice(0, bars.n).buffer, n: bars.n,
+    t: bars.t.slice(0, bars.n).buffer,
+    o: bars.o.slice(0, bars.n).buffer,
+    h: bars.h.slice(0, bars.n).buffer,
+    l: bars.l.slice(0, bars.n).buffer,
+    c: bars.c.slice(0, bars.n).buffer,
+    v: bars.v.slice(0, bars.n).buffer,
+    n: bars.n,
   };
   await idb.put('bars', meta.id, sb);
   await idb.put('meta', meta.id, meta);
@@ -85,8 +96,13 @@ export async function loadBars(id: string): Promise<Bars | null> {
   const sb = await idb.get<StoredBars>('bars', id);
   if (!sb) return null;
   const b: Bars = {
-    t: new Float64Array(sb.t), o: new Float64Array(sb.o), h: new Float64Array(sb.h),
-    l: new Float64Array(sb.l), c: new Float64Array(sb.c), v: new Float64Array(sb.v), n: sb.n,
+    t: new Float64Array(sb.t),
+    o: new Float64Array(sb.o),
+    h: new Float64Array(sb.h),
+    l: new Float64Array(sb.l),
+    c: new Float64Array(sb.c),
+    v: new Float64Array(sb.v),
+    n: sb.n,
   };
   barCache.set(id, b);
   return b;

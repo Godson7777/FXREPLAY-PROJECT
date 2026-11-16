@@ -9,7 +9,7 @@ export interface Series {
   n: number;
 }
 
-export interface IndOutput {
+interface IndOutput {
   name: string;
   values: Float64Array;
   kind: 'line' | 'hist';
@@ -27,7 +27,8 @@ export interface IndicatorDef {
 
 export function sma(x: ArrayLike<number>, n: number, len: number): Float64Array {
   const out = new Float64Array(n).fill(NaN);
-  let sum = 0, cnt = 0;
+  let sum = 0,
+    cnt = 0;
   for (let i = 0; i < n; i++) {
     const v = x[i];
     if (isNaN(v)) continue;
@@ -42,14 +43,16 @@ export function sma(x: ArrayLike<number>, n: number, len: number): Float64Array 
 export function ema(x: ArrayLike<number>, n: number, len: number): Float64Array {
   const out = new Float64Array(n).fill(NaN);
   const k = 2 / (len + 1);
-  let prev = NaN, seed = 0, cnt = 0;
+  let prev = NaN,
+    seed = 0,
+    cnt = 0;
   for (let i = 0; i < n; i++) {
     const v = x[i];
     if (isNaN(v)) continue;
     if (isNaN(prev)) {
       seed += v;
       cnt++;
-      if (cnt === len) prev = seed / len, (out[i] = prev);
+      if (cnt === len) (prev = seed / len), (out[i] = prev);
     } else {
       prev = v * k + prev * (1 - k);
       out[i] = prev;
@@ -60,7 +63,9 @@ export function ema(x: ArrayLike<number>, n: number, len: number): Float64Array 
 
 function rma(x: ArrayLike<number>, n: number, len: number): Float64Array {
   const out = new Float64Array(n).fill(NaN);
-  let prev = NaN, seed = 0, cnt = 0;
+  let prev = NaN,
+    seed = 0,
+    cnt = 0;
   for (let i = 0; i < n; i++) {
     const v = x[i];
     if (isNaN(v)) continue;
@@ -93,15 +98,24 @@ function trueRange(s: Series) {
 
 export const INDICATORS: IndicatorDef[] = [
   {
-    type: 'sma', label: 'SMA', pane: 'main', params: { length: 20 },
+    type: 'sma',
+    label: 'SMA',
+    pane: 'main',
+    params: { length: 20 },
     compute: (s, p) => [{ name: `SMA ${p.length}`, values: sma(s.c, s.n, p.length), kind: 'line' }],
   },
   {
-    type: 'ema', label: 'EMA', pane: 'main', params: { length: 50 },
+    type: 'ema',
+    label: 'EMA',
+    pane: 'main',
+    params: { length: 50 },
     compute: (s, p) => [{ name: `EMA ${p.length}`, values: ema(s.c, s.n, p.length), kind: 'line' }],
   },
   {
-    type: 'bb', label: 'Bollinger Bands', pane: 'main', params: { length: 20, mult: 2 },
+    type: 'bb',
+    label: 'Bollinger Bands',
+    pane: 'main',
+    params: { length: 20, mult: 2 },
     compute: (s, p) => {
       const m = sma(s.c, s.n, p.length);
       const sd = stdev(s.c, s.n, p.length, m);
@@ -115,10 +129,15 @@ export const INDICATORS: IndicatorDef[] = [
     },
   },
   {
-    type: 'vwap', label: 'VWAP (daily)', pane: 'main', params: {},
+    type: 'vwap',
+    label: 'VWAP (daily)',
+    pane: 'main',
+    params: {},
     compute: (s) => {
       const out = new Float64Array(s.n).fill(NaN);
-      let day = -1, pv = 0, vv = 0;
+      let day = -1,
+        pv = 0,
+        vv = 0;
       for (let i = 0; i < s.n; i++) {
         const d = Math.floor(s.time[i] / 86400);
         if (d !== day) (day = d), (pv = 0), (vv = 0);
@@ -132,11 +151,16 @@ export const INDICATORS: IndicatorDef[] = [
     },
   },
   {
-    type: 'donchian', label: 'Donchian Channel', pane: 'main', params: { length: 20 },
+    type: 'donchian',
+    label: 'Donchian Channel',
+    pane: 'main',
+    params: { length: 20 },
     compute: (s, p) => {
-      const up = new Float64Array(s.n).fill(NaN), dn = new Float64Array(s.n).fill(NaN);
+      const up = new Float64Array(s.n).fill(NaN),
+        dn = new Float64Array(s.n).fill(NaN);
       for (let i = p.length - 1; i < s.n; i++) {
-        let hi = -Infinity, lo = Infinity;
+        let hi = -Infinity,
+          lo = Infinity;
         for (let j = i - p.length + 1; j <= i; j++) (hi = Math.max(hi, s.h[j])), (lo = Math.min(lo, s.l[j]));
         up[i] = hi;
         dn[i] = lo;
@@ -148,23 +172,34 @@ export const INDICATORS: IndicatorDef[] = [
     },
   },
   {
-    type: 'rsi', label: 'RSI', pane: 'sub', params: { length: 14 }, levels: [30, 70],
+    type: 'rsi',
+    label: 'RSI',
+    pane: 'sub',
+    params: { length: 14 },
+    levels: [30, 70],
     compute: (s, p) => {
-      const g = new Float64Array(s.n), l = new Float64Array(s.n);
+      const g = new Float64Array(s.n),
+        l = new Float64Array(s.n);
       for (let i = 1; i < s.n; i++) {
         const d = s.c[i] - s.c[i - 1];
         g[i] = Math.max(0, d);
         l[i] = Math.max(0, -d);
       }
-      const ag = rma(g, s.n, p.length), al = rma(l, s.n, p.length);
+      const ag = rma(g, s.n, p.length),
+        al = rma(l, s.n, p.length);
       const out = ag.map((x, i) => (al[i] === 0 ? 100 : 100 - 100 / (1 + x / al[i])));
       return [{ name: `RSI ${p.length}`, values: out, kind: 'line' }];
     },
   },
   {
-    type: 'macd', label: 'MACD', pane: 'sub', params: { fast: 12, slow: 26, signal: 9 }, levels: [0],
+    type: 'macd',
+    label: 'MACD',
+    pane: 'sub',
+    params: { fast: 12, slow: 26, signal: 9 },
+    levels: [0],
     compute: (s, p) => {
-      const f = ema(s.c, s.n, p.fast), sl = ema(s.c, s.n, p.slow);
+      const f = ema(s.c, s.n, p.fast),
+        sl = ema(s.c, s.n, p.slow);
       const m = f.map((x, i) => x - sl[i]);
       const sig = ema(m, s.n, p.signal);
       const hist = m.map((x, i) => x - sig[i]);
@@ -176,15 +211,23 @@ export const INDICATORS: IndicatorDef[] = [
     },
   },
   {
-    type: 'atr', label: 'ATR', pane: 'sub', params: { length: 14 },
+    type: 'atr',
+    label: 'ATR',
+    pane: 'sub',
+    params: { length: 14 },
     compute: (s, p) => [{ name: `ATR ${p.length}`, values: rma(trueRange(s), s.n, p.length), kind: 'line' }],
   },
   {
-    type: 'stoch', label: 'Stochastic', pane: 'sub', params: { k: 14, d: 3, smooth: 3 }, levels: [20, 80],
+    type: 'stoch',
+    label: 'Stochastic',
+    pane: 'sub',
+    params: { k: 14, d: 3, smooth: 3 },
+    levels: [20, 80],
     compute: (s, p) => {
       const raw = new Float64Array(s.n).fill(NaN);
       for (let i = p.k - 1; i < s.n; i++) {
-        let hi = -Infinity, lo = Infinity;
+        let hi = -Infinity,
+          lo = Infinity;
         for (let j = i - p.k + 1; j <= i; j++) (hi = Math.max(hi, s.h[j])), (lo = Math.min(lo, s.l[j]));
         raw[i] = hi === lo ? 50 : ((s.c[i] - lo) / (hi - lo)) * 100;
       }
@@ -196,7 +239,10 @@ export const INDICATORS: IndicatorDef[] = [
     },
   },
   {
-    type: 'volume', label: 'Volume', pane: 'sub', params: {},
+    type: 'volume',
+    label: 'Volume',
+    pane: 'sub',
+    params: {},
     compute: (s) => [{ name: 'Volume', values: Float64Array.from({ length: s.n }, (_, i) => s.v[i]), kind: 'hist' }],
   },
 ];

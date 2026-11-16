@@ -14,23 +14,66 @@ import { rng } from '../src/data/synthetic';
  */
 const DAY = 86400;
 const spec = { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 5 };
-const metas = new Map<string, DatasetMeta>([['EURUSD', { id: 'EURUSD', symbol: 'EURUSD', source: 'csv', resolution: 60, from: 0, to: 0, count: 0, spec, createdAt: 0 }]]);
+const metas = new Map<string, DatasetMeta>([
+  ['EURUSD', { id: 'EURUSD', symbol: 'EURUSD', source: 'csv', resolution: 60, from: 0, to: 0, count: 0, spec, createdAt: 0 }],
+]);
 
-interface Row { pnl: number; risk?: number | null; entry: number; exit: number; side?: 'long' | 'short'; tags?: string[] }
+interface Row {
+  pnl: number;
+  risk?: number | null;
+  entry: number;
+  exit: number;
+  side?: 'long' | 'short';
+  tags?: string[];
+}
 
 function sessionOf(rows: Row[], balance = 10000, tz = 'UTC', id = 's1'): Session {
   const s = newSession({
-    id, name: 'Check', description: '', symbols: ['EURUSD'], start: rows[0]?.entry ?? 0, end: null, balance,
-    commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: tz, riskPct: 1, createdAt: 0, specs: { EURUSD: spec },
+    id,
+    name: 'Check',
+    description: '',
+    symbols: ['EURUSD'],
+    start: rows[0]?.entry ?? 0,
+    end: null,
+    balance,
+    commissionPerLot: 0,
+    spreadPips: { '*': 0 },
+    slFirst: true,
+    timezone: tz,
+    riskPct: 1,
+    createdAt: 0,
+    specs: { EURUSD: spec },
   });
   let bal = balance;
   rows.forEach((x, i) => {
     bal += x.pnl;
     const risk = x.risk === undefined ? 100 : x.risk;
     const t: Trade = {
-      id: i + 1, symbol: 'EURUSD', side: x.side ?? (i % 2 ? 'short' : 'long'), lots: 1, entry: 1.1, exit: 1.1, entryTime: x.entry, exitTime: x.exit,
-      gross: x.pnl, commission: 0, pnl: x.pnl, pips: x.pnl / 10, risk, r: risk ? x.pnl / risk : null, maePips: 0, mfePips: 0, maeR: null, mfeR: null,
-      holdSec: x.exit - x.entry, exitReason: x.pnl > 0 ? 'tp' : x.pnl < 0 ? 'sl' : 'manual', orderType: 'market', tags: x.tags ?? [], note: '', balanceAfter: bal, regime: null,
+      id: i + 1,
+      symbol: 'EURUSD',
+      side: x.side ?? (i % 2 ? 'short' : 'long'),
+      lots: 1,
+      entry: 1.1,
+      exit: 1.1,
+      entryTime: x.entry,
+      exitTime: x.exit,
+      gross: x.pnl,
+      commission: 0,
+      pnl: x.pnl,
+      pips: x.pnl / 10,
+      risk,
+      r: risk ? x.pnl / risk : null,
+      maePips: 0,
+      mfePips: 0,
+      maeR: null,
+      mfeR: null,
+      holdSec: x.exit - x.entry,
+      exitReason: x.pnl > 0 ? 'tp' : x.pnl < 0 ? 'sl' : 'manual',
+      orderType: 'market',
+      tags: x.tags ?? [],
+      note: '',
+      balanceAfter: bal,
+      regime: null,
     };
     s.state.broker.trades.push(t);
   });
@@ -42,12 +85,15 @@ const report = (s: Session, tz = s.timezone) => buildReport(buildRecords([s], me
 /** Every number in the report, with its path. */
 function numbers(o: unknown, path = '', out: [string, number][] = []): [string, number][] {
   if (typeof o === 'number') out.push([path, o]);
-  else if (Array.isArray(o) || ArrayBuffer.isView(o)) (o as ArrayLike<unknown>).length <= 400 && Array.from(o as ArrayLike<unknown>).forEach((v, i) => numbers(v, `${path}[${i}]`, out));
+  else if (Array.isArray(o) || ArrayBuffer.isView(o))
+    (o as ArrayLike<unknown>).length <= 400 && Array.from(o as ArrayLike<unknown>).forEach((v, i) => numbers(v, `${path}[${i}]`, out));
   else if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) numbers(v, path ? `${path}.${k}` : k, out);
   return out;
 }
 const noNaN = (r: Report, what: string) => {
-  const bad = numbers(r).filter(([, v]) => Number.isNaN(v)).map(([p]) => p);
+  const bad = numbers(r)
+    .filter(([, v]) => Number.isNaN(v))
+    .map(([p]) => p);
   expect(bad, `${what}: NaN in the report`).toEqual([]);
 };
 
@@ -129,7 +175,11 @@ describe('awkward trade lists never produce a broken number', () => {
     expect(r.risk.maxDDAbs).toBeCloseTo(50, 6);
   });
   it('only winners, only losers, only break-even', () => {
-    for (const [what, f] of [['wins', () => 80], ['losses', () => -80], ['break-even', () => 0]] as const) {
+    for (const [what, f] of [
+      ['wins', () => 80],
+      ['losses', () => -80],
+      ['break-even', () => 0],
+    ] as const) {
       const r = report(sessionOf(Array.from({ length: 30 }, (_, i) => ({ pnl: f(), ...at(i) }))))!;
       noNaN(r, what);
       expect(r.netPnl).toBeCloseTo(30 * f(), 4);
@@ -146,14 +196,25 @@ describe('awkward trade lists never produce a broken number', () => {
   });
   it('several trades closing in the same second (Close all)', () => {
     const t = MON + 5 * 3600;
-    const rows = [{ pnl: 120, entry: t - 3000, exit: t }, { pnl: -80, entry: t - 5000, exit: t }, { pnl: 40, entry: t - 1000, exit: t }, { pnl: -30, entry: t - 1000, exit: t }];
+    const rows = [
+      { pnl: 120, entry: t - 3000, exit: t },
+      { pnl: -80, entry: t - 5000, exit: t },
+      { pnl: 40, entry: t - 1000, exit: t },
+      { pnl: -30, entry: t - 1000, exit: t },
+    ];
     const r = report(sessionOf(rows))!;
     noNaN(r, 'same second');
     expect(r.netPnl).toBeCloseTo(50, 6);
     expect(r.final).toBeCloseTo(10050, 6);
   });
   it('an account that is wiped out', () => {
-    const r = report(sessionOf([{ pnl: -6000, ...at(0) }, { pnl: -4000, ...at(1) }, { pnl: 100, ...at(2) }]))!;
+    const r = report(
+      sessionOf([
+        { pnl: -6000, ...at(0) },
+        { pnl: -4000, ...at(1) },
+        { pnl: 100, ...at(2) },
+      ]),
+    )!;
     noNaN(r, 'wiped out');
     expect(r.final).toBeGreaterThanOrEqual(0);
     expect(r.risk.maxDD).toBeLessThanOrEqual(1);
@@ -173,7 +234,14 @@ describe('random trade lists agree with a plain recount', () => {
         const hold = 60 + Math.floor(rand() * 2 * DAY);
         const u = rand();
         const pnl = u < 0.07 ? 0 : Math.round((rand() - 0.47) * start * 0.02 * 100) / 100;
-        rows.push({ pnl, entry: t, exit: t + hold, side: rand() < 0.5 ? 'long' : 'short', risk: rand() < 0.9 ? start * 0.005 : null, tags: rand() < 0.5 ? ['a'] : rand() < 0.5 ? ['b'] : [] });
+        rows.push({
+          pnl,
+          entry: t,
+          exit: t + hold,
+          side: rand() < 0.5 ? 'long' : 'short',
+          risk: rand() < 0.9 ? start * 0.005 : null,
+          tags: rand() < 0.5 ? ['a'] : rand() < 0.5 ? ['b'] : [],
+        });
       }
       const s = sessionOf(rows, start);
       const r = report(s)!;
@@ -181,12 +249,22 @@ describe('random trade lists agree with a plain recount', () => {
 
       // a plain recount, in the order trades closed
       const T = [...s.state.broker.trades].sort((a, b) => a.exitTime - b.exitTime || a.id - b.id);
-      let bal = start, peak = start, ddAbs = 0, ddPct = 0, gp = 0, gl = 0, w = 0, l = 0, sumR = 0, nR = 0;
-      const byDay = new Map<number, number>(), byMonth = new Map<string, number>();
+      let bal = start,
+        peak = start,
+        ddAbs = 0,
+        ddPct = 0,
+        gp = 0,
+        gl = 0,
+        w = 0,
+        l = 0,
+        sumR = 0,
+        nR = 0;
+      const byDay = new Map<number, number>(),
+        byMonth = new Map<string, number>();
       for (const x of T) {
         bal += x.pnl;
-        if (x.pnl > 0) (w++, (gp += x.pnl));
-        else if (x.pnl < 0) (l++, (gl -= x.pnl));
+        if (x.pnl > 0) w++, (gp += x.pnl);
+        else if (x.pnl < 0) l++, (gl -= x.pnl);
         if (bal > peak) peak = bal;
         ddAbs = Math.max(ddAbs, peak - bal);
         ddPct = Math.max(ddPct, (peak - bal) / peak);
@@ -196,7 +274,8 @@ describe('random trade lists agree with a plain recount', () => {
         const mk = new Date(x.exitTime * 1000).toISOString().slice(0, 7);
         byMonth.set(mk, (byMonth.get(mk) ?? 0) + x.pnl);
       }
-      const net = bal - start, tol = Math.max(1e-6, Math.abs(start) * 1e-9);
+      const net = bal - start,
+        tol = Math.max(1e-6, Math.abs(start) * 1e-9);
       expect(r.n).toBe(n);
       expect(Math.abs(r.netPnl - net)).toBeLessThan(tol);
       expect(Math.abs(r.final - bal)).toBeLessThan(tol);
@@ -219,7 +298,11 @@ describe('random trade lists agree with a plain recount', () => {
       for (const [mk, v] of byMonth) expect(Math.abs((r.months.find((m) => m.key === mk)?.pnl ?? NaN) - v)).toBeLessThan(tol * 10);
       expect(r.core.bestDay).toBeCloseTo(Math.max(...byDay.values()), 4);
       expect(r.core.worstDay).toBeCloseTo(Math.min(...byDay.values()), 4);
-      for (const groups of [groupBy(r.trades, (x) => x.side), groupBy(r.trades, (x) => x.exitReason), groupBy(r.trades, (x) => (x.tags.length ? x.tags : ['(untagged)']))]) {
+      for (const groups of [
+        groupBy(r.trades, (x) => x.side),
+        groupBy(r.trades, (x) => x.exitReason),
+        groupBy(r.trades, (x) => (x.tags.length ? x.tags : ['(untagged)'])),
+      ]) {
         expect(groups.reduce((a, g) => a + g.trades, 0)).toBe(n);
         expect(Math.abs(groups.reduce((a, g) => a + g.pnl, 0) - net)).toBeLessThan(tol * 10);
         expect(groups.reduce((a, g) => a + g.wins, 0)).toBe(w);
@@ -229,8 +312,11 @@ describe('random trade lists agree with a plain recount', () => {
       expect(r.core.winRate).toBeLessThanOrEqual(1);
       expect(r.risk.underwaterPct).toBeGreaterThanOrEqual(0);
       expect(r.risk.underwaterPct).toBeLessThanOrEqual(1);
-      for (const p of [r.significance.pValue, r.significance.psr, r.ruin30, r.propPass]) if (p != null) (expect(p).toBeGreaterThanOrEqual(0), expect(p).toBeLessThanOrEqual(1));
-      if (r.significance.ciLow != null) (expect(r.significance.ciLow).toBeLessThanOrEqual(r.significance.mean + 1e-9), expect(r.significance.ciHigh!).toBeGreaterThanOrEqual(r.significance.mean - 1e-9));
+      for (const p of [r.significance.pValue, r.significance.psr, r.ruin30, r.propPass])
+        if (p != null) expect(p).toBeGreaterThanOrEqual(0), expect(p).toBeLessThanOrEqual(1);
+      if (r.significance.ciLow != null)
+        expect(r.significance.ciLow).toBeLessThanOrEqual(r.significance.mean + 1e-9),
+          expect(r.significance.ciHigh!).toBeGreaterThanOrEqual(r.significance.mean - 1e-9);
       expect(r.score.score == null || (r.score.score >= 0 && r.score.score <= 100)).toBe(true);
     });
   }
@@ -239,7 +325,10 @@ describe('random trade lists agree with a plain recount', () => {
 describe('calendar days and months follow the chart timezone', () => {
   it('a trade closed at 20:00 UTC on 31 January belongs to 1 February in Jakarta', () => {
     const t = Date.UTC(2024, 0, 31, 20) / 1000;
-    const rows = [{ pnl: 100, entry: t - 3600, exit: t }, { pnl: -40, entry: t + DAY, exit: t + DAY + 3600 }];
+    const rows = [
+      { pnl: 100, entry: t - 3600, exit: t },
+      { pnl: -40, entry: t + DAY, exit: t + DAY + 3600 },
+    ];
     const utc = report(sessionOf(rows, 10000, 'UTC'))!;
     const jkt = report(sessionOf(rows, 10000, 'Asia/Jakarta'))!;
     expect(utc.months.map((m) => m.key)).toEqual(['2024-01', '2024-02']);

@@ -29,7 +29,8 @@ export function generateSynthetic(opts: {
   const res = opts.resolution ?? 60;
   const rand = rng(opts.seed ?? 42);
   const gauss = () => {
-    let u = 0, v = 0;
+    let u = 0,
+      v = 0;
     while (u === 0) u = rand();
     while (v === 0) v = rand();
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
@@ -51,17 +52,15 @@ export function generateSynthetic(opts: {
       if (dow === 6 || (dow === 5 && hr >= 21) || (dow === 0 && hr < 21)) continue;
     }
     // intraday seasonality
-    const season =
-      0.45 +
-      0.9 * Math.exp(-(((hr - 8.5) / 2.2) ** 2)) +
-      1.1 * Math.exp(-(((hr - 14) / 2.5) ** 2)) +
-      0.25 * Math.exp(-(((hr - 1) / 2) ** 2));
+    const season = 0.45 + 0.9 * Math.exp(-(((hr - 8.5) / 2.2) ** 2)) + 1.1 * Math.exp(-(((hr - 14) / 2.5) ** 2)) + 0.25 * Math.exp(-(((hr - 1) / 2) ** 2));
     if (i % Math.max(1, Math.floor(86400 / res)) === 0) drift = drift * 0.8 + gauss() * baseVol * 0.006;
     volState = Math.max(0.3, Math.min(4, volState * 0.995 + 0.005 + (rand() < 0.002 ? gauss() * 1.5 : 0)));
     const sigma = baseVol * season * volState;
     const o = p;
     const steps = 4;
-    let hi = o, lo = o, x = o;
+    let hi = o,
+      lo = o,
+      x = o;
     for (let s = 0; s < steps; s++) {
       x *= Math.exp(drift / steps + (sigma / Math.sqrt(steps)) * gauss());
       if (x > hi) hi = x;

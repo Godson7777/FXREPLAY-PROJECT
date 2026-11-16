@@ -53,7 +53,8 @@ export async function syncSessions(local: Local, remote: Remote): Promise<SyncRe
   for (const [id, at] of Object.entries(T)) {
     const r = R.get(id);
     if (r && !r.deleted) {
-      if (r.updatedAt > at) await pull(id); // edited elsewhere after we deleted it
+      if (r.updatedAt > at)
+        await pull(id); // edited elsewhere after we deleted it
       else {
         await remote.tombstone(id, at);
         R.set(id, { id, updatedAt: at, deleted: true });
@@ -90,7 +91,6 @@ export async function syncSessions(local: Local, remote: Remote): Promise<SyncRe
 }
 
 // ---- binary packing for market data files ---------------------------------------
-
 
 /** [u32 metaLen][meta JSON][t][o][h][l][c][v] as float64, then gzip. */
 export async function packDataset(meta: DatasetMeta, b: Bars): Promise<Blob> {

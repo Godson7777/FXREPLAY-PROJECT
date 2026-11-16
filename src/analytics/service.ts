@@ -29,7 +29,8 @@ function seriesFor(symbol: string, b: Bars): RegimeSeries {
 
 /** Tags trades with their market regime and saves the tags (derived data only). */
 export async function prepareSessions(sessions: Session[]): Promise<void> {
-  const plain = sessions.filter((s) => !s.imported), imported = sessions.filter((s) => s.imported);
+  const plain = sessions.filter((s) => !s.imported),
+    imported = sessions.filter((s) => s.imported);
   const changed = await ensureRegimes(plain, (sym) => loadBars(sym), seriesFor);
   if (imported.length) {
     // imported trades are only tagged from real market data, never from demo/synthetic bars
@@ -89,7 +90,7 @@ export interface ReportFilter {
 }
 
 /** The account a combined report is drawn on: the earliest session's balance and timezone. */
-export function referenceSession(sessions: Session[]): Session | null {
+function referenceSession(sessions: Session[]): Session | null {
   return [...sessions].sort((a, b) => a.start - b.start || a.createdAt - b.createdAt)[0] ?? null;
 }
 
@@ -103,14 +104,6 @@ export function reportOf(sessions: Session[], metas: Map<string, DatasetMeta>, t
   if (filter) recs = recs.filter(filter.test);
   const rep = recs.length ? buildReport(recs, { initial: ref.balance, off: offsetFn(ref.timezone), trialsSR: trials }) : null;
   return remember(reportCache, key, rep);
-}
-
-/** Full pipeline for a scope: tag regimes, then build the report. */
-export async function scopeReport(scope: Session[], all: Session[], filter?: ReportFilter): Promise<Report | null> {
-  if (!scope.length) return null;
-  await prepareSessions(scope);
-  const metas = await datasetMetas();
-  return reportOf(scope, metas, trialSharpes(all, metas), filter);
 }
 
 /** Reports for several groups of sessions (tagging every session once). */
@@ -140,12 +133,14 @@ export function eligibility(st: Strategy | null, r: Report | null): Eligibility 
   if (st && !st.published) reasons.push('Not published yet — turn on "Publish to leaderboard".');
   if (!r) reasons.push('No closed trades yet.');
   else {
-    if (r.n < RANK_MIN_TRADES) reasons.push(`Needs ${RANK_MIN_TRADES - r.n} more closed trade${RANK_MIN_TRADES - r.n === 1 ? '' : 's'} (${r.n} of ${RANK_MIN_TRADES}).`);
+    if (r.n < RANK_MIN_TRADES)
+      reasons.push(`Needs ${RANK_MIN_TRADES - r.n} more closed trade${RANK_MIN_TRADES - r.n === 1 ? '' : 's'} (${r.n} of ${RANK_MIN_TRADES}).`);
     if (r.spanDays < RANK_MIN_DAYS) {
       const left = Math.max(1, Math.ceil(RANK_MIN_DAYS - r.spanDays));
       reasons.push(`Needs ${left} more day${left === 1 ? '' : 's'} of tested history (${Math.floor(r.spanDays)} of ${RANK_MIN_DAYS}).`);
     }
-    if (r.synthetic === 'all' || r.synthetic === 'some') reasons.push(`Uses synthetic practice data${r.synthetic === 'some' ? ' for some trades' : ''} — backtest on imported real market data to be ranked.`);
+    if (r.synthetic === 'all' || r.synthetic === 'some')
+      reasons.push(`Uses synthetic practice data${r.synthetic === 'some' ? ' for some trades' : ''} — backtest on imported real market data to be ranked.`);
     if (r.synthetic === 'unknown') {
       const missing = [...new Set(r.trades.filter((t) => t.synthetic === null).map((t) => t.symbol))];
       reasons.push(`Market data for ${missing.join(', ')} is not on this device, so it cannot be verified as real data.`);
@@ -163,12 +158,28 @@ export interface Badge {
 
 export function badges(r: Report, sessions: Session[] = []): Badge[] {
   const out: Badge[] = [];
-  if (sessions.some((s) => s.imported)) out.push({ id: 'imported', label: 'Imported', title: 'Includes trades imported from a CSV file (e.g. an FX Replay export) — they were not replayed on this site, so they cannot be verified' });
-  if (r.score.allWeather) out.push({ id: 'allweather', label: 'All-weather', title: 'Profitable in trending and ranging markets and in every tested volatility regime' });
-  if ((r.propPass ?? 0) >= 0.5) out.push({ id: 'prop', label: 'Prop-ready', title: `${Math.round((r.propPass ?? 0) * 100)}% simulated chance to pass a 10%-target / 5%-daily / 10%-max-loss evaluation at 1% risk` });
+  if (sessions.some((s) => s.imported))
+    out.push({
+      id: 'imported',
+      label: 'Imported',
+      title: 'Includes trades imported from a CSV file (e.g. an FX Replay export) — they were not replayed on this site, so they cannot be verified',
+    });
+  if (r.score.allWeather)
+    out.push({ id: 'allweather', label: 'All-weather', title: 'Profitable in trending and ranging markets and in every tested volatility regime' });
+  if ((r.propPass ?? 0) >= 0.5)
+    out.push({
+      id: 'prop',
+      label: 'Prop-ready',
+      title: `${Math.round((r.propPass ?? 0) * 100)}% simulated chance to pass a 10%-target / 5%-daily / 10%-max-loss evaluation at 1% risk`,
+    });
   if (r.n >= 100) out.push({ id: 'n100', label: '100+ trades', title: `${r.n} closed trades` });
   if (r.spanDays >= 365) out.push({ id: 'year', label: '1-year record', title: `Tested over ${Math.round(r.spanDays)} days` });
-  if (r.significance.pValue != null && r.significance.pValue < 0.05) out.push({ id: 'sig', label: 'Significant', title: `The edge is statistically significant (p = ${r.significance.pValue < 0.001 ? '< 0.001' : r.significance.pValue.toFixed(3)})` });
+  if (r.significance.pValue != null && r.significance.pValue < 0.05)
+    out.push({
+      id: 'sig',
+      label: 'Significant',
+      title: `The edge is statistically significant (p = ${r.significance.pValue < 0.001 ? '< 0.001' : r.significance.pValue.toFixed(3)})`,
+    });
   return out;
 }
 
@@ -184,7 +195,10 @@ export interface BoardEntry {
 }
 
 const byScore = (a: BoardEntry, b: BoardEntry) =>
-  (b.report?.score.score ?? -1) - (a.report?.score.score ?? -1) || (b.report?.n ?? 0) - (a.report?.n ?? 0) || a.strategy.createdAt - b.strategy.createdAt || a.strategy.id.localeCompare(b.strategy.id);
+  (b.report?.score.score ?? -1) - (a.report?.score.score ?? -1) ||
+  (b.report?.n ?? 0) - (a.report?.n ?? 0) ||
+  a.strategy.createdAt - b.strategy.createdAt ||
+  a.strategy.id.localeCompare(b.strategy.id);
 
 /** Every strategy with its report, eligibility and rank, best first. */
 export async function buildBoard(all: Session[], strategies: Strategy[]): Promise<BoardEntry[]> {

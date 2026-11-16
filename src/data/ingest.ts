@@ -4,7 +4,11 @@ import { fetchCandles, refreshSource, type FetchOpts } from './providers';
 
 /** Save bars as a dataset, optionally merging into what is stored under the same id. */
 export async function storeBars(
-  symbol: string, bars: Bars, source: DatasetMeta['source'], merge = false, spec?: InstrumentSpec,
+  symbol: string,
+  bars: Bars,
+  source: DatasetMeta['source'],
+  merge = false,
+  spec?: InstrumentSpec,
   provider?: DatasetMeta['provider'],
 ): Promise<DatasetMeta> {
   const id = symbol.toUpperCase();
@@ -13,17 +17,26 @@ export async function storeBars(
     const old = await loadBars(id);
     if (old) {
       if (oldMeta && oldMeta.resolution !== detectResolution(bars) && bars.n > 1)
-        throw new Error(`${id} is stored as ${oldMeta.resolution / 60 >= 1 ? `${oldMeta.resolution / 60}-minute` : `${oldMeta.resolution}s`} bars — the new download has a different resolution. Delete ${id} first or download the same resolution.`);
+        throw new Error(
+          `${id} is stored as ${oldMeta.resolution / 60 >= 1 ? `${oldMeta.resolution / 60}-minute` : `${oldMeta.resolution}s`} bars — the new download has a different resolution. Delete ${id} first or download the same resolution.`,
+        );
       bars = mergeBars(old, bars);
       // practice data must never pass as real: a merge with synthetic bars stays synthetic
       if (oldMeta?.source === 'synthetic') source = 'synthetic';
     }
   }
   const meta: DatasetMeta = {
-    id, symbol: id, source, resolution: oldMeta?.resolution ?? detectResolution(bars), from: bars.t[0], to: bars.t[bars.n - 1], count: bars.n,
+    id,
+    symbol: id,
+    source,
+    resolution: oldMeta?.resolution ?? detectResolution(bars),
+    from: bars.t[0],
+    to: bars.t[bars.n - 1],
+    count: bars.n,
     // keep a spec the user edited; new datasets get one guessed from the symbol and price
-    spec: spec ?? oldMeta?.spec ?? guessSpec(id, bars.c[bars.n - 1]), createdAt: oldMeta?.createdAt ?? Date.now(),
-    ...(provider ?? oldMeta?.provider ? { provider: provider ?? oldMeta!.provider } : {}),
+    spec: spec ?? oldMeta?.spec ?? guessSpec(id, bars.c[bars.n - 1]),
+    createdAt: oldMeta?.createdAt ?? Date.now(),
+    ...((provider ?? oldMeta?.provider) ? { provider: provider ?? oldMeta!.provider } : {}),
   };
   await saveDataset(meta, bars);
   return meta;

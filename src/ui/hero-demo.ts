@@ -3,7 +3,13 @@ import { generateSynthetic } from '../data/synthetic';
 import { h, theme } from './dom';
 import { countUpText, reduced, scoreRing } from './motion';
 
-interface Candle { time: UTCTimestamp; open: number; high: number; low: number; close: number }
+interface Candle {
+  time: UTCTimestamp;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
 
 /** 15-minute candles from generated 1-minute data (the same generator as the demo datasets). */
 function demoCandles(): Candle[] {
@@ -31,21 +37,39 @@ export function heroDemo(): HTMLElement {
   const stat = { n: h('b', {}, '0'), wr: h('b', {}, '—'), r: h('b', {}, '0.0R') };
   const chip = h('span', { class: 'demo-chip' });
   const bar = h('i', {});
-  const stage = h('div', { class: 'demo-stage' },
+  const stage = h(
+    'div',
+    { class: 'demo-stage' },
     h('div', { class: 'demo-head' }, h('span', { class: 'demo-sym' }, h('b', {}, 'EURUSD'), ' · 15m'), h('span', { class: 'demo-tag' }, 'Demo replay'), chip),
     chartEl,
-    h('div', { class: 'demo-foot' },
-      h('div', {}, h('span', {}, 'Trades'), stat.n), h('div', {}, h('span', {}, 'Win rate'), stat.wr), h('div', {}, h('span', {}, 'Result'), stat.r),
-      h('div', { class: 'demo-progress' }, bar)),
+    h(
+      'div',
+      { class: 'demo-foot' },
+      h('div', {}, h('span', {}, 'Trades'), stat.n),
+      h('div', {}, h('span', {}, 'Win rate'), stat.wr),
+      h('div', {}, h('span', {}, 'Result'), stat.r),
+      h('div', { class: 'demo-progress' }, bar),
+    ),
   );
   const num = h('b', { class: 'demo-score-num' }, '82');
-  const side = h('aside', { class: 'demo-score' },
+  const side = h(
+    'aside',
+    { class: 'demo-score' },
     h('span', { class: 'eyebrow' }, 'Overflow Score · example'),
     scoreRing(82, num),
     h('div', { class: 'demo-grade' }, h('span', { class: 'grade' }, 'A'), h('em', {}, 'All-weather edge')),
-    h('ul', {},
-      ...([['Profitability', 86], ['Drawdown', 78], ['Consistency', 81], ['Market regimes', 84]] as const).map(([k, v], i) =>
-        h('li', {}, h('span', {}, k), h('span', { class: 'bar' }, h('i', { style: `width:${v}%;--i:${i}` })), h('b', {}, String(v))))),
+    h(
+      'ul',
+      {},
+      ...(
+        [
+          ['Profitability', 86],
+          ['Drawdown', 78],
+          ['Consistency', 81],
+          ['Market regimes', 84],
+        ] as const
+      ).map(([k, v], i) => h('li', {}, h('span', {}, k), h('span', { class: 'bar' }, h('i', { style: `width:${v}%;--i:${i}` })), h('b', {}, String(v)))),
+    ),
   );
   countUpText(num, 1400);
   const root = h('div', { class: 'demo', 'aria-label': 'Demo: a replay playing bar by bar next to an example Overflow Score' }, stage, side);
@@ -60,17 +84,36 @@ function start(root: HTMLElement, el: HTMLElement, stat: { n: HTMLElement; wr: H
   const th = theme();
   const chart = createChart(el, {
     autoSize: true,
-    layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: th.muted, fontSize: 10, fontFamily: "'Instrument Sans', ui-sans-serif, system-ui, sans-serif", attributionLogo: false },
+    layout: {
+      background: { type: ColorType.Solid, color: 'transparent' },
+      textColor: th.muted,
+      fontSize: 10,
+      fontFamily: "'Instrument Sans', ui-sans-serif, system-ui, sans-serif",
+      attributionLogo: false,
+    },
     grid: { vertLines: { visible: false }, horzLines: { color: th.grid } },
     rightPriceScale: { borderVisible: false },
     timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: 9 },
     crosshair: { vertLine: { visible: false, labelVisible: false }, horzLine: { visible: false, labelVisible: false } },
-    handleScroll: false, handleScale: false,
+    handleScroll: false,
+    handleScale: false,
   });
-  const series = chart.addSeries(CandlestickSeries, { upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down, borderVisible: false, priceLineVisible: true, lastValueVisible: true, priceFormat: { type: 'price', precision: 5, minMove: 0.00001 } });
+  const series = chart.addSeries(CandlestickSeries, {
+    upColor: th.up,
+    downColor: th.down,
+    wickUpColor: th.up,
+    wickDownColor: th.down,
+    borderVisible: false,
+    priceLineVisible: true,
+    lastValueVisible: true,
+    priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
+  });
   const all = demoCandles();
   const SEED = 110; // start after the quiet opening hours
-  let i = 0, trades = 0, wins = 0, sumR = 0;
+  let i = 0,
+    trades = 0,
+    wins = 0,
+    sumR = 0;
   let pos: { dir: 1 | -1; entry: number; sl: number; tp: number; lines: IPriceLine[] } | null = null;
 
   const clearPos = () => {
@@ -120,8 +163,11 @@ function start(root: HTMLElement, el: HTMLElement, stat: { n: HTMLElement; wr: H
       for (let k = i - 14; k < i; k++) range += all[k].high - all[k].low;
       range /= 14;
       const dir: 1 | -1 = c.close >= all[i - 7].close ? 1 : -1;
-      const entry = c.close, sl = entry - dir * range * 1.2, tp = entry + dir * range * 2.4;
-      const line = (price: number, color: string, title: string, style = LineStyle.Dashed) => series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: false, title });
+      const entry = c.close,
+        sl = entry - dir * range * 1.2,
+        tp = entry + dir * range * 2.4;
+      const line = (price: number, color: string, title: string, style = LineStyle.Dashed) =>
+        series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: false, title });
       pos = { dir, entry, sl, tp, lines: [line(entry, th.muted, dir > 0 ? 'BUY' : 'SELL', LineStyle.Solid), line(sl, th.down, 'SL'), line(tp, th.up, 'TP')] };
       say(dir > 0 ? 'Buy · risk 1R' : 'Sell · risk 1R', '');
     }

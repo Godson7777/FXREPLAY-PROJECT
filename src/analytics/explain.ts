@@ -15,7 +15,8 @@ export const EXPLAIN = {
     what: 'One number from 0 to 100 that sums up whether the backtest shows a real, durable edge. It blends seven pillars — profitability, risk-adjusted return, drawdown, consistency, market regimes, statistical confidence and execution — and then applies hard caps for known failure modes.',
     read: 'Start with the grade and the verdict, then open the pillars to see which part pulls the score up or down. "Worth trading long-term?" is the bottom line. The suggestions list the most useful fixes first.',
     good: '80+ with the all-weather label is the goal: profitable in trending and ranging markets, shallow drawdowns, no month losing more than an average month earns, and statistically significant. 70–79 is a robust edge; 60–69 promising; below 50 not proven.',
-    watch: 'A score is only as good as the sample. Under 50 trades or 3 months it is capped, because a short test cannot show how the method behaves in different conditions. Synthetic practice data is scored but never ranked.',
+    watch:
+      'A score is only as good as the sample. Under 50 trades or 3 months it is capped, because a short test cannot show how the method behaves in different conditions. Synthetic practice data is scored but never ranked.',
   },
   pillars: {
     what: 'The seven building blocks of the score. Each pillar turns a few metrics into points (0–100) using fixed anchor tables, then the pillars are averaged by weight.',
@@ -31,7 +32,8 @@ export const EXPLAIN = {
     what: 'The headline numbers of the track record: net result, return (and annualized return once the test spans 60+ days), win rate, profit factor, expectancy per trade and maximum drawdown.',
     read: 'Read them together — a high win rate means little if the average loss is much bigger than the average win. Expectancy (what one more trade is worth, in risk units) and profit factor are the two that matter most.',
     good: 'Expectancy above +0.20 R and a profit factor above 1.5 with a drawdown under 20%.',
-    watch: 'Combined reports (strategies, all sessions) place every trade on one reference account using its % return, so dollar figures can differ from the individual sessions.',
+    watch:
+      'Combined reports (strategies, all sessions) place every trade on one reference account using its % return, so dollar figures can differ from the individual sessions.',
   },
   challenge: {
     what: 'How this session did against its prop-firm evaluation rules: profit target, daily loss limit, maximum loss and minimum trading days, checked on every 1-minute bar.',
@@ -165,7 +167,7 @@ export const EXPLAIN = {
   },
   mcRuin: {
     what: 'The probability of hitting a drawdown of 10%, 20%, 30% and 50% within the simulated horizon.',
-    read: 'Pick the level that would end your account or your confidence (a prop firm\'s max loss, for example) and read its probability.',
+    read: "Pick the level that would end your account or your confidence (a prop firm's max loss, for example) and read its probability.",
     good: 'Under 5% for the level that matters to you, under 1% for 50%.',
   },
   mcSizing: {
@@ -193,7 +195,7 @@ export const EXPLAIN = {
     watch: 'Bars far left of −1R mean stops were skipped or slipped badly.',
   },
   maeMfe: {
-    what: 'Each trade\'s maximum adverse excursion (how far it went against you) against its maximum favourable excursion (how far it went your way), in R.',
+    what: "Each trade's maximum adverse excursion (how far it went against you) against its maximum favourable excursion (how far it went your way), in R.",
     read: 'Winners far to the right of the diagonal moved a lot in your favour; losers with a large MFE were winners that turned around.',
     good: 'Winners with small MAE (clean entries) and few losers that were once well in profit.',
     watch: 'Many losers with MAE just under 1R suggest stops a little too tight.',

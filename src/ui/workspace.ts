@@ -50,13 +50,31 @@ const PANELS: { id: Panel; icon: string; label: string; title: string }[] = [
 
 const PREF_KEY = 'overflowtrade.prefs';
 function loadPrefs(): Prefs {
-  const def: Prefs = { speed: 2, unit: 'candle', autoShot: true, sizeMode: 'risk%', sizeVal: 1, slPips: 20, tpMode: 'rr', tpVal: 2, confirmClose: false, bottomH: 210, bottomCollapsed: false, panel: 'order', sideCollapsed: false, preview: true, toolsOpen: typeof window === 'undefined' || window.innerWidth >= 768 };
+  const def: Prefs = {
+    speed: 2,
+    unit: 'candle',
+    autoShot: true,
+    sizeMode: 'risk%',
+    sizeVal: 1,
+    slPips: 20,
+    tpMode: 'rr',
+    tpVal: 2,
+    confirmClose: false,
+    bottomH: 210,
+    bottomCollapsed: false,
+    panel: 'order',
+    sideCollapsed: false,
+    preview: true,
+    toolsOpen: typeof window === 'undefined' || window.innerWidth >= 768,
+  };
   try {
     const saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}') as Record<string, unknown>;
     const out = { ...def, ...saved } as Prefs;
     // a value saved while a field was empty or half-typed must not survive a reload as null/NaN
-    const o = out as unknown as Record<string, unknown>, d = def as unknown as Record<string, unknown>;
-    for (const k of Object.keys(d)) if (typeof d[k] === 'number' && !(typeof o[k] === 'number' && isFinite(o[k] as number) && (o[k] as number) >= 0)) o[k] = d[k];
+    const o = out as unknown as Record<string, unknown>,
+      d = def as unknown as Record<string, unknown>;
+    for (const k of Object.keys(d))
+      if (typeof d[k] === 'number' && !(typeof o[k] === 'number' && isFinite(o[k] as number) && (o[k] as number) >= 0)) o[k] = d[k];
     return out;
   } catch {
     return def;
@@ -112,7 +130,17 @@ export class Workspace implements PaneHost {
   private tab: 'positions' | 'orders' | 'history' = 'positions';
   private ticket = { type: 'market' as OrderType, price: 0, tags: '', note: '', trail: 0, be: 0, lev: 0, side: 'long' as Side, link: null as string | null };
   /** the order ticket drawn on the chart as a long/short box (never saved) */
-  private pv: Drawing = { id: 'ticket-preview', type: 'long', pts: [{ t: 0, p: 0 }, { t: 0, p: 0 }, { t: 0, p: 0 }], color: '#1a9e93', preview: true };
+  private pv: Drawing = {
+    id: 'ticket-preview',
+    type: 'long',
+    pts: [
+      { t: 0, p: 0 },
+      { t: 0, p: 0 },
+      { t: 0, p: 0 },
+    ],
+    color: '#1a9e93',
+    preview: true,
+  };
   private pvDragging = false;
   private rail!: HTMLDivElement;
   /** phone layout: trade bar + slide-up order sheet instead of the stacked ticket */
@@ -163,7 +191,14 @@ export class Workspace implements PaneHost {
     this.center = h('div', { class: 'center' }, this.grid, this.session.live ? this.liveControls() : this.controls(), this.bottom);
     this.rail = this.buildRail();
     this.buildSheet();
-    this.root = h('div', { class: `ws${this.session.live ? ' is-live' : ''}` }, this.topbar(), h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail), this.tradeBar, this.sheet);
+    this.root = h(
+      'div',
+      { class: `ws${this.session.live ? ' is-live' : ''}` },
+      this.topbar(),
+      h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail),
+      this.tradeBar,
+      this.sheet,
+    );
     this.mq.addEventListener('change', this.onMq);
     this.initBottomGestures();
     document.addEventListener('keydown', this.onKey);
@@ -206,9 +241,15 @@ export class Workspace implements PaneHost {
   private topbar() {
     const s = this.session;
     const layoutBtns = [1, 2, 3, 4].map((n) =>
-      h('button', { class: `seg${s.state.layout === n ? ' on' : ''}`, 'data-layout': n, title: `${n} chart${n > 1 ? 's' : ''}`, onclick: () => this.setLayout(n) }, ['▣', '◫', '◫▯', '⊞'][n - 1]),
+      h(
+        'button',
+        { class: `seg${s.state.layout === n ? ' on' : ''}`, 'data-layout': n, title: `${n} chart${n > 1 ? 's' : ''}`, onclick: () => this.setLayout(n) },
+        ['▣', '◫', '◫▯', '⊞'][n - 1],
+      ),
     );
-    return h('header', { class: 'topbar' },
+    return h(
+      'header',
+      { class: 'topbar' },
       h('a', { class: 'brand-mark', href: '#/', title: 'Overflow Trade', html: LOGO }),
       h('button', { class: 'ghost', onclick: () => this.nav('#/'), title: 'Back to sessions' }, '← Sessions'),
       h('div', { class: 'brand-sm' }, h('b', {}, s.name), h('small', {}, s.symbols.join(' · '))),
@@ -219,7 +260,17 @@ export class Workspace implements PaneHost {
       h('button', { class: 'ghost no-touch', onclick: () => this.helpModal() }, '⌨ Shortcuts'),
       cloudButton(),
       themeButton(),
-      h('button', { class: 'primary', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, 'Analytics & score'),
+      h(
+        'button',
+        {
+          class: 'primary',
+          onclick: () => {
+            this.flushSave();
+            this.nav(`#/analytics/${s.id}`);
+          },
+        },
+        'Analytics & score',
+      ),
     );
   }
 
@@ -255,7 +306,7 @@ export class Workspace implements PaneHost {
     const clear = h('button', { class: 'tool', title: 'Remove all drawings on this symbol' }, '🗑');
     clear.onclick = () => {
       const sym = this.active.cfg.symbol;
-      if (!(this.session.state.drawings[sym]?.length) || !confirm(`Remove all drawings on ${sym}?`)) return;
+      if (!this.session.state.drawings[sym]?.length || !confirm(`Remove all drawings on ${sym}?`)) return;
       this.session.state.drawings[sym] = [];
       this.drawingsChanged(sym);
     };
@@ -271,13 +322,18 @@ export class Workspace implements PaneHost {
 
   private controls() {
     this.playBtn = h('button', { class: 'play', title: 'Play / pause (Space)', onclick: () => this.togglePlay() }, '▶');
-    const speed = h('select', { title: 'Playback speed' },
-      ...[0.5, 1, 2, 3, 5, 10, 20, 50, 100].map((v) => h('option', { value: v, selected: v === this.prefs.speed }, `${v}×/s`)));
+    const speed = h(
+      'select',
+      { title: 'Playback speed' },
+      ...[0.5, 1, 2, 3, 5, 10, 20, 50, 100].map((v) => h('option', { value: v, selected: v === this.prefs.speed }, `${v}×/s`)),
+    );
     speed.onchange = () => {
       this.prefs.speed = +speed.value;
       this.savePrefs();
     };
-    const unit = h('select', { title: 'What one playback step reveals' },
+    const unit = h(
+      'select',
+      { title: 'What one playback step reveals' },
       h('option', { value: 'candle', selected: this.prefs.unit === 'candle' }, 'per candle'),
       h('option', { value: 'base', selected: this.prefs.unit === 'base' }, 'per 1m tick'),
     );
@@ -294,11 +350,14 @@ export class Workspace implements PaneHost {
       this.jump(utc);
     };
     const quick = (label: string, title: string, fn: () => void) => h('button', { class: 'ghost sm', title, onclick: fn }, label);
-    return h('div', { class: 'controls' },
+    return h(
+      'div',
+      { class: 'controls' },
       this.playBtn,
       h('button', { class: 'ctl', title: 'Next candle (→)', onclick: () => this.stepCandle() }, '⏭'),
       h('button', { class: 'ctl', title: 'Next 1-minute tick (Shift+→)', onclick: () => this.stepBase() }, '›'),
-      speed, unit,
+      speed,
+      unit,
       h('div', { class: 'ctl-sep' }),
       quick('+1H', 'Skip 1 hour', () => this.jump(this.replay.clock + 3600)),
       quick('+4H', 'Skip 4 hours', () => this.jump(this.replay.clock + 4 * 3600)),
@@ -306,7 +365,8 @@ export class Workspace implements PaneHost {
       quick('London', 'Skip to next London open (07:00 UTC)', () => this.jump(nextUtcHour(this.replay.clock, 7))),
       quick('NY', 'Skip to next New York open (13:30 UTC)', () => this.jump(nextUtcHour(this.replay.clock, 13.5))),
       h('div', { class: 'ctl-sep' }),
-      jumpInput, jumpBtn,
+      jumpInput,
+      jumpBtn,
       h('div', { class: 'spacer' }),
       this.clockEl,
       h('div', { class: 'progress', title: 'Session progress' }, this.progress),
@@ -318,7 +378,9 @@ export class Workspace implements PaneHost {
   private liveControls() {
     this.liveEl = h('span', { class: 'live-badge connecting' }, '● CONNECTING');
     // progress bar is unused in live mode but renderClock writes to it
-    return h('div', { class: 'controls live' },
+    return h(
+      'div',
+      { class: 'controls live' },
       this.liveEl,
       h('span', { class: 'muted small' }, `Hyperliquid ${this.session.live!.coin}-PERP · real-time forward test · funding not simulated`),
       h('div', { class: 'spacer' }),
@@ -341,8 +403,20 @@ export class Workspace implements PaneHost {
     const age = this.feed?.lastData ? Math.round((Date.now() - this.feed.lastData) / 1000) : null;
     const st = this.liveStatus;
     el.className = `live-badge ${st}`;
-    el.title = st === 'polling' ? 'The streaming connection is unavailable on this network, so prices are fetched every 3 seconds. Stops and targets are checked on each update.' : '';
-    el.textContent = st === 'polling' ? `● LIVE · updates every 3 s${age != null && age > 10 ? ` · ${age}s since last update` : ''}` : st === 'live' ? `● LIVE${age != null && age > 90 ? ' · no trades for a while (quiet or closed market)' : age != null && age > 5 ? ` · ${age}s since last update` : ''}` : st === 'connecting' ? '● CONNECTING' : st === 'reconnecting' ? '● RECONNECTING…' : '● OFFLINE — retrying';
+    el.title =
+      st === 'polling'
+        ? 'The streaming connection is unavailable on this network, so prices are fetched every 3 seconds. Stops and targets are checked on each update.'
+        : '';
+    el.textContent =
+      st === 'polling'
+        ? `● LIVE · updates every 3 s${age != null && age > 10 ? ` · ${age}s since last update` : ''}`
+        : st === 'live'
+          ? `● LIVE${age != null && age > 90 ? ' · no trades for a while (quiet or closed market)' : age != null && age > 5 ? ` · ${age}s since last update` : ''}`
+          : st === 'connecting'
+            ? '● CONNECTING'
+            : st === 'reconnecting'
+              ? '● RECONNECTING…'
+              : '● OFFLINE — retrying';
   }
 
   private startLive() {
@@ -389,7 +463,11 @@ export class Workspace implements PaneHost {
     try {
       const rows = await hlCandles(coin, '1m', Math.max(from, now - HL_MAX_CANDLES * 60), now);
       if (!this.feed) return;
-      if (rows.length && rows[0][0] > from + 60) toast(`Data gap: Hyperliquid only serves the latest ${HL_MAX_CANDLES.toLocaleString('en-US')} one-minute candles, so ${Math.round((rows[0][0] - from) / 3600)}h of history is missing. Open orders were checked against the candles available.`, 'info');
+      if (rows.length && rows[0][0] > from + 60)
+        toast(
+          `Data gap: Hyperliquid only serves the latest ${HL_MAX_CANDLES.toLocaleString('en-US')} one-minute candles, so ${Math.round((rows[0][0] - from) / 3600)}h of history is missing. Open orders were checked against the candles available.`,
+          'info',
+        );
       const br = this.replay.broker;
       for (const r of rows) {
         const res = applyCandle(b, r);
@@ -479,7 +557,9 @@ export class Workspace implements PaneHost {
           for (const m of metas) {
             if (!m || !canRefresh(m)) continue;
             b.textContent = `Downloading ${m.symbol}…`;
-            added += (await refreshDataset(m, { onProgress: (_p, n, msg) => (b.textContent = msg ?? `Downloading ${m.symbol}: ${n.toLocaleString('en-US')} bars…`) })).added;
+            added += (
+              await refreshDataset(m, { onProgress: (_p, n, msg) => (b.textContent = msg ?? `Downloading ${m.symbol}: ${n.toLocaleString('en-US')} bars…`) })
+            ).added;
           }
         } catch (e) {
           toast((e as Error).message, 'err');
@@ -511,9 +591,19 @@ export class Workspace implements PaneHost {
     const fmt = (t: number) => fmtLocal(t + off(t)).slice(0, 16);
     const lastBar = this.replay.dataEnd();
     const pastEnd = s.end != null && this.replay.clock > s.end;
-    const ends = s.symbols.map((sym) => { const b = this.replay.data[sym]; return b?.n ? `${sym} ends on ${fmt(b.t[b.n - 1])}` : `${sym} has no bars`; }).join(', ');
+    const ends = s.symbols
+      .map((sym) => {
+        const b = this.replay.data[sym];
+        return b?.n ? `${sym} ends on ${fmt(b.t[b.n - 1])}` : `${sym} has no bars`;
+      })
+      .join(', ');
     const empty = !s.state.broker.trades.length && !s.state.broker.positions.length && !s.state.broker.orders.length;
-    const win = dataWindow(s.symbols.map((sym) => { const b = this.replay.data[sym]; return { from: b?.t[0] ?? 0, to: b?.n ? b.t[b.n - 1] : 0 }; }));
+    const win = dataWindow(
+      s.symbols.map((sym) => {
+        const b = this.replay.data[sym];
+        return { from: b?.t[0] ?? 0, to: b?.n ? b.t[b.n - 1] : 0 };
+      }),
+    );
     const okWin = win.from < win.to;
     const restartAt = okWin ? win.from + Math.min(30 * 86400, Math.floor((win.to - win.from) / 4)) : 0;
     const startedAfter = s.start > lastBar;
@@ -529,19 +619,67 @@ export class Workspace implements PaneHost {
       await saveSession(s);
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     };
-    const body = h('div', { class: 'nodata-card' },
-      h('h3', {}, pastEnd ? 'This session has reached its end date' : startedAfter ? 'Nothing to replay after the start date' : 'You reached the end of the data'),
-      h('p', {}, startedAfter
-        ? `This session starts on ${fmt(s.start)}, but the market data stops before that: ${ends}. Play has no future candles to reveal.`
-        : pastEnd ? `The session end (${fmt(s.end!)}) has passed. Remove or move the end date in a new session to keep going.` : `The market data stops here: ${ends}. Import newer data with the same symbol name to continue.`),
-      h('div', { class: 'row-btns' },
+    const body = h(
+      'div',
+      { class: 'nodata-card' },
+      h(
+        'h3',
+        {},
+        pastEnd ? 'This session has reached its end date' : startedAfter ? 'Nothing to replay after the start date' : 'You reached the end of the data',
+      ),
+      h(
+        'p',
+        {},
+        startedAfter
+          ? `This session starts on ${fmt(s.start)}, but the market data stops before that: ${ends}. Play has no future candles to reveal.`
+          : pastEnd
+            ? `The session end (${fmt(s.end!)}) has passed. Remove or move the end date in a new session to keep going.`
+            : `The market data stops here: ${ends}. Import newer data with the same symbol name to continue.`,
+      ),
+      h(
+        'div',
+        { class: 'row-btns' },
         empty && okWin && startedAfter ? restart : null,
         pastEnd ? null : this.newerBarsButton(!(empty && startedAfter)),
-        h('button', { class: 'ghost', onclick: () => { this.flushSave(); this.nav('#/data'); } }, 'Import newer data'),
-        s.state.broker.trades.length ? h('button', { class: 'ghost', onclick: () => { this.flushSave(); this.nav(`#/analytics/${s.id}`); } }, 'See analytics') : null,
-        h('button', { class: 'ghost', onclick: () => { this.bannerEl?.remove(); this.bannerEl = null; } }, 'Dismiss'),
+        h(
+          'button',
+          {
+            class: 'ghost',
+            onclick: () => {
+              this.flushSave();
+              this.nav('#/data');
+            },
+          },
+          'Import newer data',
+        ),
+        s.state.broker.trades.length
+          ? h(
+              'button',
+              {
+                class: 'ghost',
+                onclick: () => {
+                  this.flushSave();
+                  this.nav(`#/analytics/${s.id}`);
+                },
+              },
+              'See analytics',
+            )
+          : null,
+        h(
+          'button',
+          {
+            class: 'ghost',
+            onclick: () => {
+              this.bannerEl?.remove();
+              this.bannerEl = null;
+            },
+          },
+          'Dismiss',
+        ),
       ),
-      !empty && startedAfter ? h('p', { class: 'muted small' }, 'This session already has trades, so it can’t be restarted — create a new session inside the data range instead.') : null,
+      !empty && startedAfter
+        ? h('p', { class: 'muted small' }, 'This session already has trades, so it can’t be restarted — create a new session inside the data range instead.')
+        : null,
     );
     this.bannerEl = h('div', { class: 'nodata' }, body);
     this.center.append(this.bannerEl);
@@ -607,7 +745,10 @@ export class Workspace implements PaneHost {
       const dy = s0.y - e.clientY;
       const fast = performance.now() - s0.t < 300 && Math.abs(dy) > 30;
       // swallow the click that follows a drag so a tab under the finger isn't toggled
-      const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault(); };
+      const swallow = (ev: Event) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
       el.addEventListener('click', swallow, { capture: true, once: true });
       setTimeout(() => el.removeEventListener('click', swallow, { capture: true }), 0);
       if ((fast && dy < 0) || lastH < 90) {
@@ -674,11 +815,17 @@ export class Workspace implements PaneHost {
     const preview = h('div', { class: 'muted' }, ' ');
     const upd = () => {
       const tf = parseTf(input.value);
-      preview.textContent = input.value ? (tf ? `→ ${tf.label}` : 'Not a timeframe') : 'Any timeframe works: seconds (if your data has them), minutes, hours, days, weeks, months.';
+      preview.textContent = input.value
+        ? tf
+          ? `→ ${tf.label}`
+          : 'Not a timeframe'
+        : 'Any timeframe works: seconds (if your data has them), minutes, hours, days, weeks, months.';
     };
     input.oninput = upd;
     upd();
-    const grid = h('div', { class: 'tf-grid' },
+    const grid = h(
+      'div',
+      { class: 'tf-grid' },
       ...['1m', '2m', '3m', '5m', '10m', '15m', '30m', '45m', '1H', '2H', '3H', '4H', '6H', '8H', '12H', 'D', '2D', 'W', 'M'].map((t) =>
         h('button', { class: `chip${t === pane.cfg.tf ? ' on' : ''}`, onclick: () => apply(t) }, t, fav.includes(t) ? ' ★' : ''),
       ),
@@ -723,8 +870,10 @@ export class Workspace implements PaneHost {
     const dg = this.session.specs[sym]?.digits ?? 5;
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
-      if (p.sl != null) out.push({ key: `s${p.id}`, price: p.sl, color: '#e0605a', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }) });
-      if (p.tp != null) out.push({ key: `t${p.id}`, price: p.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }) });
+      if (p.sl != null)
+        out.push({ key: `s${p.id}`, price: p.sl, color: '#e0605a', label: 'SL', onDrop: (px) => this.modifyPos(p.id, { sl: +px.toFixed(dg) }) });
+      if (p.tp != null)
+        out.push({ key: `t${p.id}`, price: p.tp, color: '#1a9e93', label: 'TP', onDrop: (px) => this.modifyPos(p.id, { tp: +px.toFixed(dg) }) });
     }
     for (const o of br.s.orders) {
       if (o.symbol !== sym) continue;
@@ -791,8 +940,18 @@ export class Workspace implements PaneHost {
     const entry = type === 'market' ? (lv.side === 'long' ? br.ask(sym) : br.bid(sym)) : lv.entry;
     const lots = lotsFor({ ...lv, entry }, d.pos ?? this.posDefaults(), this.posEnv(sym));
     const r = br.place({
-      symbol: sym, side: lv.side, type, lots, price: +entry.toFixed(dg), sl: +lv.sl.toFixed(dg), tp: +lv.tp.toFixed(dg),
-      tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), leverage: this.ticketLev(sym),
+      symbol: sym,
+      side: lv.side,
+      type,
+      lots,
+      price: +entry.toFixed(dg),
+      sl: +lv.sl.toFixed(dg),
+      tp: +lv.tp.toFixed(dg),
+      tags: this.ticket.tags
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+      leverage: this.ticketLev(sym),
     });
     if (!r.ok) return toast(r.error, 'err');
     toast(`${lv.side === 'long' ? 'Buy' : 'Sell'} ${type} ${lots} lots placed from the R:R tool`, 'ok');
@@ -819,8 +978,20 @@ export class Workspace implements PaneHost {
     const buyType: OrderType = px < br.ask(sym) ? 'limit' : 'stop';
     const sellType: OrderType = px > br.bid(sym) ? 'limit' : 'stop';
     const item = (label: string, fn: () => void, cls = '') =>
-      h('button', { class: `menu-item ${cls}`, onclick: () => { this.closeMenu(); fn(); } }, label);
-    const m = h('div', { class: 'ctx-menu' },
+      h(
+        'button',
+        {
+          class: `menu-item ${cls}`,
+          onclick: () => {
+            this.closeMenu();
+            fn();
+          },
+        },
+        label,
+      );
+    const m = h(
+      'div',
+      { class: 'ctx-menu' },
       h('div', { class: 'menu-head' }, `${sym} @ ${px.toFixed(dg)}`),
       item(`Buy ${buyType} @ ${px.toFixed(dg)}`, () => this.submit('long', { type: buyType, price: px, sym }), 'up'),
       item(`Sell ${sellType} @ ${px.toFixed(dg)}`, () => this.submit('short', { type: sellType, price: px, sym }), 'dn'),
@@ -829,7 +1000,12 @@ export class Workspace implements PaneHost {
       item('Market sell now', () => this.submit('short', { type: 'market', price: 0, sym })),
       h('div', { class: 'menu-sep' }),
       item('Horizontal line here', () => {
-        this.drawings(sym).push({ id: Math.random().toString(36).slice(2, 10), type: 'hline', pts: [{ t: pane.times[pane.times.length - 1] ?? 0, p: px }], color: '#d4a24c' });
+        this.drawings(sym).push({
+          id: Math.random().toString(36).slice(2, 10),
+          type: 'hline',
+          pts: [{ t: pane.times[pane.times.length - 1] ?? 0, p: px }],
+          color: '#d4a24c',
+        });
         this.drawingsChanged(sym);
       }),
       item('Remove all drawings', () => {
@@ -864,7 +1040,8 @@ export class Workspace implements PaneHost {
   private stepCandle() {
     const p = this.active;
     const sym = p.cfg.symbol;
-    const a = p.agg, b = p.bars;
+    const a = p.agg,
+      b = p.bars;
     const cur = this.replay.cursor[sym];
     const k = a.baseToAgg[cur];
     const lastOf = (j: number) => (j + 1 < a.n ? a.start[j + 1] - 1 : b.n - 1);
@@ -892,19 +1069,31 @@ export class Workspace implements PaneHost {
     const s = this.session;
     const off = offsetFn(this.tz);
     const last = this.replay.dataEnd();
-    const why = s.end != null && this.replay.clock > s.end ? `the session end date (${fmtLocal(s.end + off(s.end)).slice(0, 16)})` : `the end of the market data (${fmtLocal(last + off(last)).slice(0, 16)})`;
+    const why =
+      s.end != null && this.replay.clock > s.end
+        ? `the session end date (${fmtLocal(s.end + off(s.end)).slice(0, 16)})`
+        : `the end of the market data (${fmtLocal(last + off(last)).slice(0, 16)})`;
     if (this.endNotified) return toast(`Nothing more to play: you are at ${why}.`, 'info');
     this.endNotified = true;
     if (!n) return this.showNoDataBanner();
     const go = h('button', { class: 'primary' }, 'See your Overflow Score');
     const stay = h('button', { class: 'ghost' }, 'Keep reviewing');
-    const close = modal('End of the replay', h('div', { class: 'stack' },
-      h('p', {}, `You reached ${why}. Import newer data with the same symbol name to continue this session.`),
-      h('p', { class: 'muted' }, n
-        ? `${n} closed trade${n === 1 ? '' : 's'}. See how the method scores: drawdowns, Sharpe, monthly consistency, market regimes, Monte Carlo and the final Overflow Score.`
-        : 'No closed trades yet — the Overflow Score needs at least 10.'),
-      h('div', { class: 'row-btns' }, go, s.end != null && this.replay.clock > s.end ? null : this.newerBarsButton(false), stay),
-    ));
+    const close = modal(
+      'End of the replay',
+      h(
+        'div',
+        { class: 'stack' },
+        h('p', {}, `You reached ${why}. Import newer data with the same symbol name to continue this session.`),
+        h(
+          'p',
+          { class: 'muted' },
+          n
+            ? `${n} closed trade${n === 1 ? '' : 's'}. See how the method scores: drawdowns, Sharpe, monthly consistency, market regimes, Monte Carlo and the final Overflow Score.`
+            : 'No closed trades yet — the Overflow Score needs at least 10.',
+        ),
+        h('div', { class: 'row-btns' }, go, s.end != null && this.replay.clock > s.end ? null : this.newerBarsButton(false), stay),
+      ),
+    );
     go.onclick = () => {
       close();
       this.flushSave();
@@ -964,7 +1153,8 @@ export class Workspace implements PaneHost {
   private stepCandleSilent() {
     const p = this.active;
     const sym = p.cfg.symbol;
-    const a = p.agg, b = p.bars;
+    const a = p.agg,
+      b = p.bars;
     const cur = this.replay.cursor[sym];
     const k = a.baseToAgg[cur];
     const lastOf = (j: number) => (j + 1 < a.n ? a.start[j + 1] - 1 : b.n - 1);
@@ -1018,18 +1208,31 @@ export class Workspace implements PaneHost {
     this.renderBottom();
     const passed = c.status === 'passed';
     const scoreBtn = h('button', { class: 'primary' }, 'See your Overflow Score');
-    const closeModal = modal(passed ? 'Challenge passed' : 'Challenge failed', h('div', { class: 'stack' },
-      h('p', {}, c.reason + '.'),
-      h('div', { class: 'kv-grid' },
-        kv('Balance', money(this.replay.broker.s.balance)),
-        kv('Trading days', String(c.tradingDays.length)),
-        kv('Worst daily loss', money(-c.worstDailyLoss)),
+    const closeModal = modal(
+      passed ? 'Challenge passed' : 'Challenge failed',
+      h(
+        'div',
+        { class: 'stack' },
+        h('p', {}, c.reason + '.'),
+        h(
+          'div',
+          { class: 'kv-grid' },
+          kv('Balance', money(this.replay.broker.s.balance)),
+          kv('Trading days', String(c.tradingDays.length)),
+          kv('Worst daily loss', money(-c.worstDailyLoss)),
+        ),
+        h(
+          'p',
+          { class: 'muted' },
+          passed
+            ? 'You can keep replaying this session; the result is saved in analytics.'
+            : this.session.rules?.stopOnBreach
+              ? 'Positions were closed and trading is locked for this session. Duplicate it from the Sessions page to try again.'
+              : 'Trading is still allowed (stop-on-breach is off).',
+        ),
+        h('div', { class: 'row-btns' }, scoreBtn),
       ),
-      h('p', { class: 'muted' }, passed
-        ? 'You can keep replaying this session; the result is saved in analytics.'
-        : this.session.rules?.stopOnBreach ? 'Positions were closed and trading is locked for this session. Duplicate it from the Sessions page to try again.' : 'Trading is still allowed (stop-on-breach is off).'),
-      h('div', { class: 'row-btns' }, scoreBtn),
-    ));
+    );
     scoreBtn.onclick = () => {
       closeModal();
       this.flushSave();
@@ -1056,24 +1259,29 @@ export class Workspace implements PaneHost {
   private flushShots() {
     if (!this.pendingShots.length || this.shotQueued) return;
     this.shotQueued = true;
-    requestAnimationFrame(() => setTimeout(() => {
-      this.shotQueued = false;
-      const shots = this.pendingShots.splice(0);
-      if (!shots.length || !this.root.isConnected) return;
-      const pane = this.panes.find((p) => p.cfg.symbol === shots[shots.length - 1].symbol) ?? this.active;
-      // screenshots are best-effort: a failure must never get in the way of trading
-      try {
-        void pane.screenshot().then((url) => {
-          for (const t of shots) {
-            t.shot = `${this.session.id}-${t.id}`;
-            void saveShot(t.shot, url);
-          }
-          this.scheduleSave();
-        }).catch(() => {});
-      } catch {
-        /* ignore */
-      }
-    }, 0));
+    requestAnimationFrame(() =>
+      setTimeout(() => {
+        this.shotQueued = false;
+        const shots = this.pendingShots.splice(0);
+        if (!shots.length || !this.root.isConnected) return;
+        const pane = this.panes.find((p) => p.cfg.symbol === shots[shots.length - 1].symbol) ?? this.active;
+        // screenshots are best-effort: a failure must never get in the way of trading
+        try {
+          void pane
+            .screenshot()
+            .then((url) => {
+              for (const t of shots) {
+                t.shot = `${this.session.id}-${t.id}`;
+                void saveShot(t.shot, url);
+              }
+              this.scheduleSave();
+            })
+            .catch(() => {});
+        } catch {
+          /* ignore */
+        }
+      }, 0),
+    );
   }
 
   // ---- sizing & orders ----------------------------------------------------------
@@ -1093,10 +1301,11 @@ export class Workspace implements PaneHost {
     const br = this.replay.broker;
     const pip = this.session.specs[sym]?.pipSize ?? 0.0001;
     const dir = side === 'long' ? 1 : -1;
-    const entry = type === 'market' ? (side === 'long' ? br.ask(sym) : br.bid(sym)) : o?.price ?? this.ticket.price;
+    const entry = type === 'market' ? (side === 'long' ? br.ask(sym) : br.bid(sym)) : (o?.price ?? this.ticket.price);
     const slP = this.prefs.slPips > 0 ? entry - dir * this.prefs.slPips * pip : null;
     let tpP: number | null = null;
-    if (this.prefs.tpVal > 0) tpP = this.prefs.tpMode === 'rr' ? (slP != null ? entry + dir * Math.abs(entry - slP) * this.prefs.tpVal : null) : entry + dir * this.prefs.tpVal * pip;
+    if (this.prefs.tpVal > 0)
+      tpP = this.prefs.tpMode === 'rr' ? (slP != null ? entry + dir * Math.abs(entry - slP) * this.prefs.tpVal : null) : entry + dir * this.prefs.tpVal * pip;
     const lots = this.sizeFor(sym, slP != null ? Math.abs(entry - slP) : 0, entry);
     return { sym, entry, sl: slP, tp: tpP, lots, type };
   }
@@ -1115,14 +1324,25 @@ export class Workspace implements PaneHost {
       return toast(`Enter ${what} in the Size field first`, 'err');
     }
     if (this.prefs.sizeMode === 'risk%' && this.prefs.sizeVal > 100) return toast('Risk is above 100% of the account — the Size field is in %', 'err');
-    if (this.prefs.sizeMode === 'risk$' && this.prefs.sizeVal > this.replay.broker.s.balance) return toast('The risk in $ is larger than the account balance', 'err');
+    if (this.prefs.sizeMode === 'risk$' && this.prefs.sizeVal > this.replay.broker.s.balance)
+      return toast('The risk in $ is larger than the account balance', 'err');
     const lv = this.ticketLevels(side, o);
     const dg = this.session.specs[lv.sym]?.digits ?? 5;
     const r = this.replay.broker.place({
-      symbol: lv.sym, side, type: lv.type, lots: lv.lots, price: lv.entry,
-      sl: lv.sl != null ? +lv.sl.toFixed(dg) : null, tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
-      tags: this.ticket.tags.split(',').map((x) => x.trim()).filter(Boolean), note: this.ticket.note,
-      trailPips: this.ticket.trail > 0 ? this.ticket.trail : null, beAtR: this.ticket.be > 0 ? this.ticket.be : null,
+      symbol: lv.sym,
+      side,
+      type: lv.type,
+      lots: lv.lots,
+      price: lv.entry,
+      sl: lv.sl != null ? +lv.sl.toFixed(dg) : null,
+      tp: lv.tp != null ? +lv.tp.toFixed(dg) : null,
+      tags: this.ticket.tags
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+      note: this.ticket.note,
+      trailPips: this.ticket.trail > 0 ? this.ticket.trail : null,
+      beAtR: this.ticket.be > 0 ? this.ticket.be : null,
       leverage: this.ticketLev(lv.sym),
     });
     if (!r.ok) return toast(r.error, 'err');
@@ -1143,7 +1363,8 @@ export class Workspace implements PaneHost {
     const c = this.replay.clock - 1;
     const off = offsetFn(this.tz);
     this.clockEl.textContent = `${fmtLocal(c + off(c), true)} · ${this.tz}`;
-    let lo = Infinity, hi = -Infinity;
+    let lo = Infinity,
+      hi = -Infinity;
     for (const s of this.session.symbols) {
       const b = this.replay.data[s];
       if (!b) continue;
@@ -1158,7 +1379,12 @@ export class Workspace implements PaneHost {
   private buildRail() {
     const rail = h('div', { class: 'rail', role: 'toolbar', 'aria-label': 'Panels' });
     for (const p of PANELS) {
-      const b = h('button', { class: 'rail-btn', 'data-panel': p.id, title: p.title, 'aria-label': p.title }, h('span', { class: 'ri' }, p.icon), h('small', {}, p.label));
+      const b = h(
+        'button',
+        { class: 'rail-btn', 'data-panel': p.id, title: p.title, 'aria-label': p.title },
+        h('span', { class: 'ri' }, p.icon),
+        h('small', {}, p.label),
+      );
       b.onclick = () => this.openPanel(p.id, true);
       rail.append(b);
     }
@@ -1177,10 +1403,18 @@ export class Workspace implements PaneHost {
   private buildSheet() {
     this.sheetBody = h('div', { class: 'sheet-body' });
     const handle = h('div', { class: 'sheet-handle', title: 'Swipe down to close' }, h('i', {}));
-    this.sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Order ticket', 'aria-hidden': 'true' },
+    this.sheet = h(
+      'div',
+      { class: 'sheet', role: 'dialog', 'aria-label': 'Order ticket', 'aria-hidden': 'true' },
       handle,
-      h('div', { class: 'sheet-head' }, h('b', {}, 'Order'), h('button', { class: 'ghost sm', 'aria-label': 'Close the order sheet', onclick: () => this.closeSheet() }, '✕')),
-      this.sheetBody);
+      h(
+        'div',
+        { class: 'sheet-head' },
+        h('b', {}, 'Order'),
+        h('button', { class: 'ghost sm', 'aria-label': 'Close the order sheet', onclick: () => this.closeSheet() }, '✕'),
+      ),
+      this.sheetBody,
+    );
     // swipe down on the handle closes the sheet
     let y0: number | null = null;
     handle.addEventListener('pointerdown', (e) => {
@@ -1200,8 +1434,11 @@ export class Workspace implements PaneHost {
     };
     handle.addEventListener('pointerup', up);
     handle.addEventListener('pointercancel', up);
-    const bid = h('b', { 'data-tb': 'bid' }), ask = h('b', { 'data-tb': 'ask' });
-    this.tradeBar = h('div', { class: 'trade-bar' },
+    const bid = h('b', { 'data-tb': 'bid' }),
+      ask = h('b', { 'data-tb': 'ask' });
+    this.tradeBar = h(
+      'div',
+      { class: 'trade-bar' },
       h('button', { class: 'tb-sell', title: 'Sell at market with the ticket settings', onclick: () => this.submit('short') }, h('small', {}, 'SELL'), bid),
       this.session.live ? null : h('button', { class: 'tb-play', 'aria-label': 'Play / pause', onclick: () => this.togglePlay() }, '▶'),
       h('button', { class: 'tb-order', onclick: () => (this.sheetOpen ? this.closeSheet() : this.openSheet()) }, 'Order ▴'),
@@ -1211,9 +1448,11 @@ export class Workspace implements PaneHost {
 
   private renderTradeBar() {
     if (!this.tradeBar || !this.active) return;
-    const br = this.replay.broker, sym = this.active.cfg.symbol;
+    const br = this.replay.broker,
+      sym = this.active.cfg.symbol;
     const dg = this.session.specs[sym]?.digits ?? 5;
-    const b = this.tradeBar.querySelector('[data-tb=bid]'), a = this.tradeBar.querySelector('[data-tb=ask]');
+    const b = this.tradeBar.querySelector('[data-tb=bid]'),
+      a = this.tradeBar.querySelector('[data-tb=ask]');
     if (b) b.textContent = br.bid(sym).toFixed(dg);
     if (a) a.textContent = br.ask(sym).toFixed(dg);
     const play = this.tradeBar.querySelector('.tb-play');
@@ -1256,8 +1495,22 @@ export class Workspace implements PaneHost {
     const fresh = br.s.trades.slice(Math.max(this.announced, n - 2)); // each trade once; at most two toasts at a time
     this.announced = n;
     for (const t of fresh) {
-      const how = t.exitReason === 'tp' ? 'Target hit' : t.exitReason === 'sl' ? 'Stopped out' : t.exitReason === 'liq' ? 'Liquidated' : t.exitReason === 'be' ? 'Stopped at breakeven' : t.exitReason === 'trail' ? 'Trailing stop hit' : 'Closed';
-      toast(`${how} · ${t.symbol} ${t.side === 'long' ? 'long' : 'short'} · ${money(t.pnl, true)}${t.r != null ? ` (${num(t.r, 2, true)}R)` : ''}`, t.pnl >= 0 ? 'ok' : 'err');
+      const how =
+        t.exitReason === 'tp'
+          ? 'Target hit'
+          : t.exitReason === 'sl'
+            ? 'Stopped out'
+            : t.exitReason === 'liq'
+              ? 'Liquidated'
+              : t.exitReason === 'be'
+                ? 'Stopped at breakeven'
+                : t.exitReason === 'trail'
+                  ? 'Trailing stop hit'
+                  : 'Closed';
+      toast(
+        `${how} · ${t.symbol} ${t.side === 'long' ? 'long' : 'short'} · ${money(t.pnl, true)}${t.r != null ? ` (${num(t.r, 2, true)}R)` : ''}`,
+        t.pnl >= 0 ? 'ok' : 'err',
+      );
     }
     queueMicrotask(() => {
       const tab = Array.from(this.bottom.querySelectorAll('.tab')).find((b) => b.textContent?.startsWith('History'));
@@ -1319,7 +1572,10 @@ export class Workspace implements PaneHost {
     if (!this.active) return;
     const pr = this.prefs;
     this.rail?.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => {
-      const on = this.mobile && b.dataset.panel === 'order' ? this.sheetOpen : b.dataset.panel === pr.panel && !pr.sideCollapsed && !(this.mobile && pr.panel === 'order');
+      const on =
+        this.mobile && b.dataset.panel === 'order'
+          ? this.sheetOpen
+          : b.dataset.panel === pr.panel && !pr.sideCollapsed && !(this.mobile && pr.panel === 'order');
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
     });
@@ -1344,12 +1600,19 @@ export class Workspace implements PaneHost {
     const off = offsetFn(this.tz);
     const now = this.replay.clock;
     const input = h('input', { type: 'datetime-local', class: 'jump', id: 'gotoAt', value: dateInputValue(now - 1 + off(now - 1)) });
-    const go = h('button', { class: 'primary', onclick: () => {
-      if (!input.value) return;
-      const utc = localToUtc(parseDateInput(input.value), off);
-      if (utc <= this.replay.clock) return toast('You can only move forward in time — no peeking at the past outcome.', 'err');
-      this.jump(utc);
-    } }, 'Go');
+    const go = h(
+      'button',
+      {
+        class: 'primary',
+        onclick: () => {
+          if (!input.value) return;
+          const utc = localToUtc(parseDateInput(input.value), off);
+          if (utc <= this.replay.clock) return toast('You can only move forward in time — no peeking at the past outcome.', 'err');
+          this.jump(utc);
+        },
+      },
+      'Go',
+    );
     const q = (label: string, title: string, fn: () => void) => h('button', { class: 'ghost sm', title, onclick: fn }, label);
     const tfSec = this.active.tf.sec;
     const nextMonday = () => {
@@ -1360,24 +1623,42 @@ export class Workspace implements PaneHost {
     const end = this.replay.dataEnd();
     this.right.innerHTML = '';
     this.right.append(
-      h('section', { class: 'card stack' }, this.panelHead('Go to', `Now ${fmtLocal(now - 1 + off(now - 1), true)}`),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Go to', `Now ${fmtLocal(now - 1 + off(now - 1), true)}`),
         h('p', { class: 'muted small' }, 'Jump forward only. Every bar on the way is processed, so orders, stops and targets fill exactly as they would have.'),
         field(`Date & time (${this.tz})`, h('div', { class: 'join' }, input, go)),
-        h('small', { class: 'muted' }, `Data ends ${fmtLocal(end + off(end)).slice(0, 16)}`)),
-      h('section', { class: 'card stack' }, this.panelHead('Skip ahead'),
-        h('div', { class: 'chips' },
+        h('small', { class: 'muted' }, `Data ends ${fmtLocal(end + off(end)).slice(0, 16)}`),
+      ),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Skip ahead'),
+        h(
+          'div',
+          { class: 'chips' },
           q(`+10 bars`, `Skip 10 ${this.active.tf.label} candles`, () => this.jump(now + 10 * tfSec)),
           q(`+50 bars`, `Skip 50 ${this.active.tf.label} candles`, () => this.jump(now + 50 * tfSec)),
           q('+1H', 'Skip 1 hour', () => this.jump(now + 3600)),
           q('+4H', 'Skip 4 hours', () => this.jump(now + 4 * 3600)),
           q('+1D', 'Skip 1 day', () => this.jump(now + 86400)),
-          q('+1W', 'Skip 1 week', () => this.jump(now + 7 * 86400)))),
-      h('section', { class: 'card stack' }, this.panelHead('Next session open'),
-        h('div', { class: 'chips' },
+          q('+1W', 'Skip 1 week', () => this.jump(now + 7 * 86400)),
+        ),
+      ),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Next session open'),
+        h(
+          'div',
+          { class: 'chips' },
           q('Tokyo', 'Next Tokyo open (00:00 UTC)', () => this.jump(nextUtcHour(now, 0))),
           q('London', 'Next London open (07:00 UTC)', () => this.jump(nextUtcHour(now, 7))),
           q('New York', 'Next New York open (13:30 UTC)', () => this.jump(nextUtcHour(now, 13.5))),
-          q('Next week', 'Next Monday 00:00 UTC', () => this.jump(nextMonday())))),
+          q('Next week', 'Next Monday 00:00 UTC', () => this.jump(nextMonday())),
+        ),
+      ),
     );
   }
 
@@ -1396,18 +1677,35 @@ export class Workspace implements PaneHost {
       const open = b && i0 >= 0 && i0 < b.n ? b.o[i0] : NaN;
       const ch = isFinite(open) && open ? ((bid - open) / open) * 100 : NaN;
       const active = this.active.cfg.symbol === sym;
-      return h('button', { class: `watch-row${active ? ' on' : ''}`, title: `Show ${sym} on the active chart`, onclick: () => { this.active.setSymbol(sym); this.renderSide(); } },
+      return h(
+        'button',
+        {
+          class: `watch-row${active ? ' on' : ''}`,
+          title: `Show ${sym} on the active chart`,
+          onclick: () => {
+            this.active.setSymbol(sym);
+            this.renderSide();
+          },
+        },
         h('b', {}, sym),
         h('span', { class: 'num' }, isFinite(bid) ? bid.toFixed(dg) : '—'),
-        h('span', { class: `num ${isFinite(ch) ? (ch >= 0 ? 'up' : 'dn') : 'muted'}` }, isFinite(ch) ? `${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(2)}%` : '—'),
-        h('small', { class: 'muted' }, `spread ${num((br.ask(sym) - bid) / (sp?.pipSize ?? 1), 1)}`));
+        h(
+          'span',
+          { class: `num ${isFinite(ch) ? (ch >= 0 ? 'up' : 'dn') : 'muted'}` },
+          isFinite(ch) ? `${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(2)}%` : '—',
+        ),
+        h('small', { class: 'muted' }, `spread ${num((br.ask(sym) - bid) / (sp?.pipSize ?? 1), 1)}`),
+      );
     });
     const addSel = h('select', { id: 'watchAdd' }, h('option', { value: '' }, 'Loading datasets…')) as HTMLSelectElement;
     const add = h('button', { class: 'ghost', disabled: true }, 'Add') as HTMLButtonElement;
     void listDatasets().then((ds) => {
       const c = this.replay.clock;
       const ok = ds.filter((d) => !this.session.symbols.includes(d.id) && d.from < c && d.to > c);
-      addSel.replaceChildren(h('option', { value: '' }, ok.length ? 'Add a symbol…' : 'No other dataset covers this date'), ...ok.map((d) => h('option', { value: d.id }, `${d.symbol} · ${d.source}`)));
+      addSel.replaceChildren(
+        h('option', { value: '' }, ok.length ? 'Add a symbol…' : 'No other dataset covers this date'),
+        ...ok.map((d) => h('option', { value: d.id }, `${d.symbol} · ${d.source}`)),
+      );
       add.disabled = !ok.length;
       add.onclick = async () => {
         const meta = ok.find((d) => d.id === addSel.value);
@@ -1425,11 +1723,28 @@ export class Workspace implements PaneHost {
     });
     this.right.innerHTML = '';
     this.right.append(
-      h('section', { class: 'card stack' }, this.panelHead('Watchlist', `${this.session.symbols.length} symbol${this.session.symbols.length === 1 ? '' : 's'}`),
-        h('div', { class: 'watch' }, h('div', { class: 'watch-head' }, h('span', {}, 'Symbol'), h('span', {}, 'Bid'), h('span', {}, 'Day'), h('span', {}, '')), ...rows)),
-      h('section', { class: 'card stack' }, this.panelHead('Add to this session'),
-        h('p', { class: 'muted small' }, 'Any stored dataset that covers the current replay date. It joins the replay clock, so every symbol stays time-synchronised.'),
-        h('div', { class: 'join' }, addSel, add)),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Watchlist', `${this.session.symbols.length} symbol${this.session.symbols.length === 1 ? '' : 's'}`),
+        h(
+          'div',
+          { class: 'watch' },
+          h('div', { class: 'watch-head' }, h('span', {}, 'Symbol'), h('span', {}, 'Bid'), h('span', {}, 'Day'), h('span', {}, '')),
+          ...rows,
+        ),
+      ),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Add to this session'),
+        h(
+          'p',
+          { class: 'muted small' },
+          'Any stored dataset that covers the current replay date. It joins the replay clock, so every symbol stays time-synchronised.',
+        ),
+        h('div', { class: 'join' }, addSel, add),
+      ),
     );
   }
 
@@ -1441,39 +1756,157 @@ export class Workspace implements PaneHost {
     const br = this.replay.broker;
     const icon = (t: DrawingType) => TOOL_INFO.find((x) => x.type === t)?.icon ?? '•';
     const name = (t: DrawingType) => (TOOL_INFO.find((x) => x.type === t)?.title ?? t).replace(/\s*\(.*$/, '');
-    const btn = (label: string, title: string, fn: () => void, extra = '') => h('button', { class: `mini${extra}`, title, 'aria-label': title, onclick: fn }, label);
-    const drawRows = ds.map((d) => h('div', { class: `tree-row${this.active.layer.selected === d ? ' on' : ''}${d.hidden ? ' off' : ''}` },
-      h('span', { class: 'dot', style: `background:${d.color}` }),
-      h('button', { class: 'tree-name', title: 'Select on the chart', onclick: () => { if (d.hidden) d.hidden = false; this.active.layer.selected = d; this.drawingsChanged(sym); this.renderSide(); } },
-        `${icon(d.type)} ${name(d.type)}`, h('small', { class: 'muted' }, ` ${isPosTool(d) ? `@ ${d.pts[0].p.toFixed(dg)}` : d.pts.length ? d.pts[0].p.toFixed(dg) : ''}`)),
-      btn(d.hidden ? '◌' : '◉', d.hidden ? 'Show' : 'Hide', () => { d.hidden = !d.hidden; if (d.hidden && this.active.layer.selected === d) this.active.layer.selected = null; this.drawingsChanged(sym); this.renderSide(); }),
-      btn(d.locked ? '🔒' : '🔓', d.locked ? 'Unlock' : 'Lock', () => { d.locked = !d.locked; this.drawingsChanged(sym); this.renderSide(); }),
-      btn('✕', 'Delete', () => { ds.splice(ds.indexOf(d), 1); if (this.active.layer.selected === d) this.active.layer.selected = null; this.drawingsChanged(sym); this.renderSide(); }, ' danger'),
-    ));
-    const indRows = this.active.cfg.indicators.map((cfg) => h('div', { class: 'tree-row' },
-      h('span', { class: 'dot', style: `background:${cfg.color}` }),
-      h('span', { class: 'tree-name' }, `ƒ ${indicatorDef(cfg.type)?.label ?? cfg.type}`, h('small', { class: 'muted' }, ` ${Object.values(cfg.params).join(', ')}`)),
-      btn('✕', 'Remove indicator', () => { this.active.cfg.indicators = this.active.cfg.indicators.filter((x) => x !== cfg); this.active.rebuildIndicators(); this.scheduleSave(); this.renderSide(); }, ' danger'),
-    ));
+    const btn = (label: string, title: string, fn: () => void, extra = '') =>
+      h('button', { class: `mini${extra}`, title, 'aria-label': title, onclick: fn }, label);
+    const drawRows = ds.map((d) =>
+      h(
+        'div',
+        { class: `tree-row${this.active.layer.selected === d ? ' on' : ''}${d.hidden ? ' off' : ''}` },
+        h('span', { class: 'dot', style: `background:${d.color}` }),
+        h(
+          'button',
+          {
+            class: 'tree-name',
+            title: 'Select on the chart',
+            onclick: () => {
+              if (d.hidden) d.hidden = false;
+              this.active.layer.selected = d;
+              this.drawingsChanged(sym);
+              this.renderSide();
+            },
+          },
+          `${icon(d.type)} ${name(d.type)}`,
+          h('small', { class: 'muted' }, ` ${isPosTool(d) ? `@ ${d.pts[0].p.toFixed(dg)}` : d.pts.length ? d.pts[0].p.toFixed(dg) : ''}`),
+        ),
+        btn(d.hidden ? '◌' : '◉', d.hidden ? 'Show' : 'Hide', () => {
+          d.hidden = !d.hidden;
+          if (d.hidden && this.active.layer.selected === d) this.active.layer.selected = null;
+          this.drawingsChanged(sym);
+          this.renderSide();
+        }),
+        btn(d.locked ? '🔒' : '🔓', d.locked ? 'Unlock' : 'Lock', () => {
+          d.locked = !d.locked;
+          this.drawingsChanged(sym);
+          this.renderSide();
+        }),
+        btn(
+          '✕',
+          'Delete',
+          () => {
+            ds.splice(ds.indexOf(d), 1);
+            if (this.active.layer.selected === d) this.active.layer.selected = null;
+            this.drawingsChanged(sym);
+            this.renderSide();
+          },
+          ' danger',
+        ),
+      ),
+    );
+    const indRows = this.active.cfg.indicators.map((cfg) =>
+      h(
+        'div',
+        { class: 'tree-row' },
+        h('span', { class: 'dot', style: `background:${cfg.color}` }),
+        h(
+          'span',
+          { class: 'tree-name' },
+          `ƒ ${indicatorDef(cfg.type)?.label ?? cfg.type}`,
+          h('small', { class: 'muted' }, ` ${Object.values(cfg.params).join(', ')}`),
+        ),
+        btn(
+          '✕',
+          'Remove indicator',
+          () => {
+            this.active.cfg.indicators = this.active.cfg.indicators.filter((x) => x !== cfg);
+            this.active.rebuildIndicators();
+            this.scheduleSave();
+            this.renderSide();
+          },
+          ' danger',
+        ),
+      ),
+    );
     const tradeRows = [
-      ...br.s.positions.filter((p) => p.symbol === sym).map((p) => h('div', { class: 'tree-row' },
-        h('span', { class: `dot ${p.side === 'long' ? 'bg-up' : 'bg-dn'}` }),
-        h('span', { class: 'tree-name' }, `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} @ ${p.entry.toFixed(dg)}`, h('small', { class: `${cls(br.floating(p))}` }, ` ${money(br.floating(p), true)}`)),
-        btn('✕', `Close position #${p.id}`, () => this.lineAction('close', p.id), ' danger'))),
-      ...br.s.orders.filter((o) => o.symbol === sym).map((o) => h('div', { class: 'tree-row' },
-        h('span', { class: 'dot', style: 'background:#d4a24c' }),
-        h('span', { class: 'tree-name' }, `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots} @ ${o.price.toFixed(dg)}`),
-        btn('✕', `Cancel order #${o.id}`, () => this.lineAction('cancel', o.id), ' danger'))),
+      ...br.s.positions
+        .filter((p) => p.symbol === sym)
+        .map((p) =>
+          h(
+            'div',
+            { class: 'tree-row' },
+            h('span', { class: `dot ${p.side === 'long' ? 'bg-up' : 'bg-dn'}` }),
+            h(
+              'span',
+              { class: 'tree-name' },
+              `${p.side === 'long' ? 'BUY' : 'SELL'} ${p.lots} @ ${p.entry.toFixed(dg)}`,
+              h('small', { class: `${cls(br.floating(p))}` }, ` ${money(br.floating(p), true)}`),
+            ),
+            btn('✕', `Close position #${p.id}`, () => this.lineAction('close', p.id), ' danger'),
+          ),
+        ),
+      ...br.s.orders
+        .filter((o) => o.symbol === sym)
+        .map((o) =>
+          h(
+            'div',
+            { class: 'tree-row' },
+            h('span', { class: 'dot', style: 'background:#d4a24c' }),
+            h('span', { class: 'tree-name' }, `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots} @ ${o.price.toFixed(dg)}`),
+            btn('✕', `Cancel order #${o.id}`, () => this.lineAction('cancel', o.id), ' danger'),
+          ),
+        ),
     ];
     const empty = (t: string) => h('p', { class: 'muted small' }, t);
     this.right.innerHTML = '';
     this.right.append(
-      h('section', { class: 'card stack' }, this.panelHead('Drawings', `${sym} · all timeframes`), ...(drawRows.length ? drawRows : [empty('No drawings on this symbol yet — pick a tool on the left.')]),
-        ds.length ? h('div', { class: 'row-btns' },
-          h('button', { class: 'ghost sm', onclick: () => { ds.forEach((d) => (d.hidden = false)); this.drawingsChanged(sym); this.renderSide(); } }, 'Show all'),
-          h('button', { class: 'ghost sm', onclick: () => { ds.forEach((d) => (d.hidden = true)); this.active.layer.selected = null; this.drawingsChanged(sym); this.renderSide(); } }, 'Hide all')) : null),
-      h('section', { class: 'card stack' }, this.panelHead('Indicators', `Chart ${this.active.index + 1} · ${this.active.cfg.tf}`), ...(indRows.length ? indRows : [empty('No indicators — add them with ƒx Indicators.')])),
-      h('section', { class: 'card stack' }, this.panelHead('Orders & positions', sym), ...(tradeRows.length ? tradeRows : [empty('Nothing open on this symbol.')])),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Drawings', `${sym} · all timeframes`),
+        ...(drawRows.length ? drawRows : [empty('No drawings on this symbol yet — pick a tool on the left.')]),
+        ds.length
+          ? h(
+              'div',
+              { class: 'row-btns' },
+              h(
+                'button',
+                {
+                  class: 'ghost sm',
+                  onclick: () => {
+                    ds.forEach((d) => (d.hidden = false));
+                    this.drawingsChanged(sym);
+                    this.renderSide();
+                  },
+                },
+                'Show all',
+              ),
+              h(
+                'button',
+                {
+                  class: 'ghost sm',
+                  onclick: () => {
+                    ds.forEach((d) => (d.hidden = true));
+                    this.active.layer.selected = null;
+                    this.drawingsChanged(sym);
+                    this.renderSide();
+                  },
+                },
+                'Hide all',
+              ),
+            )
+          : null,
+      ),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Indicators', `Chart ${this.active.index + 1} · ${this.active.cfg.tf}`),
+        ...(indRows.length ? indRows : [empty('No indicators — add them with ƒx Indicators.')]),
+      ),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Orders & positions', sym),
+        ...(tradeRows.length ? tradeRows : [empty('Nothing open on this symbol.')]),
+      ),
     );
   }
 
@@ -1482,7 +1915,8 @@ export class Workspace implements PaneHost {
     const info = this.dataInfo ?? p.lastInfo();
     const dg = this.session.specs[p.cfg.symbol]?.digits ?? 5;
     const row = (k: string, v: string, c = '') => h('div', { class: 'kv' }, h('span', {}, k), h('b', { class: c }, v));
-    const fx = (v: number) => (isFinite(v) ? (Math.abs(v) >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : v.toFixed(Math.max(2, Math.min(dg, 6)))) : '—');
+    const fx = (v: number) =>
+      isFinite(v) ? (Math.abs(v) >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : v.toFixed(Math.max(2, Math.min(dg, 6)))) : '—';
     this.right.innerHTML = '';
     if (!info) {
       this.right.append(h('section', { class: 'card' }, this.panelHead('Data window'), h('p', { class: 'muted small' }, 'No candle yet.')));
@@ -1490,15 +1924,35 @@ export class Workspace implements PaneHost {
     }
     const ch = info.c - info.o;
     this.right.append(
-      h('section', { class: 'card stack' }, this.panelHead('Data window', this.dataInfo ? 'Under the cursor' : 'Latest candle'),
+      h(
+        'section',
+        { class: 'card stack' },
+        this.panelHead('Data window', this.dataInfo ? 'Under the cursor' : 'Latest candle'),
         row('Symbol', `${p.cfg.symbol} · ${p.tf.label}`),
         row('Time', fmtLocal(info.t, true)),
-        row('Open', info.o.toFixed(dg)), row('High', info.h.toFixed(dg)), row('Low', info.l.toFixed(dg)), row('Close', info.c.toFixed(dg), ch >= 0 ? 'up' : 'dn'),
+        row('Open', info.o.toFixed(dg)),
+        row('High', info.h.toFixed(dg)),
+        row('Low', info.l.toFixed(dg)),
+        row('Close', info.c.toFixed(dg), ch >= 0 ? 'up' : 'dn'),
         row('Change', `${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(dg)} (${((ch / info.o) * 100).toFixed(2)}%)`, ch >= 0 ? 'up' : 'dn'),
         row('Range', `${(info.h - info.l).toFixed(dg)} · ${((info.h - info.l) / (this.session.specs[p.cfg.symbol]?.pipSize ?? 1)).toFixed(1)} pips`),
-        info.v ? row('Volume', info.v.toLocaleString('en-US', { maximumFractionDigits: 2 })) : null),
-      info.ind.length ? h('section', { class: 'card stack' }, this.panelHead('Indicators'),
-        ...info.ind.map((x) => h('div', { class: 'kv' }, h('span', {}, h('i', { class: 'dot', style: `background:${x.color}` }), ` ${x.label}`), h('b', {}, x.values.map(fx).join(' · '))))) : '',
+        info.v ? row('Volume', info.v.toLocaleString('en-US', { maximumFractionDigits: 2 })) : null,
+      ),
+      info.ind.length
+        ? h(
+            'section',
+            { class: 'card stack' },
+            this.panelHead('Indicators'),
+            ...info.ind.map((x) =>
+              h(
+                'div',
+                { class: 'kv' },
+                h('span', {}, h('i', { class: 'dot', style: `background:${x.color}` }), ` ${x.label}`),
+                h('b', {}, x.values.map(fx).join(' · ')),
+              ),
+            ),
+          )
+        : '',
     );
   }
 
@@ -1559,7 +2013,11 @@ export class Workspace implements PaneHost {
     this.pv.text = lv.tp == null ? 'no-tp' : undefined;
     this.pv.pos = this.posDefaults();
     const t1 = T[T.length - 1] + tf * 3;
-    this.pv.pts = [{ t: t0, p: lv.entry }, { t: t1, p: lv.sl }, { t: t1, p: tp }];
+    this.pv.pts = [
+      { t: t0, p: lv.entry },
+      { t: t1, p: lv.sl },
+      { t: t1, p: tp },
+    ];
     return true;
   }
 
@@ -1567,7 +2025,8 @@ export class Workspace implements PaneHost {
   private ticketFromLevels(lv: PosLevels, sym: string) {
     const br = this.replay.broker;
     const sp = this.session.specs[sym];
-    const pip = sp?.pipSize ?? 0.0001, dg = sp?.digits ?? 5;
+    const pip = sp?.pipSize ?? 0.0001,
+      dg = sp?.digits ?? 5;
     const dir = lv.side === 'long' ? 1 : -1;
     this.ticket.side = lv.side;
     const type = autoType(lv.side, lv.entry, br.bid(sym), br.ask(sym), pip / 2);
@@ -1645,17 +2104,26 @@ export class Workspace implements PaneHost {
   drawingSettings(pane: ChartPane, d: Drawing) {
     const sym = pane.cfg.symbol;
     const sp = this.session.specs[sym];
-    const dg = sp?.digits ?? 5, pip = sp?.pipSize ?? 0.0001;
+    const dg = sp?.digits ?? 5,
+      pip = sp?.pipSize ?? 0.0001;
     const env = this.posEnv(sym);
     const pos: PosSettings = { ...(d.pos ?? this.posDefaults()) };
     const lv = posLevels(d);
     const num = (v: number, step: number) => h('input', { type: 'number', value: +v.toFixed(8), step }) as HTMLInputElement;
     const account = num(pos.account ?? this.replay.broker.s.balance, 100);
-    const mode = h('select', {}, h('option', { value: 'pct', selected: pos.riskMode === 'pct' }, 'Risk % of account'), h('option', { value: 'usd', selected: pos.riskMode === 'usd' }, 'Risk amount ($)'), h('option', { value: 'lots', selected: pos.riskMode === 'lots' }, 'Fixed lots')) as HTMLSelectElement;
+    const mode = h(
+      'select',
+      {},
+      h('option', { value: 'pct', selected: pos.riskMode === 'pct' }, 'Risk % of account'),
+      h('option', { value: 'usd', selected: pos.riskMode === 'usd' }, 'Risk amount ($)'),
+      h('option', { value: 'lots', selected: pos.riskMode === 'lots' }, 'Fixed lots'),
+    ) as HTMLSelectElement;
     const risk = num(pos.risk, 0.1);
     const entry = num(lv.entry, Math.pow(10, -dg));
-    const slP = num(lv.sl, Math.pow(10, -dg)), slPips = num(Math.abs(lv.entry - lv.sl) / pip, 0.1);
-    const tpP = num(lv.tp, Math.pow(10, -dg)), tpPips = num(Math.abs(lv.tp - lv.entry) / pip, 0.1);
+    const slP = num(lv.sl, Math.pow(10, -dg)),
+      slPips = num(Math.abs(lv.entry - lv.sl) / pip, 0.1);
+    const tpP = num(lv.tp, Math.pow(10, -dg)),
+      tpPips = num(Math.abs(lv.tp - lv.entry) / pip, 0.1);
     const out = h('div', { class: 'calc' });
     const dir = () => (d.type === 'long' ? 1 : -1);
     const levels = (): PosLevels => ({ side: d.type === 'short' ? 'short' : 'long', entry: +entry.value, sl: +slP.value, tp: +tpP.value });
@@ -1667,26 +2135,68 @@ export class Workspace implements PaneHost {
         ${c.invalid ? '<div class="lv"><span>Check</span><b class="dn">Stop or target is on the wrong side of the entry</b></div>' : ''}`;
     };
     // price ↔ pips stay in sync
-    const fromSlPips = () => { slP.value = String(+(+entry.value - dir() * +slPips.value * pip).toFixed(dg)); show(); };
-    const fromTpPips = () => { tpP.value = String(+(+entry.value + dir() * +tpPips.value * pip).toFixed(dg)); show(); };
+    const fromSlPips = () => {
+      slP.value = String(+(+entry.value - dir() * +slPips.value * pip).toFixed(dg));
+      show();
+    };
+    const fromTpPips = () => {
+      tpP.value = String(+(+entry.value + dir() * +tpPips.value * pip).toFixed(dg));
+      show();
+    };
     slPips.oninput = fromSlPips;
     tpPips.oninput = fromTpPips;
-    slP.oninput = () => { slPips.value = String(+(Math.abs(+entry.value - +slP.value) / pip).toFixed(1)); show(); };
-    tpP.oninput = () => { tpPips.value = String(+(Math.abs(+tpP.value - +entry.value) / pip).toFixed(1)); show(); };
-    entry.oninput = () => { fromSlPips(); fromTpPips(); };
+    slP.oninput = () => {
+      slPips.value = String(+(Math.abs(+entry.value - +slP.value) / pip).toFixed(1));
+      show();
+    };
+    tpP.oninput = () => {
+      tpPips.value = String(+(Math.abs(+tpP.value - +entry.value) / pip).toFixed(1));
+      show();
+    };
+    entry.oninput = () => {
+      fromSlPips();
+      fromTpPips();
+    };
     account.oninput = mode.onchange = risk.oninput = show;
     show();
     const save = h('button', { class: 'primary' }, 'Save');
-    const close = modal(`${d.type === 'long' ? 'Long' : 'Short'} position`, h('div', { class: 'stack' },
-      h('h4', {}, 'Risk'),
-      h('div', { class: 'row2' }, field('Account size ($)', account, 'Defaults to the current balance'), field('Risk', h('div', { class: 'join' }, mode, risk))),
-      h('h4', {}, 'Levels'),
-      field('Entry price', entry),
-      h('div', { class: 'row2' }, field('Profit level (price)', tpP), field('Profit level (pips)', tpPips)),
-      h('div', { class: 'row2' }, field('Stop level (price)', slP), field('Stop level (pips)', slPips)),
-      out,
-      h('div', { class: 'row-btns' }, save, h('button', { class: 'ghost', onclick: () => { flipDrawing(d); this.drawingsChanged(sym); close(); this.drawingSettings(pane, d); } }, '⇅ Flip to ' + (d.type === 'long' ? 'short' : 'long'))),
-    ));
+    const close = modal(
+      `${d.type === 'long' ? 'Long' : 'Short'} position`,
+      h(
+        'div',
+        { class: 'stack' },
+        h('h4', {}, 'Risk'),
+        h(
+          'div',
+          { class: 'row2' },
+          field('Account size ($)', account, 'Defaults to the current balance'),
+          field('Risk', h('div', { class: 'join' }, mode, risk)),
+        ),
+        h('h4', {}, 'Levels'),
+        field('Entry price', entry),
+        h('div', { class: 'row2' }, field('Profit level (price)', tpP), field('Profit level (pips)', tpPips)),
+        h('div', { class: 'row2' }, field('Stop level (price)', slP), field('Stop level (pips)', slPips)),
+        out,
+        h(
+          'div',
+          { class: 'row-btns' },
+          save,
+          h(
+            'button',
+            {
+              class: 'ghost',
+              onclick: () => {
+                flipDrawing(d);
+                this.drawingsChanged(sym);
+                close();
+                this.drawingSettings(pane, d);
+              },
+            },
+            '⇅ Flip to ' + (d.type === 'long' ? 'short' : 'long'),
+          ),
+        ),
+      ),
+    );
     save.onclick = () => {
       const l = levels();
       if (posCalc(l, settings(), env).invalid) return toast('The stop and target must be on opposite sides of the entry', 'err');
@@ -1707,7 +2217,8 @@ export class Workspace implements PaneHost {
     const sym = this.active.cfg.symbol;
     const sp = this.session.specs[sym];
     const dg = sp?.digits ?? 5;
-    const bid = br.bid(sym), ask = br.ask(sym);
+    const bid = br.bid(sym),
+      ask = br.ask(sym);
     const pr = this.prefs;
     const eq = br.equity();
     const net = eq - this.session.balance;
@@ -1738,23 +2249,92 @@ export class Workspace implements PaneHost {
       i.addEventListener('change', () => this.savePrefs());
       return i;
     };
-    const typeSeg = h('div', { class: 'segs full' },
+    const typeSeg = h(
+      'div',
+      { class: 'segs full' },
       ...(['market', 'limit', 'stop'] as OrderType[]).map((t) =>
-        h('button', { class: `seg${this.ticket.type === t ? ' on' : ''}`, 'data-otype': t, onclick: () => { this.ticket.type = t; this.ticket.price = +br.bid(sym).toFixed(dg); this.syncLinked(); this.renderSide(); this.panes.forEach((p) => p.redraw()); } }, t[0].toUpperCase() + t.slice(1))),
+        h(
+          'button',
+          {
+            class: `seg${this.ticket.type === t ? ' on' : ''}`,
+            'data-otype': t,
+            onclick: () => {
+              this.ticket.type = t;
+              this.ticket.price = +br.bid(sym).toFixed(dg);
+              this.syncLinked();
+              this.renderSide();
+              this.panes.forEach((p) => p.redraw());
+            },
+          },
+          t[0].toUpperCase() + t.slice(1),
+        ),
+      ),
     );
     const linked = this.linked();
-    const sideSeg = h('div', { class: 'segs full side-seg', role: 'group', 'aria-label': 'Order side' },
+    const sideSeg = h(
+      'div',
+      { class: 'segs full side-seg', role: 'group', 'aria-label': 'Order side' },
       ...(['long', 'short'] as Side[]).map((sd) =>
-        h('button', { class: `seg ${sd === 'long' ? 'buy-seg' : 'sell-seg'}${this.ticket.side === sd ? ' on' : ''}`, 'aria-pressed': String(this.ticket.side === sd), onclick: () => this.setTicketSide(sd) }, sd === 'long' ? 'Buy / Long' : 'Sell / Short')),
+        h(
+          'button',
+          {
+            class: `seg ${sd === 'long' ? 'buy-seg' : 'sell-seg'}${this.ticket.side === sd ? ' on' : ''}`,
+            'aria-pressed': String(this.ticket.side === sd),
+            onclick: () => this.setTicketSide(sd),
+          },
+          sd === 'long' ? 'Buy / Long' : 'Sell / Short',
+        ),
+      ),
     );
-    const pvToggle = h('label', { class: 'check small', title: 'Draw this order on the chart as a long/short box you can drag' }, h('input', { type: 'checkbox', checked: pr.preview, onchange: (e: Event) => { pr.preview = (e.target as HTMLInputElement).checked; this.savePrefs(); this.panes.forEach((p) => p.redraw()); } }), ' Show on chart');
+    const pvToggle = h(
+      'label',
+      { class: 'check small', title: 'Draw this order on the chart as a long/short box you can drag' },
+      h('input', {
+        type: 'checkbox',
+        checked: pr.preview,
+        onchange: (e: Event) => {
+          pr.preview = (e.target as HTMLInputElement).checked;
+          this.savePrefs();
+          this.panes.forEach((p) => p.redraw());
+        },
+      }),
+      ' Show on chart',
+    );
     const plv = this.ticketLevels(this.ticket.side);
     const placeLabel = `Place ${this.ticket.side === 'long' ? 'BUY' : 'SELL'} ${plv.type.toUpperCase()} ${plv.lots.toFixed(2)}${plv.type === 'market' ? '' : ` @ ${plv.entry.toFixed(dg)}`}`;
-    const place = h('button', { class: `place-btn ${this.ticket.side === 'long' ? 'buy' : 'sell'}`, id: 'placeBtn', onclick: () => { const l = this.linked(); if (l) this.placeFromTool(l, sym); else this.submit(this.ticket.side); } }, linked ? `${linked.type === 'long' ? 'Buy' : 'Sell'} from the R:R tool` : placeLabel);
+    const place = h(
+      'button',
+      {
+        class: `place-btn ${this.ticket.side === 'long' ? 'buy' : 'sell'}`,
+        id: 'placeBtn',
+        onclick: () => {
+          const l = this.linked();
+          if (l) this.placeFromTool(l, sym);
+          else this.submit(this.ticket.side);
+        },
+      },
+      linked ? `${linked.type === 'long' ? 'Buy' : 'Sell'} from the R:R tool` : placeLabel,
+    );
     const linkNote = linked
-      ? h('div', { class: 'callout small' }, h('span', {}, `Linked to the ${linked.type} position tool — the ticket and the box move together.`), h('button', { class: 'ghost sm', onclick: () => { this.active.layer.selected = null; } }, 'Unlink'))
+      ? h(
+          'div',
+          { class: 'callout small' },
+          h('span', {}, `Linked to the ${linked.type} position tool — the ticket and the box move together.`),
+          h(
+            'button',
+            {
+              class: 'ghost sm',
+              onclick: () => {
+                this.active.layer.selected = null;
+              },
+            },
+            'Unlink',
+          ),
+        )
       : null;
-    const sizeSel = h('select', { id: 'sizeMode' },
+    const sizeSel = h(
+      'select',
+      { id: 'sizeMode' },
       h('option', { value: 'risk%', selected: pr.sizeMode === 'risk%' }, 'Risk %'),
       h('option', { value: 'risk$', selected: pr.sizeMode === 'risk$' }, 'Risk $'),
       h('option', { value: 'lots', selected: pr.sizeMode === 'lots' }, 'Lots'),
@@ -1764,7 +2344,9 @@ export class Workspace implements PaneHost {
       this.savePrefs();
       this.renderSide();
     };
-    const tpSel = h('select', { id: 'tpMode' },
+    const tpSel = h(
+      'select',
+      { id: 'tpMode' },
       h('option', { value: 'rr', selected: pr.tpMode === 'rr' }, 'TP in R'),
       h('option', { value: 'pips', selected: pr.tpMode === 'pips' }, 'TP pips'),
     );
@@ -1773,48 +2355,129 @@ export class Workspace implements PaneHost {
       this.savePrefs();
       this.renderSide();
     };
-    const favs = h('div', { class: 'favs' },
+    const favs = h(
+      'div',
+      { class: 'favs' },
       ...this.session.state.favTfs.map((t) => h('button', { class: `chip${t === this.active.cfg.tf ? ' on' : ''}`, onclick: () => this.active.setTf(t) }, t)),
       h('button', { class: 'chip', title: 'Any timeframe…', onclick: () => this.tfPrompt(this.active, '') }, '+'),
     );
 
     // what the listeners above close over; while it is unchanged the ticket is updated in
     // place, so a tick never swallows a click, closes a dropdown or moves the caret
-    const key = [sym, this.active.cfg.tf, this.ticket.type, this.ticket.side, linked?.id ?? '', linked?.type ?? '', pr.sizeMode, pr.tpMode, this.session.state.favTfs.join(','), br.leveraged ? 1 : 0, dg].join('|');
+    const key = [
+      sym,
+      this.active.cfg.tf,
+      this.ticket.type,
+      this.ticket.side,
+      linked?.id ?? '',
+      linked?.type ?? '',
+      pr.sizeMode,
+      pr.tpMode,
+      this.session.state.favTfs.join(','),
+      br.leveraged ? 1 : 0,
+      dg,
+    ].join('|');
     const cards = [
-      h('section', { class: 'card' },
+      h(
+        'section',
+        { class: 'card' },
         h('div', { class: 'card-title' }, h('span', {}, `${sym}`), h('small', { class: 'muted' }, `Active chart · ${this.active.cfg.tf}`)),
         favs,
       ),
-      h('section', { class: 'card ticket' },
-        h('div', { class: 'quote' },
-          h('button', { class: 'sell', onclick: () => this.submit('short'), title: 'Sell (Shift+S)' }, h('small', {}, 'SELL'), h('b', { 'data-live': 'bid' }, bid.toFixed(dg))),
+      h(
+        'section',
+        { class: 'card ticket' },
+        h(
+          'div',
+          { class: 'quote' },
+          h(
+            'button',
+            { class: 'sell', onclick: () => this.submit('short'), title: 'Sell (Shift+S)' },
+            h('small', {}, 'SELL'),
+            h('b', { 'data-live': 'bid' }, bid.toFixed(dg)),
+          ),
           h('span', { class: 'spread', title: 'Spread in pips' }, num((ask - bid) / (sp?.pipSize ?? 1), 1)),
-          h('button', { class: 'buy', onclick: () => this.submit('long'), title: 'Buy (Shift+B)' }, h('small', {}, 'BUY'), h('b', { 'data-live': 'ask' }, ask.toFixed(dg))),
+          h(
+            'button',
+            { class: 'buy', onclick: () => this.submit('long'), title: 'Buy (Shift+B)' },
+            h('small', {}, 'BUY'),
+            h('b', { 'data-live': 'ask' }, ask.toFixed(dg)),
+          ),
         ),
         sideSeg,
         linkNote,
         typeSeg,
-        this.ticket.type !== 'market' ? field('Entry price', inp('tPrice', this.ticket.price, (v) => (this.ticket.price = +v), { type: 'number', step: Math.pow(10, -dg) })) : null,
-        h('div', { class: 'row2' },
-          field('Size', h('div', { class: 'join' }, sizeSel, inp('tSize', pr.sizeVal, (v) => (pr.sizeVal = +v), { type: 'number', step: 0.01, min: 0 }))),
-          field('Stop loss (pips)', inp('tSl', pr.slPips, (v) => (pr.slPips = +v), { type: 'number', step: 0.1, min: 0 })),
+        this.ticket.type !== 'market'
+          ? field(
+              'Entry price',
+              inp('tPrice', this.ticket.price, (v) => (this.ticket.price = +v), { type: 'number', step: Math.pow(10, -dg) }),
+            )
+          : null,
+        h(
+          'div',
+          { class: 'row2' },
+          field(
+            'Size',
+            h(
+              'div',
+              { class: 'join' },
+              sizeSel,
+              inp('tSize', pr.sizeVal, (v) => (pr.sizeVal = +v), { type: 'number', step: 0.01, min: 0 }),
+            ),
+          ),
+          field(
+            'Stop loss (pips)',
+            inp('tSl', pr.slPips, (v) => (pr.slPips = +v), { type: 'number', step: 0.1, min: 0 }),
+          ),
         ),
-        h('div', { class: 'row2' },
-          field('Take profit', h('div', { class: 'join' }, tpSel, inp('tTp', pr.tpVal, (v) => (pr.tpVal = +v), { type: 'number', step: 0.1, min: 0 }))),
-          field('Trail (pips)', inp('tTrail', this.ticket.trail || '', (v) => (this.ticket.trail = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
+        h(
+          'div',
+          { class: 'row2' },
+          field(
+            'Take profit',
+            h(
+              'div',
+              { class: 'join' },
+              tpSel,
+              inp('tTp', pr.tpVal, (v) => (pr.tpVal = +v), { type: 'number', step: 0.1, min: 0 }),
+            ),
+          ),
+          field(
+            'Trail (pips)',
+            inp('tTrail', this.ticket.trail || '', (v) => (this.ticket.trail = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' }),
+          ),
         ),
-        this.replay.broker.leveraged ? field(`Leverage (max ${this.replay.broker.maxLev(sym) ?? '∞'}×, isolated)`, inp('tLev', this.ticketLev(sym)!, (v) => (this.ticket.lev = Math.max(1, +v || 1)), { type: 'number', step: 1, min: 1, ...(this.replay.broker.maxLev(sym) ? { max: this.replay.broker.maxLev(sym)! } : {}) })) : null,
-        h('div', { class: 'row2' },
-          field('Auto-BE at R', inp('tBe', this.ticket.be || '', (v) => (this.ticket.be = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' })),
-          field('Tags / setup', inp('tTags', this.ticket.tags, (v) => (this.ticket.tags = v), { type: 'text', placeholder: 'breakout, A+' })),
+        this.replay.broker.leveraged
+          ? field(
+              `Leverage (max ${this.replay.broker.maxLev(sym) ?? '∞'}×, isolated)`,
+              inp('tLev', this.ticketLev(sym)!, (v) => (this.ticket.lev = Math.max(1, +v || 1)), {
+                type: 'number',
+                step: 1,
+                min: 1,
+                ...(this.replay.broker.maxLev(sym) ? { max: this.replay.broker.maxLev(sym)! } : {}),
+              }),
+            )
+          : null,
+        h(
+          'div',
+          { class: 'row2' },
+          field(
+            'Auto-BE at R',
+            inp('tBe', this.ticket.be || '', (v) => (this.ticket.be = +v), { type: 'number', step: 0.1, min: 0, placeholder: 'off' }),
+          ),
+          field(
+            'Tags / setup',
+            inp('tTags', this.ticket.tags, (v) => (this.ticket.tags = v), { type: 'text', placeholder: 'breakout, A+' }),
+          ),
         ),
         h('div', { class: 'calc', id: 'calc', 'data-keep': '' }),
         place,
         pvToggle,
       ),
       this.challengeCard(),
-      h('section', { class: 'card acct' },
+      h(
+        'section',
+        { class: 'card acct' },
         h('div', { class: 'card-title' }, h('span', {}, 'Account')),
         kv('Balance', money(br.s.balance)),
         kv('Equity', money(eq)),
@@ -1830,26 +2493,37 @@ export class Workspace implements PaneHost {
   }
 
   private challengeCard() {
-    const r = this.session.rules, c = this.session.state.challenge;
+    const r = this.session.rules,
+      c = this.session.state.challenge;
     if (!r || !c) return null;
     const init = this.session.balance;
     const br = this.replay.broker;
     const bar = (label: string, frac: number, text: string, kind: 'good' | 'bad') =>
-      h('div', { class: 'rule' },
+      h(
+        'div',
+        { class: 'rule' },
         h('div', { class: 'rule-top' }, h('span', {}, label), h('b', {}, text)),
-        h('div', { class: `meter ${kind}` }, h('div', { style: `width:${Math.max(0, Math.min(100, frac * 100)).toFixed(1)}%` })));
+        h('div', { class: `meter ${kind}` }, h('div', { style: `width:${Math.max(0, Math.min(100, frac * 100)).toFixed(1)}%` })),
+      );
     const profit = br.s.balance - init;
     const target = (r.profitTarget / 100) * init;
     const dailyLim = (r.maxDailyLoss / 100) * init;
     const totalLim = (r.maxTotalLoss / 100) * init;
     const eq = br.equity();
     const floor = (r.trailingDrawdown ? Math.min(c.highWater, init + totalLim) : init) - totalLim;
-    const badge = c.status === 'active' ? h('span', { class: 'badge' }, 'In progress') : h('span', { class: `badge ${c.status}` }, c.status === 'passed' ? 'PASSED' : 'FAILED');
-    return h('section', { class: 'card challenge' },
+    const badge =
+      c.status === 'active'
+        ? h('span', { class: 'badge' }, 'In progress')
+        : h('span', { class: `badge ${c.status}` }, c.status === 'passed' ? 'PASSED' : 'FAILED');
+    return h(
+      'section',
+      { class: 'card challenge' },
       h('div', { class: 'card-title' }, h('span', {}, r.name), badge),
       r.profitTarget > 0 ? bar('Profit target', target ? profit / target : 0, `${money(profit, true)} / ${money(target)}`, 'good') : null,
       r.maxDailyLoss > 0 ? bar('Daily loss used', dailyLim ? c.todayLoss / dailyLim : 0, `${money(c.todayLoss)} / ${money(dailyLim)}`, 'bad') : null,
-      r.maxTotalLoss > 0 ? bar(r.trailingDrawdown ? 'Trailing loss used' : 'Max loss used', totalLim ? (totalLim - (eq - floor)) / totalLim : 0, `floor ${money(floor)}`, 'bad') : null,
+      r.maxTotalLoss > 0
+        ? bar(r.trailingDrawdown ? 'Trailing loss used' : 'Max loss used', totalLim ? (totalLim - (eq - floor)) / totalLim : 0, `floor ${money(floor)}`, 'bad')
+        : null,
       bar('Trading days', r.minTradingDays ? c.tradingDays.length / r.minTradingDays : 1, `${c.tradingDays.length} / ${r.minTradingDays}`, 'good'),
       c.status !== 'active' ? h('div', { class: 'muted small' }, c.reason) : null,
     );
@@ -1859,7 +2533,8 @@ export class Workspace implements PaneHost {
     const el = this.orderRoot.querySelector('#calc');
     if (!el) return;
     const br = this.replay.broker;
-    const L = this.ticketLevels('long'), S = this.ticketLevels('short');
+    const L = this.ticketLevels('long'),
+      S = this.ticketLevels('short');
     const sym = L.sym;
     const dg = this.session.specs[sym]?.digits ?? 5;
     const risk = L.sl != null ? br.value(sym, Math.abs(L.entry - L.sl), L.lots, L.sl) : null;
@@ -1880,38 +2555,89 @@ export class Workspace implements PaneHost {
     // a pair quoted in neither USD nor with USD as base: say how its results become dollars
     const conv = br.conversion(sym);
     if (conv) {
-      el.insertAdjacentHTML('beforeend', `<div class="lv calc-note">${conv.ccy} amounts are converted at ${conv.rate.toPrecision(4)} USD per ${conv.ccy}${conv.exact ? '' : ` — an approximate rate. Add USD${conv.ccy} (or ${conv.ccy}USD) to this session for the exact one`}.</div>`);
+      el.insertAdjacentHTML(
+        'beforeend',
+        `<div class="lv calc-note">${conv.ccy} amounts are converted at ${conv.rate.toPrecision(4)} USD per ${conv.ccy}${conv.exact ? '' : ` — an approximate rate. Add USD${conv.ccy} (or ${conv.ccy}USD) to this session for the exact one`}.</div>`,
+      );
     }
     // sizing by risk has two silent traps: no stop to size from, and the 0.01-lot minimum
     const pr = this.prefs;
     const want = pr.sizeMode === 'risk%' ? (br.s.balance * pr.sizeVal) / 100 : pr.sizeMode === 'risk$' ? pr.sizeVal : null;
     if (want != null && want > 0) {
-      if (risk == null) el.insertAdjacentHTML('beforeend', `<div class="lv calc-warn">No stop loss: the size cannot be worked out from the risk, so the minimum of 0.01 lots is used.</div>`);
+      if (risk == null)
+        el.insertAdjacentHTML(
+          'beforeend',
+          `<div class="lv calc-warn">No stop loss: the size cannot be worked out from the risk, so the minimum of 0.01 lots is used.</div>`,
+        );
       else if (L.lots <= 0.01 && risk > want * 1.15) {
-        el.insertAdjacentHTML('beforeend', `<div class="lv calc-warn">The smallest size is 0.01 lots, so this trade risks ${money(risk)} (${((risk / br.s.balance) * 100).toFixed(2)}% of the balance) — more than the ${money(want)} you set. Tighten the stop or accept the larger risk.</div>`);
+        el.insertAdjacentHTML(
+          'beforeend',
+          `<div class="lv calc-warn">The smallest size is 0.01 lots, so this trade risks ${money(risk)} (${((risk / br.s.balance) * 100).toFixed(2)}% of the balance) — more than the ${money(want)} you set. Tighten the stop or accept the larger risk.</div>`,
+        );
       }
     }
     const lev = this.ticketLev(sym);
     if (lev) {
       const margin = br.marginFor(sym, L.lots, L.entry, lev) + br.fee(sym, L.lots, L.entry); // what the order ties up, fee included
-      el.insertAdjacentHTML('beforeend', `
+      el.insertAdjacentHTML(
+        'beforeend',
+        `
       <div><span>Margin</span><b>${money(margin)}</b></div>
-      <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>${br.freeMargin() < margin ? `
-      <div class="lv calc-warn">Too large for the free margin: at ${lev}× the most you can open is ${(Math.floor((L.lots * Math.max(0, br.freeMargin()) / margin) * 100) / 100).toFixed(2)} lots. Widen the stop, lower the risk or raise the leverage.</div>` : ''}
-      <div class="lv"><span>Liq. buy / sell</span><b>${br.liqPrice(sym, 'long', L.entry, lev).toFixed(dg)} / ${br.liqPrice(sym, 'short', S.entry, lev).toFixed(dg)}</b></div>`);
+      <div><span>Free margin</span><b class="${br.freeMargin() < margin ? 'dn' : ''}">${money(br.freeMargin())}</b></div>${
+        br.freeMargin() < margin
+          ? `
+      <div class="lv calc-warn">Too large for the free margin: at ${lev}× the most you can open is ${(Math.floor(((L.lots * Math.max(0, br.freeMargin())) / margin) * 100) / 100).toFixed(2)} lots. Widen the stop, lower the risk or raise the leverage.</div>`
+          : ''
+      }
+      <div class="lv"><span>Liq. buy / sell</span><b>${br.liqPrice(sym, 'long', L.entry, lev).toFixed(dg)} / ${br.liqPrice(sym, 'short', S.entry, lev).toFixed(dg)}</b></div>`,
+      );
     }
   }
 
   private renderBottom() {
     const br = this.replay.broker;
     this.announce();
-    const tabs = h('div', { class: 'tabs' },
+    const tabs = h(
+      'div',
+      { class: 'tabs' },
       ...(['positions', 'orders', 'history'] as const).map((t) =>
-        h('button', { class: `tab${this.tab === t ? ' on' : ''}`, onclick: () => { this.tab = t; if (this.prefs.bottomCollapsed) this.toggleBottom(true); this.renderBottom(); } },
-          t === 'positions' ? `Positions (${br.s.positions.length})` : t === 'orders' ? `Orders (${br.s.orders.length})` : `History (${br.s.trades.length})`)),
+        h(
+          'button',
+          {
+            class: `tab${this.tab === t ? ' on' : ''}`,
+            onclick: () => {
+              this.tab = t;
+              if (this.prefs.bottomCollapsed) this.toggleBottom(true);
+              this.renderBottom();
+            },
+          },
+          t === 'positions' ? `Positions (${br.s.positions.length})` : t === 'orders' ? `Orders (${br.s.orders.length})` : `History (${br.s.trades.length})`,
+        ),
+      ),
       h('div', { class: 'spacer' }),
-      br.s.positions.length ? h('button', { class: 'ghost sm', onclick: () => { br.closeAll(); this.afterTrade(); } }, 'Close all') : null,
-      h('button', { class: 'ghost sm bottom-toggle', type: 'button', title: this.prefs.bottomCollapsed ? 'Show the panel (swipe up or `)' : 'Hide the panel (swipe down or `)', onclick: () => this.toggleBottom() }, this.prefs.bottomCollapsed ? '▴' : '▾'),
+      br.s.positions.length
+        ? h(
+            'button',
+            {
+              class: 'ghost sm',
+              onclick: () => {
+                br.closeAll();
+                this.afterTrade();
+              },
+            },
+            'Close all',
+          )
+        : null,
+      h(
+        'button',
+        {
+          class: 'ghost sm bottom-toggle',
+          type: 'button',
+          title: this.prefs.bottomCollapsed ? 'Show the panel (swipe up or `)' : 'Hide the panel (swipe down or `)',
+          onclick: () => this.toggleBottom(),
+        },
+        this.prefs.bottomCollapsed ? '▴' : '▾',
+      ),
     );
     const body = h('div', { class: 'table-wrap' });
     const t = h('table', { class: 'tbl' });
@@ -1928,23 +2654,86 @@ export class Workspace implements PaneHost {
         const fl = br.floating(p);
         const rNow = p.initialSl != null ? ((p.side === 'long' ? 1 : -1) * (px - p.entry)) / Math.abs(p.entry - p.initialSl) : null;
         const off = offsetFn(this.tz);
-        const tr = h('tr', { class: p.id > this.seenPos ? 'row-new' : '' },
-          h('td', {}, `${p.id}`), h('td', {}, p.symbol), h('td', { class: p.side === 'long' ? 'up' : 'dn' }, p.side.toUpperCase()), h('td', {}, p.lots.toFixed(2)),
-          ...(levd ? [h('td', {}, p.leverage ? `${p.leverage}×` : '—'), h('td', {}, p.margin != null ? money(p.margin) : '—'), h('td', { class: 'warn-ink' }, p.liq != null ? p.liq.toFixed(dg) : '—')] : []),
+        const tr = h(
+          'tr',
+          { class: p.id > this.seenPos ? 'row-new' : '' },
+          h('td', {}, `${p.id}`),
+          h('td', {}, p.symbol),
+          h('td', { class: p.side === 'long' ? 'up' : 'dn' }, p.side.toUpperCase()),
+          h('td', {}, p.lots.toFixed(2)),
+          ...(levd
+            ? [
+                h('td', {}, p.leverage ? `${p.leverage}×` : '—'),
+                h('td', {}, p.margin != null ? money(p.margin) : '—'),
+                h('td', { class: 'warn-ink' }, p.liq != null ? p.liq.toFixed(dg) : '—'),
+              ]
+            : []),
           h('td', {}, p.entry.toFixed(dg)),
-          h('td', {}, this.levelInput(p.id, 'sl', p.sl, dg)), h('td', {}, this.levelInput(p.id, 'tp', p.tp, dg)),
-          h('td', { class: cls(pips) }, num(pips, 1, true)), h('td', { class: cls(rNow ?? 0) }, rNow != null ? num(rNow, 2, true) : '—'),
-          h('td', { class: cls(fl) }, money(fl, true)), h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
-          h('td', { class: 'acts' },
-            h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { const err = br.breakeven(p.id); if (err) toast(err, 'err'); this.afterTrade(); } }, 'BE'),
-            h('button', { class: 'mini', title: 'Close half', onclick: this.rowAct(`half${p.id}`, false, () => { br.close(p.id, 0.5); this.afterTrade(); }) }, '½'),
-            h('button', { class: 'mini', title: 'Reverse position', onclick: this.rowAct(`rev${p.id}`, true, () => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); }) }, '⇄'),
-            h('button', { class: 'mini danger', title: 'Close', onclick: this.rowAct(`close${p.id}`, true, () => { br.close(p.id); this.afterTrade(); }) }, '✕'),
+          h('td', {}, this.levelInput(p.id, 'sl', p.sl, dg)),
+          h('td', {}, this.levelInput(p.id, 'tp', p.tp, dg)),
+          h('td', { class: cls(pips) }, num(pips, 1, true)),
+          h('td', { class: cls(rNow ?? 0) }, rNow != null ? num(rNow, 2, true) : '—'),
+          h('td', { class: cls(fl) }, money(fl, true)),
+          h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
+          h(
+            'td',
+            { class: 'acts' },
+            h(
+              'button',
+              {
+                class: 'mini',
+                title: 'Move SL to breakeven',
+                onclick: () => {
+                  const err = br.breakeven(p.id);
+                  if (err) toast(err, 'err');
+                  this.afterTrade();
+                },
+              },
+              'BE',
+            ),
+            h(
+              'button',
+              {
+                class: 'mini',
+                title: 'Close half',
+                onclick: this.rowAct(`half${p.id}`, false, () => {
+                  br.close(p.id, 0.5);
+                  this.afterTrade();
+                }),
+              },
+              '½',
+            ),
+            h(
+              'button',
+              {
+                class: 'mini',
+                title: 'Reverse position',
+                onclick: this.rowAct(`rev${p.id}`, true, () => {
+                  const r = br.reverse(p.id);
+                  if (!r.ok) toast(r.error, 'err');
+                  this.afterTrade();
+                }),
+              },
+              '⇄',
+            ),
+            h(
+              'button',
+              {
+                class: 'mini danger',
+                title: 'Close',
+                onclick: this.rowAct(`close${p.id}`, true, () => {
+                  br.close(p.id);
+                  this.afterTrade();
+                }),
+              },
+              '✕',
+            ),
           ),
         );
         tb.append(tr);
       }
-      if (!br.s.positions.length) tb.append(emptyRow(levd ? 15 : 12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
+      if (!br.s.positions.length)
+        tb.append(emptyRow(levd ? 15 : 12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
       t.append(tb);
     } else if (this.tab === 'orders') {
       t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Type</th><th>Side</th><th>Lots</th><th>Price</th><th>SL</th><th>TP</th><th>Placed</th><th></th></tr></thead>`;
@@ -1952,12 +2741,36 @@ export class Workspace implements PaneHost {
       const off = offsetFn(this.tz);
       for (const o of br.s.orders) {
         const dg = this.session.specs[o.symbol]?.digits ?? 5;
-        tb.append(h('tr', {},
-          h('td', {}, `${o.id}`), h('td', {}, o.symbol), h('td', {}, o.type), h('td', { class: o.side === 'long' ? 'up' : 'dn' }, o.side.toUpperCase()), h('td', {}, o.lots.toFixed(2)),
-          h('td', {}, o.price.toFixed(dg)), h('td', {}, o.sl?.toFixed(dg) ?? '—'), h('td', {}, o.tp?.toFixed(dg) ?? '—'),
-          h('td', { class: 'muted' }, fmtLocal(o.createdAt + off(o.createdAt))),
-          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: this.rowAct(`cancel${o.id}`, true, () => { br.cancelOrder(o.id); this.afterTrade(); }) }, 'Cancel')),
-        ));
+        tb.append(
+          h(
+            'tr',
+            {},
+            h('td', {}, `${o.id}`),
+            h('td', {}, o.symbol),
+            h('td', {}, o.type),
+            h('td', { class: o.side === 'long' ? 'up' : 'dn' }, o.side.toUpperCase()),
+            h('td', {}, o.lots.toFixed(2)),
+            h('td', {}, o.price.toFixed(dg)),
+            h('td', {}, o.sl?.toFixed(dg) ?? '—'),
+            h('td', {}, o.tp?.toFixed(dg) ?? '—'),
+            h('td', { class: 'muted' }, fmtLocal(o.createdAt + off(o.createdAt))),
+            h(
+              'td',
+              { class: 'acts' },
+              h(
+                'button',
+                {
+                  class: 'mini danger',
+                  onclick: this.rowAct(`cancel${o.id}`, true, () => {
+                    br.cancelOrder(o.id);
+                    this.afterTrade();
+                  }),
+                },
+                'Cancel',
+              ),
+            ),
+          ),
+        );
       }
       if (!br.s.orders.length) tb.append(emptyRow(10, 'No pending orders. Drag order/SL/TP lines on the chart to adjust them.'));
       t.append(tb);
@@ -1966,18 +2779,36 @@ export class Workspace implements PaneHost {
       const tb = h('tbody');
       for (const [ti, tr] of [...br.s.trades].reverse().slice(0, 200).entries()) {
         const dg = this.session.specs[tr.symbol]?.digits ?? 5;
-        tb.append(h('tr', { class: br.s.trades.length - 1 - ti >= this.seenTrades ? `row-new ${tr.pnl >= 0 ? 'win' : 'loss'}` : '' },
-          h('td', {}, `${tr.id}`), h('td', {}, tr.symbol), h('td', { class: tr.side === 'long' ? 'up' : 'dn' }, tr.side.toUpperCase()), h('td', {}, tr.lots.toFixed(2)),
-          h('td', {}, tr.entry.toFixed(dg)), h('td', {}, tr.exit.toFixed(dg)), h('td', { class: cls(tr.pips) }, num(tr.pips, 1, true)),
-          h('td', { class: cls(tr.r ?? 0) }, tr.r != null ? num(tr.r, 2, true) : '—'), h('td', { class: cls(tr.pnl) }, money(tr.pnl, true)),
-          h('td', {}, tr.exitReason.toUpperCase()), h('td', {}, fmtDuration(tr.holdSec)), h('td', { class: 'muted' }, tr.tags.join(', ')),
-          h('td', { class: 'acts' }, h('button', { class: 'mini', onclick: () => this.journalModal(tr) }, 'Journal')),
-        ));
+        tb.append(
+          h(
+            'tr',
+            { class: br.s.trades.length - 1 - ti >= this.seenTrades ? `row-new ${tr.pnl >= 0 ? 'win' : 'loss'}` : '' },
+            h('td', {}, `${tr.id}`),
+            h('td', {}, tr.symbol),
+            h('td', { class: tr.side === 'long' ? 'up' : 'dn' }, tr.side.toUpperCase()),
+            h('td', {}, tr.lots.toFixed(2)),
+            h('td', {}, tr.entry.toFixed(dg)),
+            h('td', {}, tr.exit.toFixed(dg)),
+            h('td', { class: cls(tr.pips) }, num(tr.pips, 1, true)),
+            h('td', { class: cls(tr.r ?? 0) }, tr.r != null ? num(tr.r, 2, true) : '—'),
+            h('td', { class: cls(tr.pnl) }, money(tr.pnl, true)),
+            h('td', {}, tr.exitReason.toUpperCase()),
+            h('td', {}, fmtDuration(tr.holdSec)),
+            h('td', { class: 'muted' }, tr.tags.join(', ')),
+            h('td', { class: 'acts' }, h('button', { class: 'mini', onclick: () => this.journalModal(tr) }, 'Journal')),
+          ),
+        );
       }
       if (!br.s.trades.length) tb.append(emptyRow(13, 'Closed trades appear here. Every close is auto-screenshotted for your journal.'));
       t.append(tb);
     }
-    const key = [this.tab, br.s.positions.map((p) => p.id).join(','), br.s.orders.map((o) => o.id).join(','), br.s.trades.length, br.s.trades[br.s.trades.length - 1]?.id ?? ''].join('|');
+    const key = [
+      this.tab,
+      br.s.positions.map((p) => p.id).join(','),
+      br.s.orders.map((o) => o.id).join(','),
+      br.s.trades.length,
+      br.s.trades[br.s.trades.length - 1]?.id ?? '',
+    ].join('|');
     patchChildren(this.bottom, key, [h('div', { class: 'bottom-handle', title: 'Drag or swipe to resize · swipe down to hide' }, h('i', {})), tabs, body]);
     this.applyBottom();
   }
@@ -1999,24 +2830,55 @@ export class Workspace implements PaneHost {
 
   journalModal(t: Trade) {
     const img = h('img', { class: 'shot', alt: 'Chart at close', hidden: true });
-    if (t.shot) void getShot(t.shot).then((u) => { if (u) { img.src = u; img.hidden = false; } }).catch(() => {});
+    if (t.shot)
+      void getShot(t.shot)
+        .then((u) => {
+          if (u) {
+            img.src = u;
+            img.hidden = false;
+          }
+        })
+        .catch(() => {});
     const tags = h('input', { value: t.tags.join(', '), placeholder: 'setup, mistake, A+ …' });
     const note = h('textarea', { rows: 4, placeholder: 'What did you see? What would you do differently?' }, t.note);
-    const rating = h('select', {}, ...[0, 1, 2, 3, 4, 5].map((r) => h('option', { value: r, selected: (t.rating ?? 0) === r }, r ? '★'.repeat(r) : 'No rating')));
+    const rating = h(
+      'select',
+      {},
+      ...[0, 1, 2, 3, 4, 5].map((r) => h('option', { value: r, selected: (t.rating ?? 0) === r }, r ? '★'.repeat(r) : 'No rating')),
+    );
     const off = offsetFn(this.tz);
     const save = h('button', { class: 'primary' }, 'Save');
-    const close = modal(`Trade #${t.id} · ${t.symbol} ${t.side.toUpperCase()}`, h('div', { class: 'stack' },
-      h('div', { class: 'kv-grid' },
-        kv('P&L', money(t.pnl, true), cls(t.pnl)), kv('R', t.r != null ? num(t.r, 2, true) : '—', cls(t.r ?? 0)), kv('Pips', num(t.pips, 1, true)),
-        kv('Entry', `${fmtLocal(t.entryTime + off(t.entryTime))}`), kv('Exit', `${fmtLocal(t.exitTime + off(t.exitTime))}`), kv('Held', fmtDuration(t.holdSec)),
-        kv('MAE', `${num(t.maePips, 1)} pips${t.maeR != null ? ` (${num(t.maeR, 2)}R)` : ''}`), kv('MFE', `${num(t.mfePips, 1)} pips${t.mfeR != null ? ` (${num(t.mfeR, 2)}R)` : ''}`), kv('Exit by', t.exitReason.toUpperCase()),
+    const close = modal(
+      `Trade #${t.id} · ${t.symbol} ${t.side.toUpperCase()}`,
+      h(
+        'div',
+        { class: 'stack' },
+        h(
+          'div',
+          { class: 'kv-grid' },
+          kv('P&L', money(t.pnl, true), cls(t.pnl)),
+          kv('R', t.r != null ? num(t.r, 2, true) : '—', cls(t.r ?? 0)),
+          kv('Pips', num(t.pips, 1, true)),
+          kv('Entry', `${fmtLocal(t.entryTime + off(t.entryTime))}`),
+          kv('Exit', `${fmtLocal(t.exitTime + off(t.exitTime))}`),
+          kv('Held', fmtDuration(t.holdSec)),
+          kv('MAE', `${num(t.maePips, 1)} pips${t.maeR != null ? ` (${num(t.maeR, 2)}R)` : ''}`),
+          kv('MFE', `${num(t.mfePips, 1)} pips${t.mfeR != null ? ` (${num(t.mfeR, 2)}R)` : ''}`),
+          kv('Exit by', t.exitReason.toUpperCase()),
+        ),
+        img,
+        field('Tags', tags),
+        field('Notes', note),
+        field('Rating', rating),
+        save,
       ),
-      img,
-      field('Tags', tags), field('Notes', note), field('Rating', rating),
-      save,
-    ), { wide: true });
+      { wide: true },
+    );
     save.onclick = () => {
-      t.tags = tags.value.split(',').map((x) => x.trim()).filter(Boolean);
+      t.tags = tags.value
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
       t.note = note.value;
       t.rating = +rating.value || undefined;
       this.journalDirty.add(t.id);
@@ -2046,16 +2908,49 @@ export class Workspace implements PaneHost {
           };
           row.append(h('label', { class: 'mini-field' }, h('small', {}, k), i));
         }
-        row.append(h('button', { class: 'mini danger', onclick: () => { pane.cfg.indicators = pane.cfg.indicators.filter((x) => x !== cfg); pane.rebuildIndicators(); this.scheduleSave(); render(); } }, 'Remove'));
+        row.append(
+          h(
+            'button',
+            {
+              class: 'mini danger',
+              onclick: () => {
+                pane.cfg.indicators = pane.cfg.indicators.filter((x) => x !== cfg);
+                pane.rebuildIndicators();
+                this.scheduleSave();
+                render();
+              },
+            },
+            'Remove',
+          ),
+        );
         list.append(row);
       }
-      list.append(h('div', { class: 'chips' }, ...INDICATORS.map((d) =>
-        h('button', { class: 'chip', onclick: () => {
-          pane.cfg.indicators.push({ id: Math.random().toString(36).slice(2, 8), type: d.type, params: { ...d.params }, color: IND_COLORS[pane.cfg.indicators.length % IND_COLORS.length] });
-          pane.rebuildIndicators();
-          this.scheduleSave();
-          render();
-        } }, `+ ${d.label}`))));
+      list.append(
+        h(
+          'div',
+          { class: 'chips' },
+          ...INDICATORS.map((d) =>
+            h(
+              'button',
+              {
+                class: 'chip',
+                onclick: () => {
+                  pane.cfg.indicators.push({
+                    id: Math.random().toString(36).slice(2, 8),
+                    type: d.type,
+                    params: { ...d.params },
+                    color: IND_COLORS[pane.cfg.indicators.length % IND_COLORS.length],
+                  });
+                  pane.rebuildIndicators();
+                  this.scheduleSave();
+                  render();
+                },
+              },
+              `+ ${d.label}`,
+            ),
+          ),
+        ),
+      );
     };
     render();
     modal('Indicators', list, { wide: true });
@@ -2063,7 +2958,11 @@ export class Workspace implements PaneHost {
 
   private settingsModal() {
     const s = this.session;
-    const tz = h('select', {}, ...ZONES.concat(ZONES.includes(s.timezone) ? [] : [s.timezone]).map((z) => h('option', { value: z, selected: z === s.timezone }, z)));
+    const tz = h(
+      'select',
+      {},
+      ...ZONES.concat(ZONES.includes(s.timezone) ? [] : [s.timezone]).map((z) => h('option', { value: z, selected: z === s.timezone }, z)),
+    );
     const comm = h('input', { type: 'number', step: 0.01, value: s.commissionPerLot });
     const slFirst = h('input', { type: 'checkbox', checked: s.slFirst });
     const autoShot = h('input', { type: 'checkbox', checked: this.prefs.autoShot });
@@ -2076,26 +2975,42 @@ export class Workspace implements PaneHost {
       const dg = h('input', { type: 'number', step: 1, value: sp.digits, class: 'sm' });
       return { sym, spread, pip, cs, dg, row: h('tr', {}, h('td', {}, sym), h('td', {}, spread), h('td', {}, pip), h('td', {}, cs), h('td', {}, dg)) };
     });
-    const tbl = h('table', { class: 'tbl' }, h('thead', { html: '<tr><th>Symbol</th><th>Spread (pips)</th><th>Pip size</th><th>Contract / lot</th><th>Digits</th></tr>' }), h('tbody', {}, ...specRows.map((r) => r.row)));
+    const tbl = h(
+      'table',
+      { class: 'tbl' },
+      h('thead', { html: '<tr><th>Symbol</th><th>Spread (pips)</th><th>Pip size</th><th>Contract / lot</th><th>Digits</th></tr>' }),
+      h('tbody', {}, ...specRows.map((r) => r.row)),
+    );
     const save = h('button', { class: 'primary' }, 'Save settings');
-    const close = modal('Session settings', h('div', { class: 'stack' },
-      h('div', { class: 'row2' }, field('Chart timezone', tz), field('Commission per lot per side ($)', comm)),
-      h('label', { class: 'check' }, slFirst, ' If SL and TP are both touched inside one 1m bar, assume SL first (conservative)'),
-      h('label', { class: 'check' }, autoShot, ' Auto-screenshot the chart when a trade closes (journal)'),
-      h('label', { class: 'check' }, pauseClose, ' Pause playback when a trade closes'),
-      h('h4', {}, 'Instruments'), tbl,
-      save,
-    ), { wide: true });
+    const close = modal(
+      'Session settings',
+      h(
+        'div',
+        { class: 'stack' },
+        h('div', { class: 'row2' }, field('Chart timezone', tz), field('Commission per lot per side ($)', comm)),
+        h('label', { class: 'check' }, slFirst, ' If SL and TP are both touched inside one 1m bar, assume SL first (conservative)'),
+        h('label', { class: 'check' }, autoShot, ' Auto-screenshot the chart when a trade closes (journal)'),
+        h('label', { class: 'check' }, pauseClose, ' Pause playback when a trade closes'),
+        h('h4', {}, 'Instruments'),
+        tbl,
+        save,
+      ),
+      { wide: true },
+    );
     save.onclick = () => {
       // a pip size of 0 or "−1 digits" would stop this session from ever opening again: check before anything is changed
       let commission: number;
       const next: { sym: string; spread: number; pipSize: number; contractSize: number; digits: number }[] = [];
       try {
         commission = numField(comm, 'Commission', 0, 1000);
-        for (const r of specRows) next.push({
-          sym: r.sym, spread: numField(r.spread, `${r.sym} spread`, 0, 10000), pipSize: numField(r.pip, `${r.sym} pip size`, 1e-9, 1e6),
-          contractSize: numField(r.cs, `${r.sym} contract size`, 1e-9, 1e9), digits: numField(r.dg, `${r.sym} digits`, 0, 10, true),
-        });
+        for (const r of specRows)
+          next.push({
+            sym: r.sym,
+            spread: numField(r.spread, `${r.sym} spread`, 0, 10000),
+            pipSize: numField(r.pip, `${r.sym} pip size`, 1e-9, 1e6),
+            contractSize: numField(r.cs, `${r.sym} contract size`, 1e-9, 1e9),
+            digits: numField(r.dg, `${r.sym} digits`, 0, 10, true),
+          });
       } catch (e) {
         return toast((e as Error).message, 'err');
       }
@@ -2118,12 +3033,21 @@ export class Workspace implements PaneHost {
 
   private helpModal() {
     const rows: [string, string][] = [
-      ['Space', 'Play / pause'], ['→', 'Next candle on the active chart'], ['Shift + →', 'Next 1-minute tick'],
-      ['Shift + B / Shift + S', 'Market buy / sell with the ticket settings'], ['Shift + C', 'Close all positions'],
-      ['Type a number / "4h" / "d"', 'Change timeframe of the active chart'], ['Alt + T/H/V/R/F/L/S/M', 'Trend, H-line, V-line, Rect, Fib, Long, Short, Measure'],
-      ['Esc', 'Cursor tool / close dialog'], ['Delete / Backspace', 'Delete the selected drawing'], ['1 … 4 (with Alt)', 'Layout with 1–4 charts'],
+      ['Space', 'Play / pause'],
+      ['→', 'Next candle on the active chart'],
+      ['Shift + →', 'Next 1-minute tick'],
+      ['Shift + B / Shift + S', 'Market buy / sell with the ticket settings'],
+      ['Shift + C', 'Close all positions'],
+      ['Type a number / "4h" / "d"', 'Change timeframe of the active chart'],
+      ['Alt + T/H/V/R/F/L/S/M', 'Trend, H-line, V-line, Rect, Fib, Long, Short, Measure'],
+      ['Esc', 'Cursor tool / close dialog'],
+      ['Delete / Backspace', 'Delete the selected drawing'],
+      ['1 … 4 (with Alt)', 'Layout with 1–4 charts'],
     ];
-    modal('Keyboard shortcuts', h('table', { class: 'tbl' }, h('tbody', {}, ...rows.map(([k, v]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, v))))));
+    modal(
+      'Keyboard shortcuts',
+      h('table', { class: 'tbl' }, h('tbody', {}, ...rows.map(([k, v]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, v))))),
+    );
   }
 
   // ---- keyboard ----------------------------------------------------------------------
@@ -2142,7 +3066,8 @@ export class Workspace implements PaneHost {
       return;
     }
     if (k === '`') return (e.preventDefault(), this.toggleBottom());
-    if (this.session.live && (k === ' ' || k === 'ArrowRight')) return (e.preventDefault(), toast('Live market: time runs in real time — nothing to skip.', 'info'));
+    if (this.session.live && (k === ' ' || k === 'ArrowRight'))
+      return (e.preventDefault(), toast('Live market: time runs in real time — nothing to skip.', 'info'));
     if (k === ' ') return (e.preventDefault(), this.togglePlay());
     if (k === 'ArrowRight') return (e.preventDefault(), e.shiftKey ? this.stepBase() : this.stepCandle());
     if (k === 'Escape') return this.setTool('cursor');
@@ -2194,15 +3119,17 @@ export class Workspace implements PaneHost {
     }
     const dirtyJournal = new Set(this.journalDirty);
     this.journalDirty.clear();
-    void saveReplaySession(s, this.saved, dirtyJournal).then((res) => {
-      if (res === 'saved') return;
-      for (const id of dirtyJournal) this.journalDirty.add(id);
-      this.showConflict(res);
-    }).catch((e) => {
-      this.dirty = true;
-      for (const id of dirtyJournal) this.journalDirty.add(id);
-      toast('Could not save session: ' + e, 'err');
-    });
+    void saveReplaySession(s, this.saved, dirtyJournal)
+      .then((res) => {
+        if (res === 'saved') return;
+        for (const id of dirtyJournal) this.journalDirty.add(id);
+        this.showConflict(res);
+      })
+      .catch((e) => {
+        this.dirty = true;
+        for (const id of dirtyJournal) this.journalDirty.add(id);
+        toast('Could not save session: ' + e, 'err');
+      });
   };
 
   /** The stored session moved on without this tab: stop, say so, and never overwrite it. */
@@ -2213,12 +3140,23 @@ export class Workspace implements PaneHost {
     this.bannerEl?.remove();
     const reload = h('button', { class: 'primary' }, why === 'deleted' ? 'Back to sessions' : 'Reload this tab');
     reload.onclick = () => (why === 'deleted' ? this.nav('#/') : location.reload());
-    this.bannerEl = h('div', { class: 'nodata' }, h('div', { class: 'nodata-card conflict-card' },
-      h('h3', {}, why === 'deleted' ? 'This session was deleted' : 'This session was continued somewhere else'),
-      h('p', {}, why === 'deleted'
-        ? 'It was removed in another tab or on another device, so nothing more is saved from here.'
-        : 'It is open in another tab or was synced from another device, and that copy is newer. To protect it, this tab has stopped saving — reload to pick up the latest state.'),
-      h('div', { class: 'row-btns' }, reload)));
+    this.bannerEl = h(
+      'div',
+      { class: 'nodata' },
+      h(
+        'div',
+        { class: 'nodata-card conflict-card' },
+        h('h3', {}, why === 'deleted' ? 'This session was deleted' : 'This session was continued somewhere else'),
+        h(
+          'p',
+          {},
+          why === 'deleted'
+            ? 'It was removed in another tab or on another device, so nothing more is saved from here.'
+            : 'It is open in another tab or was synced from another device, and that copy is newer. To protect it, this tab has stopped saving — reload to pick up the latest state.',
+        ),
+        h('div', { class: 'row-btns' }, reload),
+      ),
+    );
     this.center.append(this.bannerEl);
   }
 }
@@ -2240,4 +3178,3 @@ function nextUtcHour(clock: number, hour: number) {
   if (dow === 0) t += 86400;
   return t;
 }
-

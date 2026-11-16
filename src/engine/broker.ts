@@ -23,7 +23,7 @@ export interface Order {
   leverage?: number;
 }
 
-export interface PartialClose {
+interface PartialClose {
   time: number;
   lots: number;
   price: number;
@@ -61,7 +61,7 @@ export interface Position {
 }
 
 /** A single order may not be worth more than this many times the account's equity. */
-export const MAX_NOTIONAL_X = 100000;
+const MAX_NOTIONAL_X = 100000;
 
 export interface Trade {
   id: number;
@@ -107,7 +107,7 @@ export interface BrokerConfig {
   feePct?: number;
 }
 
-export interface EquityPoint {
+interface EquityPoint {
   t: number;
   balance: number;
   equity: number;
@@ -144,8 +144,26 @@ export interface OrderRequest {
  * hand; the ticket says so when it is. Without it a JPY profit would be counted as dollars.
  */
 const APPROX_USD: Record<string, number> = {
-  EUR: 1.08, GBP: 1.27, AUD: 0.66, NZD: 0.6, CAD: 0.73, CHF: 1.13, JPY: 0.0067, SEK: 0.095, NOK: 0.093, DKK: 0.145,
-  SGD: 0.75, HKD: 0.128, ZAR: 0.054, MXN: 0.055, TRY: 0.029, PLN: 0.25, CZK: 0.043, HUF: 0.0027, CNH: 0.138, CNY: 0.138,
+  EUR: 1.08,
+  GBP: 1.27,
+  AUD: 0.66,
+  NZD: 0.6,
+  CAD: 0.73,
+  CHF: 1.13,
+  JPY: 0.0067,
+  SEK: 0.095,
+  NOK: 0.093,
+  DKK: 0.145,
+  SGD: 0.75,
+  HKD: 0.128,
+  ZAR: 0.054,
+  MXN: 0.055,
+  TRY: 0.029,
+  PLN: 0.25,
+  CZK: 0.043,
+  HUF: 0.0027,
+  CNH: 0.138,
+  CNY: 0.138,
 };
 
 /** How a symbol's prices turn into dollars. */
@@ -319,10 +337,12 @@ export class Broker {
     if (block) return { ok: false, error: block };
     if (!this.s.last[sym]) return { ok: false, error: 'No price yet for ' + sym };
     if (!(req.lots > 0)) return { ok: false, error: 'Lot size must be > 0' };
-    const bid = this.bid(sym), ask = this.ask(sym);
+    const bid = this.bid(sym),
+      ask = this.ask(sym);
     const px = req.type === 'market' ? (req.side === 'long' ? ask : bid) : req.price!;
     if (!(px > 0)) return { ok: false, error: 'Invalid price' };
-    const sl = req.sl ?? null, tp = req.tp ?? null;
+    const sl = req.sl ?? null,
+      tp = req.tp ?? null;
     if (req.side === 'long') {
       if (sl != null && sl >= px) return { ok: false, error: 'Stop loss must be below entry for a buy' };
       if (tp != null && tp <= px) return { ok: false, error: 'Take profit must be above entry for a buy' };
@@ -341,13 +361,24 @@ export class Broker {
     if (!(round2(req.lots) > 0)) return { ok: false, error: 'Lot size is below the minimum of 0.01' };
     // a slipped decimal or a stop of a fraction of a pip: nothing real is this large, and the
     // results would be too big to add up exactly
-    const notional = this.notional(sym, req.lots, px), cap = Math.max(1, this.equity()) * MAX_NOTIONAL_X;
+    const notional = this.notional(sym, req.lots, px),
+      cap = Math.max(1, this.equity()) * MAX_NOTIONAL_X;
     if (!isFinite(req.lots) || !isFinite(notional) || notional > cap)
-      return { ok: false, error: `That is ${isFinite(req.lots) && req.lots < 1e9 ? round2(req.lots).toLocaleString('en-US') : 'far too many'} lots — over ${MAX_NOTIONAL_X.toLocaleString('en-US')}× the account. Check the size and the stop distance.` };
+      return {
+        ok: false,
+        error: `That is ${isFinite(req.lots) && req.lots < 1e9 ? round2(req.lots).toLocaleString('en-US') : 'far too many'} lots — over ${MAX_NOTIONAL_X.toLocaleString('en-US')}× the account. Check the size and the stop distance.`,
+      };
     const lev = this.leveraged ? this.levFor(sym, req.leverage) : undefined;
     const common = {
-      symbol: sym, side: req.side, lots: round2(req.lots), sl, tp,
-      tags: req.tags ?? [], note: req.note ?? '', trailPips: req.trailPips ?? null, beAtR: req.beAtR ?? null,
+      symbol: sym,
+      side: req.side,
+      lots: round2(req.lots),
+      sl,
+      tp,
+      tags: req.tags ?? [],
+      note: req.note ?? '',
+      trailPips: req.trailPips ?? null,
+      beAtR: req.beAtR ?? null,
       ...(lev ? { leverage: lev } : {}),
     };
     if (lev) {
@@ -357,11 +388,15 @@ export class Broker {
       const fee = this.fee(sym, common.lots, px);
       const free = this.freeMargin();
       if (need + fee > free) {
-        const max = Math.floor((common.lots * Math.max(0, free) / (need + fee)) * 100) / 100;
-        return { ok: false, error: `Not enough margin: needs $${need.toFixed(2)}${fee > 0 ? ` plus $${fee.toFixed(2)} in fees` : ''}, free $${Math.max(0, free).toFixed(2)} at ${lev}×. ${max > 0 ? `The most you can open is ${max.toFixed(2)} lots — ` : ''}widen the stop, lower the risk or raise the leverage.` };
+        const max = Math.floor(((common.lots * Math.max(0, free)) / (need + fee)) * 100) / 100;
+        return {
+          ok: false,
+          error: `Not enough margin: needs $${need.toFixed(2)}${fee > 0 ? ` plus $${fee.toFixed(2)} in fees` : ''}, free $${Math.max(0, free).toFixed(2)} at ${lev}×. ${max > 0 ? `The most you can open is ${max.toFixed(2)} lots — ` : ''}widen the stop, lower the risk or raise the leverage.`,
+        };
       }
       const liq = this.liqPrice(sym, req.side, px, lev);
-      if (sl != null && (req.side === 'long' ? sl <= liq : sl >= liq)) return { ok: false, error: `Stop loss is past the liquidation price (${liq.toFixed(this.spec(sym).digits)}) — lower the leverage or tighten the stop` };
+      if (sl != null && (req.side === 'long' ? sl <= liq : sl >= liq))
+        return { ok: false, error: `Stop loss is past the liquidation price (${liq.toFixed(this.spec(sym).digits)}) — lower the leverage or tighten the stop` };
     }
     if (req.type === 'market') {
       const p = this.open({ ...common, entry: px, time: this.now(sym), orderType: 'market' });
@@ -373,14 +408,45 @@ export class Broker {
   }
 
   private open(a: {
-    symbol: string; side: Side; lots: number; entry: number; time: number; sl: number | null; tp: number | null;
-    tags: string[]; note: string; trailPips: number | null; beAtR: number | null; orderType: OrderType; leverage?: number;
+    symbol: string;
+    side: Side;
+    lots: number;
+    entry: number;
+    time: number;
+    sl: number | null;
+    tp: number | null;
+    tags: string[];
+    note: string;
+    trailPips: number | null;
+    beAtR: number | null;
+    orderType: OrderType;
+    leverage?: number;
   }): Position {
     const commission = this.fee(a.symbol, a.lots, a.entry);
     const p: Position = {
-      id: this.id(), symbol: a.symbol, side: a.side, lots: a.lots, initialLots: a.lots, entry: a.entry, entryTime: a.time,
-      sl: a.sl, tp: a.tp, initialSl: a.sl, commission, realized: 0, mae: 0, mfe: 0, tags: a.tags, note: a.note,
-      trailPips: a.trailPips, beAtR: a.beAtR, beDone: false, orderType: a.orderType, partials: [], openedBar: a.time, slMoved: null,
+      id: this.id(),
+      symbol: a.symbol,
+      side: a.side,
+      lots: a.lots,
+      initialLots: a.lots,
+      entry: a.entry,
+      entryTime: a.time,
+      sl: a.sl,
+      tp: a.tp,
+      initialSl: a.sl,
+      commission,
+      realized: 0,
+      mae: 0,
+      mfe: 0,
+      tags: a.tags,
+      note: a.note,
+      trailPips: a.trailPips,
+      beAtR: a.beAtR,
+      beDone: false,
+      orderType: a.orderType,
+      partials: [],
+      openedBar: a.time,
+      slMoved: null,
     };
     if (a.leverage) {
       p.leverage = a.leverage;
@@ -409,13 +475,18 @@ export class Broker {
     const dg = this.spec(o.symbol).digits;
     if (!(next.price > 0) || !isFinite(next.price)) return 'Enter a valid price';
     if (!(next.lots > 0)) return 'Lot size must be > 0';
-    const bid = this.bid(o.symbol), ask = this.ask(o.symbol);
+    const bid = this.bid(o.symbol),
+      ask = this.ask(o.symbol);
     const buy = o.side === 'long';
-    if (next.sl != null && (buy ? next.sl >= next.price : next.sl <= next.price)) return `Stop loss must be ${buy ? 'below' : 'above'} the entry for a ${buy ? 'buy' : 'sell'}`;
-    if (next.tp != null && (buy ? next.tp <= next.price : next.tp >= next.price)) return `Take profit must be ${buy ? 'above' : 'below'} the entry for a ${buy ? 'buy' : 'sell'}`;
+    if (next.sl != null && (buy ? next.sl >= next.price : next.sl <= next.price))
+      return `Stop loss must be ${buy ? 'below' : 'above'} the entry for a ${buy ? 'buy' : 'sell'}`;
+    if (next.tp != null && (buy ? next.tp <= next.price : next.tp >= next.price))
+      return `Take profit must be ${buy ? 'above' : 'below'} the entry for a ${buy ? 'buy' : 'sell'}`;
     if (patch.price !== undefined && isFinite(bid)) {
-      if (o.type === 'limit' && (buy ? next.price >= ask : next.price <= bid)) return `A ${buy ? 'buy' : 'sell'} limit must stay ${buy ? 'below' : 'above'} the current price (${(buy ? ask : bid).toFixed(dg)})`;
-      if (o.type === 'stop' && (buy ? next.price <= ask : next.price >= bid)) return `A ${buy ? 'buy' : 'sell'} stop must stay ${buy ? 'above' : 'below'} the current price (${(buy ? ask : bid).toFixed(dg)})`;
+      if (o.type === 'limit' && (buy ? next.price >= ask : next.price <= bid))
+        return `A ${buy ? 'buy' : 'sell'} limit must stay ${buy ? 'below' : 'above'} the current price (${(buy ? ask : bid).toFixed(dg)})`;
+      if (o.type === 'stop' && (buy ? next.price <= ask : next.price >= bid))
+        return `A ${buy ? 'buy' : 'sell'} stop must stay ${buy ? 'above' : 'below'} the current price (${(buy ? ask : bid).toFixed(dg)})`;
     }
     Object.assign(o, patch);
     return null;
@@ -431,8 +502,10 @@ export class Broker {
     if (!isFinite(px)) return null;
     const at = px.toFixed(this.spec(p.symbol).digits);
     if (kind === 'sl') {
-      if (buy ? price >= px : price <= px) return `Stop loss must be ${buy ? 'below' : 'above'} the current price (${at}) for a ${buy ? 'buy' : 'sell'} — there it would close the trade on the next bar`;
-      if (p.liq != null && (buy ? price <= p.liq : price >= p.liq)) return `Stop loss is past the liquidation price (${p.liq.toFixed(this.spec(p.symbol).digits)})`;
+      if (buy ? price >= px : price <= px)
+        return `Stop loss must be ${buy ? 'below' : 'above'} the current price (${at}) for a ${buy ? 'buy' : 'sell'} — there it would close the trade on the next bar`;
+      if (p.liq != null && (buy ? price <= p.liq : price >= p.liq))
+        return `Stop loss is past the liquidation price (${p.liq.toFixed(this.spec(p.symbol).digits)})`;
     } else if (buy ? price <= px : price >= px) return `Take profit must be ${buy ? 'above' : 'below'} the current price (${at}) for a ${buy ? 'buy' : 'sell'}`;
     return null;
   }
@@ -521,12 +594,29 @@ export class Broker {
     let why = reason;
     if (reason === 'sl' && p.slMoved) why = p.slMoved;
     const tr: Trade = {
-      id: p.id, symbol: p.symbol, side: p.side, lots: p.initialLots, entry: p.entry, exit, entryTime: p.entryTime, exitTime: t,
-      gross: p.realized, commission: p.commission, pnl, pips: (dir * (exit - p.entry)) / sp.pipSize,
-      risk, r: risk ? pnl / risk : null,
-      maePips: p.mae / sp.pipSize, mfePips: p.mfe / sp.pipSize,
-      maeR: riskDist ? p.mae / riskDist : null, mfeR: riskDist ? p.mfe / riskDist : null,
-      holdSec: t - p.entryTime, exitReason: why, orderType: p.orderType, tags: p.tags, note: p.note,
+      id: p.id,
+      symbol: p.symbol,
+      side: p.side,
+      lots: p.initialLots,
+      entry: p.entry,
+      exit,
+      entryTime: p.entryTime,
+      exitTime: t,
+      gross: p.realized,
+      commission: p.commission,
+      pnl,
+      pips: (dir * (exit - p.entry)) / sp.pipSize,
+      risk,
+      r: risk ? pnl / risk : null,
+      maePips: p.mae / sp.pipSize,
+      mfePips: p.mfe / sp.pipSize,
+      maeR: riskDist ? p.mae / riskDist : null,
+      mfeR: riskDist ? p.mfe / riskDist : null,
+      holdSec: t - p.entryTime,
+      exitReason: why,
+      orderType: p.orderType,
+      tags: p.tags,
+      note: p.note,
       balanceAfter: this.s.balance,
     };
     this.s.trades.push(tr);
@@ -586,7 +676,9 @@ export class Broker {
       if (od.symbol !== sym) continue;
       let fill: number | null = null;
       if (od.side === 'long') {
-        const aO = o + spr, aH = h + spr, aL = l + spr;
+        const aO = o + spr,
+          aH = h + spr,
+          aL = l + spr;
         if (od.type === 'limit' && aL <= od.price) fill = Math.min(od.price, aO);
         if (od.type === 'stop' && aH >= od.price) fill = Math.max(od.price, aO);
       } else {

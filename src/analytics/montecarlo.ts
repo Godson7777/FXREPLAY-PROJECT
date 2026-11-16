@@ -20,9 +20,17 @@ export interface PathSimOptions {
   ruinLevels: number[];
 }
 
-export const DEFAULT_PATH_OPTS: PathSimOptions = { runs: 1000, horizon: 100, mode: 'bootstrap', skip: 0, friction: 0, seed: 7, ruinLevels: [0.1, 0.2, 0.3, 0.5] };
+export const DEFAULT_PATH_OPTS: PathSimOptions = {
+  runs: 1000,
+  horizon: 100,
+  mode: 'bootstrap',
+  skip: 0,
+  friction: 0,
+  seed: 7,
+  ruinLevels: [0.1, 0.2, 0.3, 0.5],
+};
 
-export interface Quantiles {
+interface Quantiles {
   p5: number;
   p25: number;
   p50: number;
@@ -51,7 +59,9 @@ export function simulatePaths(rets: number[], friction: number[], o: PathSimOpti
   const runs = Math.max(50, Math.round(o.runs));
   const rand = rng(o.seed);
   const paths = new Float32Array(runs * (H + 1));
-  const finals = new Float64Array(runs), dds = new Float64Array(runs), streaks = new Float64Array(runs);
+  const finals = new Float64Array(runs),
+    dds = new Float64Array(runs),
+    streaks = new Float64Array(runs);
   const ruinHits = o.ruinLevels.map(() => 0);
   const idx = new Int32Array(n);
   let profit = 0;
@@ -65,7 +75,11 @@ export function simulatePaths(rets: number[], friction: number[], o: PathSimOpti
         idx[j] = tmp;
       }
     }
-    let e = 1, peak = 1, mdd = 0, streak = 0, maxStreak = 0;
+    let e = 1,
+      peak = 1,
+      mdd = 0,
+      streak = 0,
+      maxStreak = 0;
     const base = r * (H + 1);
     paths[base] = 1;
     for (let i = 1; i <= H; i++) {
@@ -94,7 +108,13 @@ export function simulatePaths(rets: number[], friction: number[], o: PathSimOpti
     });
   }
   const col = new Float64Array(runs);
-  const bands = { p5: new Float64Array(H + 1), p25: new Float64Array(H + 1), p50: new Float64Array(H + 1), p75: new Float64Array(H + 1), p95: new Float64Array(H + 1) };
+  const bands = {
+    p5: new Float64Array(H + 1),
+    p25: new Float64Array(H + 1),
+    p50: new Float64Array(H + 1),
+    p75: new Float64Array(H + 1),
+    p95: new Float64Array(H + 1),
+  };
   for (let i = 0; i <= H; i++) {
     for (let r = 0; r < runs; r++) col[r] = paths[r * (H + 1) + i];
     col.sort();
@@ -108,10 +128,27 @@ export function simulatePaths(rets: number[], friction: number[], o: PathSimOpti
   const ds = Float64Array.from(dds).sort();
   const ss = Float64Array.from(streaks).sort();
   return {
-    runs, horizon: H, mode: o.mode, bands,
-    final: { p5: quantileSorted(fs, 0.05), p25: quantileSorted(fs, 0.25), p50: quantileSorted(fs, 0.5), p75: quantileSorted(fs, 0.75), p95: quantileSorted(fs, 0.95), mean: fs.reduce((a, b) => a + b, 0) / runs },
+    runs,
+    horizon: H,
+    mode: o.mode,
+    bands,
+    final: {
+      p5: quantileSorted(fs, 0.05),
+      p25: quantileSorted(fs, 0.25),
+      p50: quantileSorted(fs, 0.5),
+      p75: quantileSorted(fs, 0.75),
+      p95: quantileSorted(fs, 0.95),
+      mean: fs.reduce((a, b) => a + b, 0) / runs,
+    },
     profitProb: profit / runs,
-    dd: { p50: quantileSorted(ds, 0.5), p75: quantileSorted(ds, 0.75), p95: quantileSorted(ds, 0.95), p99: quantileSorted(ds, 0.99), mean: ds.reduce((a, b) => a + b, 0) / runs, max: ds[ds.length - 1] },
+    dd: {
+      p50: quantileSorted(ds, 0.5),
+      p75: quantileSorted(ds, 0.75),
+      p95: quantileSorted(ds, 0.95),
+      p99: quantileSorted(ds, 0.99),
+      mean: ds.reduce((a, b) => a + b, 0) / runs,
+      max: ds[ds.length - 1],
+    },
     ddHist: histogram(ds),
     ruin: o.ruinLevels.map((level, i) => ({ level, prob: ruinHits[i] / runs })),
     lossStreak: { p50: quantileSorted(ss, 0.5), p95: quantileSorted(ss, 0.95) },
@@ -141,7 +178,8 @@ export function ruinProbability(rets: number[], level: number, runs = 500, horiz
   const rand = rng(seed);
   let hits = 0;
   for (let r = 0; r < runs; r++) {
-    let e = 1, peak = 1;
+    let e = 1,
+      peak = 1;
     for (let i = 0; i < horizon; i++) {
       e = Math.max(0, e * (1 + rets[Math.floor(rand() * n)]));
       if (e > peak) peak = e;
@@ -177,10 +215,14 @@ export function riskSizing(units: number[], risks: number[], runs = 1000, horizo
   if (n < 5) return [];
   return risks.map((risk, ri) => {
     const rand = rng(seed + ri);
-    const fin = new Float64Array(runs), dds = new Float64Array(runs);
-    let p20 = 0, ruin = 0;
+    const fin = new Float64Array(runs),
+      dds = new Float64Array(runs);
+    let p20 = 0,
+      ruin = 0;
     for (let r = 0; r < runs; r++) {
-      let e = 1, peak = 1, mdd = 0;
+      let e = 1,
+        peak = 1,
+        mdd = 0;
       for (let i = 0; i < horizon; i++) {
         e = Math.max(0, e * (1 + units[Math.floor(rand() * n)] * risk));
         if (e > peak) peak = e;
@@ -195,8 +237,14 @@ export function riskSizing(units: number[], risks: number[], runs = 1000, horizo
     fin.sort();
     dds.sort();
     return {
-      risk, medianReturn: quantileSorted(fin, 0.5), p5Return: quantileSorted(fin, 0.05), p95Return: quantileSorted(fin, 0.95),
-      medianDD: quantileSorted(dds, 0.5), p95DD: quantileSorted(dds, 0.95), probDD20: p20 / runs, probRuin: ruin / runs,
+      risk,
+      medianReturn: quantileSorted(fin, 0.5),
+      p5Return: quantileSorted(fin, 0.05),
+      p95Return: quantileSorted(fin, 0.95),
+      medianDD: quantileSorted(dds, 0.5),
+      p95DD: quantileSorted(dds, 0.95),
+      probDD20: p20 / runs,
+      probRuin: ruin / runs,
     };
   });
 }
@@ -232,10 +280,15 @@ export function propFirmSim(rets: number[], dayCounts: number[], rules: PropRule
   const n = rets.length;
   if (n < 5 || !dayCounts.length) return null;
   const rand = rng(seed);
-  let pass = 0, failD = 0, failT = 0;
+  let pass = 0,
+    failD = 0,
+    failT = 0;
   const passDays: number[] = [];
   for (let r = 0; r < runs; r++) {
-    let b = 1, hw = 1, tradingDays = 0, outcome: 'pass' | 'daily' | 'total' | null = null;
+    let b = 1,
+      hw = 1,
+      tradingDays = 0,
+      outcome: 'pass' | 'daily' | 'total' | null = null;
     for (let d = 1; d <= maxDays && !outcome; d++) {
       const c = dayCounts[Math.floor(rand() * dayCounts.length)];
       const dayStart = b;
@@ -264,8 +317,14 @@ export function propFirmSim(rets: number[], dayCounts: number[], rules: PropRule
   }
   const pd = Float64Array.from(passDays).sort();
   return {
-    runs, maxDays,
-    pass: pass / runs, failDaily: failD / runs, failTotal: failT / runs, unfinished: (runs - pass - failD - failT) / runs,
-    medianDays: pd.length ? quantileSorted(pd, 0.5) : null, p25Days: pd.length ? quantileSorted(pd, 0.25) : null, p75Days: pd.length ? quantileSorted(pd, 0.75) : null,
+    runs,
+    maxDays,
+    pass: pass / runs,
+    failDaily: failD / runs,
+    failTotal: failT / runs,
+    unfinished: (runs - pass - failD - failT) / runs,
+    medianDays: pd.length ? quantileSorted(pd, 0.5) : null,
+    p25Days: pd.length ? quantileSorted(pd, 0.25) : null,
+    p75Days: pd.length ? quantileSorted(pd, 0.75) : null,
   };
 }

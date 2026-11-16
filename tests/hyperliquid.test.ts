@@ -50,7 +50,10 @@ describe('hyperliquid helpers', () => {
   });
 
   it('reserves capacity without losing data', () => {
-    const b = barsFromRows([[60, 1, 1, 1, 1, 1], [120, 2, 2, 2, 2, 2]]);
+    const b = barsFromRows([
+      [60, 1, 1, 1, 1, 1],
+      [120, 2, 2, 2, 2, 2],
+    ]);
     reserveBars(b, 5000);
     expect(b.t.length).toBeGreaterThanOrEqual(5002);
     expect([...b.c.subarray(0, 2)]).toEqual([1, 2]);
@@ -77,7 +80,12 @@ describe('hyperliquid helpers', () => {
 describe('session date range', () => {
   const fmt = (t: number) => String(t);
   it('finds the common window', () => {
-    expect(dataWindow([{ from: 10, to: 100 }, { from: 20, to: 90 }])).toEqual({ from: 20, to: 90 });
+    expect(
+      dataWindow([
+        { from: 10, to: 100 },
+        { from: 20, to: 90 },
+      ]),
+    ).toEqual({ from: 20, to: 90 });
   });
   it('rejects a start after the data ends', () => {
     expect(checkRange({ from: 0, to: 100 }, 150, null, fmt)).toMatch(/Start must be between 0 and 100/);
@@ -103,21 +111,48 @@ class FakeWS {
   constructor(public url: string) {
     FakeWS.all.push(this);
     setTimeout(() => {
-      if (FakeWS.fail) { this.readyState = 3; this.onerror?.(); this.onclose?.(); } else { this.readyState = 1; this.onopen?.(); }
+      if (FakeWS.fail) {
+        this.readyState = 3;
+        this.onerror?.();
+        this.onclose?.();
+      } else {
+        this.readyState = 1;
+        this.onopen?.();
+      }
     }, 10);
   }
-  send(m: string) { this.sent.push(m); }
-  close() { if (this.readyState === 3) return; this.readyState = 3; this.onclose?.(); }
+  send(m: string) {
+    this.sent.push(m);
+  }
+  close() {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.onclose?.();
+  }
 }
 
 describe('live feed resilience', () => {
-  beforeEach(() => { vi.useFakeTimers(); FakeWS.all = []; FakeWS.fail = true; vi.stubGlobal('WebSocket', FakeWS); });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWS.all = [];
+    FakeWS.fail = true;
+    vi.stubGlobal('WebSocket', FakeWS);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   const make = (poll: () => Promise<number[][]>) => {
-    const st: FS[] = [], candles: number[][] = [], trades: number[][] = [];
+    const st: FS[] = [],
+      candles: number[][] = [],
+      trades: number[][] = [];
     let opened = 0;
-    const feed = new LiveFeed('BTC', { status: (s) => st.push(s), candle: (r) => candles.push(r), trade: (t, px) => trades.push([t, px]), opened: () => opened++ }, { poll, pollMs: 3000 });
+    const feed = new LiveFeed(
+      'BTC',
+      { status: (s) => st.push(s), candle: (r) => candles.push(r), trade: (t, px) => trades.push([t, px]), opened: () => opened++ },
+      { poll, pollMs: 3000 },
+    );
     return { feed, st, candles, trades, opened: () => opened };
   };
 
@@ -143,7 +178,9 @@ describe('live feed resilience', () => {
   });
 
   it('reports offline when polling fails too', async () => {
-    const x = make(async () => { throw new Error('down'); });
+    const x = make(async () => {
+      throw new Error('down');
+    });
     await vi.advanceTimersByTimeAsync(12000);
     expect(x.st).toContain('offline');
     x.feed.close();
@@ -177,10 +214,19 @@ describe('live feed resilience', () => {
 
 describe('builder-deployed markets', () => {
   it('lists own perps and builder markets from one request, and names them', async () => {
-    const f = (async () => ({ ok: true, status: 200, json: async () => [
-      { universe: [{ name: 'BTC', szDecimals: 5, maxLeverage: 40 }, { name: 'OLD', szDecimals: 1, maxLeverage: 3, isDelisted: true }] },
-      { universe: [{ name: 'xyz:GOLD', szDecimals: 4, maxLeverage: 20 }] },
-    ] })) as unknown as typeof fetch;
+    const f = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          universe: [
+            { name: 'BTC', szDecimals: 5, maxLeverage: 40 },
+            { name: 'OLD', szDecimals: 1, maxLeverage: 3, isDelisted: true },
+          ],
+        },
+        { universe: [{ name: 'xyz:GOLD', szDecimals: 4, maxLeverage: 20 }] },
+      ],
+    })) as unknown as typeof fetch;
     const coins = await coinsFor(f);
     expect(coins.map((c) => c.name)).toEqual(['BTC', 'xyz:GOLD']);
     expect(coins[1].dex).toBe('xyz');

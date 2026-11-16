@@ -17,11 +17,26 @@ describe('provider naming', () => {
     expect(sourceOf('bybit-linear')).toBe('bybit');
   });
   it('infers how to refresh older datasets', () => {
-    const m = (o: Partial<DatasetMeta>) => ({ id: 'X', symbol: 'X', source: 'csv', resolution: 60, from: 0, to: 0, count: 0, spec: { symbol: 'X', pipSize: 1, contractSize: 1, digits: 2 }, createdAt: 0, ...o }) as DatasetMeta;
+    const m = (o: Partial<DatasetMeta>) =>
+      ({
+        id: 'X',
+        symbol: 'X',
+        source: 'csv',
+        resolution: 60,
+        from: 0,
+        to: 0,
+        count: 0,
+        spec: { symbol: 'X', pipSize: 1, contractSize: 1, digits: 2 },
+        createdAt: 0,
+        ...o,
+      }) as DatasetMeta;
     expect(refreshSource(m({ id: 'BTCUSDT.P', source: 'binance' }))).toEqual({ provider: 'binance-futures', symbol: 'BTCUSDT' });
     expect(refreshSource(m({ id: 'HL-ETH', source: 'hyperliquid' }))).toEqual({ provider: 'hyperliquid', symbol: 'ETH' });
     expect(refreshSource(m({ source: 'csv' }))).toBeNull();
-    expect(refreshSource(m({ source: 'twelvedata', provider: { provider: 'twelvedata', symbol: 'XAU/USD' } }))).toEqual({ provider: 'twelvedata', symbol: 'XAU/USD' });
+    expect(refreshSource(m({ source: 'twelvedata', provider: { provider: 'twelvedata', symbol: 'XAU/USD' } }))).toEqual({
+      provider: 'twelvedata',
+      symbol: 'XAU/USD',
+    });
   });
 });
 
@@ -55,7 +70,8 @@ describe('OKX', () => {
       calls++;
       const after = +new URL(u).searchParams.get('after')!;
       const data = [];
-      for (let t = Math.ceil(after / 60000) * 60000 - 60000; t >= 0 && data.length < 100; t -= 60000) data.push([String(t), '1', '2', '0.5', '1.5', '3', '0', '0', '1']);
+      for (let t = Math.ceil(after / 60000) * 60000 - 60000; t >= 0 && data.length < 100; t -= 60000)
+        data.push([String(t), '1', '2', '0.5', '1.5', '3', '0', '0', '1']);
       return json({ code: '0', msg: '', data });
     }) as typeof fetch;
     const b = await fetchCandles('okx', 'BTC-USDT', T0, T0 + 250 * MIN, { fetch: f, sleep: noSleep });
@@ -74,7 +90,9 @@ describe('Twelve Data', () => {
     });
   };
   it('needs a key', async () => {
-    await expect(fetchCandles('twelvedata', 'XAU/USD', 0, 600, { key: '', fetch: (async () => json({})) as unknown as typeof fetch })).rejects.toThrow(/API key/);
+    await expect(fetchCandles('twelvedata', 'XAU/USD', 0, 600, { key: '', fetch: (async () => json({})) as unknown as typeof fetch })).rejects.toThrow(
+      /API key/,
+    );
   });
   it('pages backwards, paces requests and waits out a 429', async () => {
     const sleeps: number[] = [];

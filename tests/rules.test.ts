@@ -5,7 +5,15 @@ import { offsetFn } from '../src/core/tz';
 
 const spec = { EURUSD: { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 5 } };
 const utc = offsetFn('UTC');
-const rules: ChallengeRules = { name: 't', profitTarget: 10, maxDailyLoss: 5, maxTotalLoss: 10, minTradingDays: 2, trailingDrawdown: false, stopOnBreach: true };
+const rules: ChallengeRules = {
+  name: 't',
+  profitTarget: 10,
+  maxDailyLoss: 5,
+  maxTotalLoss: 10,
+  minTradingDays: 2,
+  trailingDrawdown: false,
+  stopOnBreach: true,
+};
 const D = 86400;
 
 function setup(r = rules) {

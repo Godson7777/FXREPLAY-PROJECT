@@ -4,7 +4,7 @@ import type { Side } from './broker';
  * Math behind the Long/Short position tool (TradingView-style): risk sizing, the
  * target/stop read-outs and which level a replay reaches first.
  */
-export type RiskMode = 'pct' | 'usd' | 'lots';
+type RiskMode = 'pct' | 'usd' | 'lots';
 
 export interface PosSettings {
   riskMode: RiskMode;
@@ -52,15 +52,22 @@ export function lotsFor(l: PosLevels, s: PosSettings, env: PosEnv): number {
 
 export function posCalc(l: PosLevels, s: PosSettings, env: PosEnv): PosCalc {
   const lots = lotsFor(l, s, env);
-  const slD = Math.abs(l.entry - l.sl), tpD = Math.abs(l.tp - l.entry);
+  const slD = Math.abs(l.entry - l.sl),
+    tpD = Math.abs(l.tp - l.entry);
   const dir = l.side === 'long' ? 1 : -1;
   const invalid = dir * (l.entry - l.sl) <= 0 || dir * (l.tp - l.entry) <= 0;
   const riskUsd = env.value(slD, lots, l.sl);
   const rewardUsd = env.value(tpD, lots, l.tp);
   return {
-    lots, riskUsd, rewardUsd, rr: slD ? tpD / slD : 0,
-    slPips: slD / env.pipSize, tpPips: tpD / env.pipSize,
-    slPct: (slD / l.entry) * 100, tpPct: (tpD / l.entry) * 100, invalid,
+    lots,
+    riskUsd,
+    rewardUsd,
+    rr: slD ? tpD / slD : 0,
+    slPips: slD / env.pipSize,
+    tpPips: tpD / env.pipSize,
+    slPct: (slD / l.entry) * 100,
+    tpPct: (tpD / l.entry) * 100,
+    invalid,
   };
 }
 

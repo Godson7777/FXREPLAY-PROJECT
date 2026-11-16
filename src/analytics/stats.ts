@@ -74,8 +74,12 @@ export function computeStats(trades: Trade[], initialBalance: number): Stats {
   const lossR = T.filter((t) => t.r != null && t.pnl < 0).map((t) => t.r!);
 
   // equity & drawdown (trade-by-trade on closed balance)
-  let bal = initialBalance, peak = initialBalance, peakT = T[0]?.entryTime ?? 0;
-  let maxDD = 0, maxDDPct = 0, maxDur = 0;
+  let bal = initialBalance,
+    peak = initialBalance,
+    peakT = T[0]?.entryTime ?? 0;
+  let maxDD = 0,
+    maxDDPct = 0,
+    maxDur = 0;
   const rets: number[] = [];
   for (const t of T) {
     const before = bal;
@@ -93,10 +97,13 @@ export function computeStats(trades: Trade[], initialBalance: number): Stats {
   if (T.length) maxDur = Math.max(maxDur, T[T.length - 1].exitTime - peakT);
 
   // streaks
-  let ws = 0, ls = 0, mws = 0, mls = 0;
+  let ws = 0,
+    ls = 0,
+    mws = 0,
+    mls = 0;
   for (const t of T) {
-    if (t.pnl > 0) (ws++, (ls = 0));
-    else if (t.pnl < 0) (ls++, (ws = 0));
+    if (t.pnl > 0) ws++, (ls = 0);
+    else if (t.pnl < 0) ls++, (ws = 0);
     mws = Math.max(mws, ws);
     mls = Math.max(mls, ls);
   }
@@ -185,42 +192,6 @@ export function computeStats(trades: Trade[], initialBalance: number): Stats {
     finalBalance: last ? initialBalance + netPnl : initialBalance,
     initialBalance,
   };
-}
-
-// ---- breakdowns -------------------------------------------------------------
-
-export interface Group {
-  key: string;
-  trades: number;
-  wins: number;
-  pnl: number;
-  winRate: number;
-  avgR: number | null;
-  pf: number;
-}
-
-export function groupBy<T extends Trade>(trades: T[], keyFn: (t: T) => string | string[], order?: string[]): Group[] {
-  const map = new Map<string, T[]>();
-  for (const t of trades) {
-    const ks = keyFn(t);
-    for (const k of Array.isArray(ks) ? ks : [ks]) {
-      if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push(t);
-    }
-  }
-  const keys = order ? order.filter((k) => map.has(k)) : [...map.keys()].sort();
-  if (order) for (const k of map.keys()) if (!order.includes(k)) keys.push(k);
-  return keys.map((key) => {
-    const a = map.get(key)!;
-    const w = a.filter((t) => t.pnl > 0);
-    const gp = w.reduce((s, t) => s + t.pnl, 0);
-    const gl = -a.filter((t) => t.pnl < 0).reduce((s, t) => s + t.pnl, 0);
-    const rs = a.filter((t) => t.r != null).map((t) => t.r!);
-    return {
-      key, trades: a.length, wins: w.length, pnl: gp - gl, winRate: w.length / a.length,
-      avgR: rs.length ? mean(rs) : null, pf: gl ? gp / gl : gp ? Infinity : 0,
-    };
-  });
 }
 
 export const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

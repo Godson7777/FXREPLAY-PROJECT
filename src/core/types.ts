@@ -9,15 +9,6 @@ export interface Bars {
   n: number;
 }
 
-export interface Candle {
-  time: number; // display time (local-shifted seconds)
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
 export interface InstrumentSpec {
   symbol: string;
   /** size of one pip in price units (EURUSD 0.0001, USDJPY 0.01, XAUUSD 0.1, BTC 1) */
@@ -63,7 +54,8 @@ export function barsFromRows(rows: number[][]): Bars {
   for (const r of rows) {
     // a bar needs a time, an open and a close; a missing or broken high/low falls back to them
     if (!(r[0] > 0) || !(r[1] > 0) || !(r[4] > 0) || !isFinite(r[1]) || !isFinite(r[4])) continue;
-    const hi = r[2] > 0 && isFinite(r[2]) ? r[2] : r[1], lo = r[3] > 0 && isFinite(r[3]) ? r[3] : r[1];
+    const hi = r[2] > 0 && isFinite(r[2]) ? r[2] : r[1],
+      lo = r[3] > 0 && isFinite(r[3]) ? r[3] : r[1];
     const i = n > 0 && b.t[n - 1] === r[0] ? n - 1 : n++;
     b.t[i] = r[0];
     b.o[i] = r[1];
@@ -74,18 +66,6 @@ export function barsFromRows(rows: number[][]): Bars {
   }
   b.n = n;
   return b;
-}
-
-export function sliceBars(b: Bars, from: number, to: number): Bars {
-  return {
-    t: b.t.slice(from, to),
-    o: b.o.slice(from, to),
-    h: b.h.slice(from, to),
-    l: b.l.slice(from, to),
-    c: b.c.slice(from, to),
-    v: b.v.slice(from, to),
-    n: Math.max(0, to - from),
-  };
 }
 
 export function mergeBars(a: Bars, b: Bars): Bars {

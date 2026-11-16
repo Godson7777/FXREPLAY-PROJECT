@@ -13,7 +13,10 @@ import { barsFromRows, type Bars } from '../core/types';
  * Timestamps without a zone of their own are interpreted in `sourceUtcOffsetHours` (default 0 = UTC).
  */
 export function parseCsv(text: string, sourceUtcOffsetHours = 0): Bars {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim().length);
+  const lines = text
+    .replace(/^﻿/, '')
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length);
   if (!lines.length) throw new Error('File is empty');
   const delim = pickDelim(lines[0]);
   let first = 0;
@@ -26,7 +29,7 @@ export function parseCsv(text: string, sourceUtcOffsetHours = 0): Bars {
     if (date < 0) date = find(/date|time/);
     const time = head.findIndex((x, i) => i !== date && /^time$/.test(x));
     cols = {
-      date: date >= 0 ? date : 0,
+      date: Math.max(date, 0),
       time: time >= 0 && date >= 0 && /date|dtyyyymmdd/.test(head[date]) && !/time/.test(head[date]) ? time : -1,
       o: find(/^open$|^o$/),
       h: find(/^high$|^h$/),
@@ -45,7 +48,8 @@ export function parseCsv(text: string, sourceUtcOffsetHours = 0): Bars {
   // One file uses one style. Decide from a sample, so a line is never read differently from its neighbours:
   //  - 01/13/2024 can only be month first; 13/01/2024 only day first
   //  - 42,283.58 means commas group thousands; otherwise a comma inside a number is the decimal mark
-  let monthFirst = false, usThousands = false;
+  let monthFirst = false,
+    usThousands = false;
   const step = Math.max(1, Math.floor((lines.length - first) / 400));
   for (let i = first; i < lines.length; i += step) {
     const p = splitLine(lines[i], delim);
@@ -57,7 +61,12 @@ export function parseCsv(text: string, sourceUtcOffsetHours = 0): Bars {
     if (s == null) return NaN;
     let x = s.replace(/\s/g, '');
     if (!x) return NaN;
-    if (x.includes(',')) x = usThousands ? x.replace(/,/g, '') : x.indexOf('.') >= 0 && x.indexOf('.') < x.lastIndexOf(',') ? x.replace(/\./g, '').replace(',', '.') : x.replace(',', '.');
+    if (x.includes(','))
+      x = usThousands
+        ? x.replace(/,/g, '')
+        : x.indexOf('.') >= 0 && x.indexOf('.') < x.lastIndexOf(',')
+          ? x.replace(/\./g, '').replace(',', '.')
+          : x.replace(',', '.');
     return +x;
   };
 
@@ -72,7 +81,14 @@ export function parseCsv(text: string, sourceUtcOffsetHours = 0): Bars {
       continue;
     }
     // a stamp that names its own zone (or counts seconds since 1970) is already UTC
-    rows.push([st.abs ? st.t : st.t - offSec, num(p[cols.o]), cols.h >= 0 ? num(p[cols.h]) : NaN, cols.l >= 0 ? num(p[cols.l]) : NaN, num(p[cols.c]), cols.v >= 0 ? num(p[cols.v]) || 0 : 0]);
+    rows.push([
+      st.abs ? st.t : st.t - offSec,
+      num(p[cols.o]),
+      cols.h >= 0 ? num(p[cols.h]) : NaN,
+      cols.l >= 0 ? num(p[cols.l]) : NaN,
+      num(p[cols.c]),
+      cols.v >= 0 ? num(p[cols.v]) || 0 : 0,
+    ]);
   }
   if (!rows.length) throw new Error(`No parseable rows (${bad} bad lines)`);
   const bars = barsFromRows(rows);
@@ -82,7 +98,8 @@ export function parseCsv(text: string, sourceUtcOffsetHours = 0): Bars {
 
 function pickDelim(line: string): string {
   const cands = [',', ';', '\t', '|'];
-  let best = ',', bc = 0;
+  let best = ',',
+    bc = 0;
   for (const d of cands) {
     const c = line.split(d).length;
     if (c > bc) (bc = c), (best = d);
@@ -94,7 +111,8 @@ function pickDelim(line: string): string {
 function splitLine(line: string, delim: string): string[] {
   if (!line.includes('"')) return line.split(delim).map((x) => x.trim());
   const out: string[] = [];
-  let cur = '', q = false;
+  let cur = '',
+    q = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
@@ -143,7 +161,8 @@ function stamp(raw: string | undefined, monthFirst = false): { t: number; abs: b
   if ((m = YMD.exec(s))) return { t: Date.UTC(+m[1], +m[2] - 1, +m[3], hour(m[4], m[7]), +(m[5] || 0), +(m[6] || 0)) / 1000, abs: false };
   // 02.01.2024 00:00:00.000 (day first) | 01/13/2024 (month first: the caller decides per file, a 13 decides per line)
   if ((m = DMY.exec(s))) {
-    let d = +m[1], mo = +m[3];
+    let d = +m[1],
+      mo = +m[3];
     if (m[2] !== '.' && (monthFirst || (d <= 12 && mo > 12))) [d, mo] = [mo, d];
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
     return { t: Date.UTC(+m[4], mo - 1, d, hour(m[5], m[8]), +(m[6] || 0), +(m[7] || 0)) / 1000, abs: false };

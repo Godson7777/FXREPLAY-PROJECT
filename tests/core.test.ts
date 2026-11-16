@@ -94,8 +94,7 @@ describe('csv', () => {
 
 describe('broker', () => {
   const spec = { EURUSD: { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 5 } };
-  const mk = (slFirst = true) =>
-    new Broker({ initialBalance: 10000, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst }, spec, newBrokerState(10000));
+  const mk = (slFirst = true) => new Broker({ initialBalance: 10000, commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst }, spec, newBrokerState(10000));
 
   it('fills market orders and hits TP', () => {
     const br = mk();
@@ -166,7 +165,11 @@ describe('broker', () => {
   });
 
   it('converts P&L for USD-base pairs', () => {
-    const br = new Broker({ initialBalance: 1e4, commissionPerLot: 0, spreadPips: {}, slFirst: true }, { USDJPY: { symbol: 'USDJPY', pipSize: 0.01, contractSize: 100000, digits: 3 } }, newBrokerState(1e4));
+    const br = new Broker(
+      { initialBalance: 1e4, commissionPerLot: 0, spreadPips: {}, slFirst: true },
+      { USDJPY: { symbol: 'USDJPY', pipSize: 0.01, contractSize: 100000, digits: 3 } },
+      newBrokerState(1e4),
+    );
     br.setPrice('USDJPY', 0, 150);
     br.place({ symbol: 'USDJPY', side: 'long', type: 'market', lots: 1 });
     br.setPrice('USDJPY', 60, 151);
@@ -178,9 +181,30 @@ describe('broker', () => {
 describe('stats', () => {
   it('computes core metrics', () => {
     const mkT = (pnl: number, i: number) => ({
-      id: i, symbol: 'X', side: 'long' as const, lots: 1, entry: 1, exit: 1, entryTime: i * 3600, exitTime: i * 3600 + 60,
-      gross: pnl, commission: 0, pnl, pips: 0, risk: 100, r: pnl / 100, maePips: 0, mfePips: 0, maeR: 0.5, mfeR: 1, holdSec: 60,
-      exitReason: 'tp' as const, orderType: 'market' as const, tags: [], note: '', balanceAfter: 0,
+      id: i,
+      symbol: 'X',
+      side: 'long' as const,
+      lots: 1,
+      entry: 1,
+      exit: 1,
+      entryTime: i * 3600,
+      exitTime: i * 3600 + 60,
+      gross: pnl,
+      commission: 0,
+      pnl,
+      pips: 0,
+      risk: 100,
+      r: pnl / 100,
+      maePips: 0,
+      mfePips: 0,
+      maeR: 0.5,
+      mfeR: 1,
+      holdSec: 60,
+      exitReason: 'tp' as const,
+      orderType: 'market' as const,
+      tags: [],
+      note: '',
+      balanceAfter: 0,
     });
     const trades = [200, -100, 200, -100, -100, 300].map(mkT);
     let b = 10000;
@@ -194,7 +218,11 @@ describe('stats', () => {
     expect(s.maxLossStreak).toBe(2);
     expect(s.totalR).toBeCloseTo(4);
     const rets = trades.map((t) => t.pnl / (t.balanceAfter - t.pnl));
-    const mc = simulatePaths(rets, rets.map(() => 0), { ...DEFAULT_PATH_OPTS, runs: 200, horizon: 50 });
+    const mc = simulatePaths(
+      rets,
+      rets.map(() => 0),
+      { ...DEFAULT_PATH_OPTS, runs: 200, horizon: 50 },
+    );
     expect(mc).not.toBeNull();
     expect(mc!.bands.p50.length).toBe(51);
     expect(mc!.profitProb).toBeGreaterThan(0.5);

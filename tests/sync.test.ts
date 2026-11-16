@@ -81,7 +81,17 @@ describe('session sync', () => {
 describe('dataset packing', () => {
   it('round-trips bars through gzip', async () => {
     const bars = generateSynthetic({ start: Date.UTC(2024, 0, 1) / 1000, days: 10, price: 1.1, seed: 3 });
-    const meta = { id: 'EURUSD', symbol: 'EURUSD', source: 'synthetic' as const, resolution: 60, from: bars.t[0], to: bars.t[bars.n - 1], count: bars.n, spec: guessSpec('EURUSD', 1.1), createdAt: 1 };
+    const meta = {
+      id: 'EURUSD',
+      symbol: 'EURUSD',
+      source: 'synthetic' as const,
+      resolution: 60,
+      from: bars.t[0],
+      to: bars.t[bars.n - 1],
+      count: bars.n,
+      spec: guessSpec('EURUSD', 1.1),
+      createdAt: 1,
+    };
     const blob = await packDataset(meta, bars);
     expect(blob.size).toBeLessThan(bars.n * 48 * 0.8);
     const back = await unpackDataset(blob);
