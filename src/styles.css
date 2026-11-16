@@ -1105,7 +1105,16 @@ span.tree-name { font-size: 12px; }
 @media (max-width: 900px) { .demo { grid-template-columns: 1fr; } .demo-score { flex-direction: row; flex-wrap: wrap; justify-content: center; } .demo-score .eyebrow, .demo-score ul { width: 100%; text-align: center; } }
 @media (prefers-reduced-motion: no-preference) { .panel-in > * { animation: panel-in 0.22s ease-out; } }
 @keyframes panel-in { from { opacity: 0; transform: translateX(6px); } }
-.subnav { background: color-mix(in srgb, var(--bg) 98%, transparent); }
+/* sticky bars are solid: even 2–4% see-through let page text read faintly behind the menu */
+.site-header, .subnav { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* positions / orders / history: the action buttons stay in reach when the table is wider than
+   the panel (a 1280 px laptop, three charts open) — the Close button used to be off screen */
+.ws .bottom .tbl td.acts { position: sticky; right: 0; background: var(--surface); white-space: nowrap; box-shadow: -10px 0 10px -10px rgba(0, 0, 0, 0.35); }
+/* in the replay, notices sit over the top of the chart, not over the positions table they report on */
+@media (min-width: 768px) {
+  body:has(.ws) #toasts { top: 62px; bottom: auto; flex-direction: column-reverse; }
+  body:has(.ws) .toast.out { transform: translateY(-6px); }
+}
 
 /* printing: no entrance may hide anything, and bars that follow the scroll stay out of the way */
 @media print {

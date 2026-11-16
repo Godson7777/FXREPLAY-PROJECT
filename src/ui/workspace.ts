@@ -81,16 +81,22 @@ export class Workspace implements PaneHost {
   private lastFrame = 0;
   private acc = 0;
   private saveTimer = 0;
-  private lastRowAct = 0;
+  private lastShift = 0;
+  private lastRowKey = '';
+  private lastRowAt = 0;
   /**
-   * Closing or reversing a row makes the rows below slide up under the cursor, so the second
-   * click of a double click would land on a different position. One row action per 450 ms.
+   * Row buttons and double clicks. Closing or reversing a row makes the rows below slide up
+   * under the cursor, so for 400 ms after such an action no row button reacts — the second
+   * click of a double click would otherwise land on a different position. An action that
+   * leaves the rows in place (`shifts` false) only ignores a repeat of itself.
    */
-  private rowAct(fn: () => void) {
+  private rowAct(key: string, shifts: boolean, fn: () => void) {
     return () => {
       const now = performance.now();
-      if (now - this.lastRowAct < 450) return;
-      this.lastRowAct = now;
+      if (now - this.lastShift < 400 || (key === this.lastRowKey && now - this.lastRowAt < 400)) return;
+      this.lastRowKey = key;
+      this.lastRowAt = now;
+      if (shifts) this.lastShift = now;
       fn();
     };
   }
@@ -1931,9 +1937,9 @@ export class Workspace implements PaneHost {
           h('td', { class: cls(fl) }, money(fl, true)), h('td', { class: 'muted' }, fmtLocal(p.entryTime + off(p.entryTime))),
           h('td', { class: 'acts' },
             h('button', { class: 'mini', title: 'Move SL to breakeven', onclick: () => { const err = br.breakeven(p.id); if (err) toast(err, 'err'); this.afterTrade(); } }, 'BE'),
-            h('button', { class: 'mini', title: 'Close half', onclick: this.rowAct(() => { br.close(p.id, 0.5); this.afterTrade(); }) }, '½'),
-            h('button', { class: 'mini', title: 'Reverse position', onclick: this.rowAct(() => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); }) }, '⇄'),
-            h('button', { class: 'mini danger', title: 'Close', onclick: this.rowAct(() => { br.close(p.id); this.afterTrade(); }) }, '✕'),
+            h('button', { class: 'mini', title: 'Close half', onclick: this.rowAct(`half${p.id}`, false, () => { br.close(p.id, 0.5); this.afterTrade(); }) }, '½'),
+            h('button', { class: 'mini', title: 'Reverse position', onclick: this.rowAct(`rev${p.id}`, true, () => { const r = br.reverse(p.id); if (!r.ok) toast(r.error, 'err'); this.afterTrade(); }) }, '⇄'),
+            h('button', { class: 'mini danger', title: 'Close', onclick: this.rowAct(`close${p.id}`, true, () => { br.close(p.id); this.afterTrade(); }) }, '✕'),
           ),
         );
         tb.append(tr);
@@ -1950,7 +1956,7 @@ export class Workspace implements PaneHost {
           h('td', {}, `${o.id}`), h('td', {}, o.symbol), h('td', {}, o.type), h('td', { class: o.side === 'long' ? 'up' : 'dn' }, o.side.toUpperCase()), h('td', {}, o.lots.toFixed(2)),
           h('td', {}, o.price.toFixed(dg)), h('td', {}, o.sl?.toFixed(dg) ?? '—'), h('td', {}, o.tp?.toFixed(dg) ?? '—'),
           h('td', { class: 'muted' }, fmtLocal(o.createdAt + off(o.createdAt))),
-          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: this.rowAct(() => { br.cancelOrder(o.id); this.afterTrade(); }) }, 'Cancel')),
+          h('td', { class: 'acts' }, h('button', { class: 'mini danger', onclick: this.rowAct(`cancel${o.id}`, true, () => { br.cancelOrder(o.id); this.afterTrade(); }) }, 'Cancel')),
         ));
       }
       if (!br.s.orders.length) tb.append(emptyRow(10, 'No pending orders. Drag order/SL/TP lines on the chart to adjust them.'));

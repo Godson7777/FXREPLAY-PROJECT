@@ -65,7 +65,7 @@ ok((await st()).positions[0].sl === before, 'the stop is unchanged');
 await row().locator('button', { hasText: '½' }).click(); await page.waitForTimeout(250);
 s = await books('half close');
 ok(s.positions.length === 1 && s.positions[0].lots > 0, `half closed: ${s.positions[0].lots} lots left`);
-await row().locator('button', { hasText: '⇄' }).click(); await page.waitForTimeout(300);
+await row().locator('button', { hasText: '⇄' }).click(); await page.waitForTimeout(600); // row buttons rest for 400 ms after rows move
 s = await books('reverse');
 ok(s.positions.length === 1 && s.positions[0].side === 'short' && s.trades.length === 1, 'reverse: the long is closed and a short is open');
 await row().locator('button.danger').click(); await page.waitForTimeout(300);
