@@ -74,7 +74,7 @@ function responsive(height: number, draw: (root: SVGSVGElement, w: number, h: nu
     if (!w || w === lastW) return;
     lastW = w;
     box.innerHTML = '';
-    const root = svg('svg', { width: w, height, viewBox: `0 0 ${w} ${height}`, role: 'img' });
+    const root = svg('svg', { width: w, height, viewBox: `0 0 ${w} ${height}`, role: 'img', 'aria-label': 'Chart' });
     box.append(root);
     draw(root, w, height);
   };
@@ -121,6 +121,7 @@ export function lineChart(opts: {
 }) {
   const H = opts.height ?? 240;
   return responsive(H, (root, W) => {
+    root.setAttribute('aria-label', `Line chart: ${opts.series.map((x) => x.name).join(', ')}`);
     const m = { l: 64, r: 14, t: 12, b: 26 };
     const all = opts.series.flatMap((s) => s.ys).concat(opts.band?.flatMap((b) => [...b.lo, ...b.hi]) ?? []);
     const xsAll = opts.series.flatMap((s) => s.xs);
@@ -223,6 +224,13 @@ export interface BarItem {
 export function barChart(opts: { items: BarItem[]; height?: number; yFmt: (v: number) => string; posColor?: string; negColor?: string; showValues?: boolean }) {
   const H = opts.height ?? 220;
   return responsive(H, (root, W) => {
+    root.setAttribute(
+      'aria-label',
+      `Bar chart: ${opts.items
+        .map((x) => x.label)
+        .slice(0, 12)
+        .join(', ')}`,
+    );
     const items = opts.items;
     if (!items.length) return;
     const m = { l: 60, r: 10, t: 16, b: 34 };
@@ -288,6 +296,7 @@ export function scatter(opts: {
 }) {
   const H = opts.height ?? 260;
   return responsive(H, (root, W) => {
+    root.setAttribute('aria-label', `Scatter chart${opts.xLabel ? `: ${opts.yLabel ?? ''} against ${opts.xLabel}` : ''}`);
     const P = opts.points;
     if (!P.length) return;
     const m = { l: 56, r: 14, t: 12, b: 38 };

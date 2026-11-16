@@ -133,7 +133,7 @@ export class Workspace implements PaneHost {
       'div',
       { class: `ws${this.session.live ? ' is-live' : ''}` },
       this.topbar(),
-      h('div', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail),
+      h('main', { class: 'ws-main' }, this.toolbar(), this.center, this.right, this.rail),
       this.tradeBar,
       this.sheet,
     );
@@ -190,7 +190,7 @@ export class Workspace implements PaneHost {
       { class: 'topbar' },
       h('a', { class: 'brand-mark', href: '#/', title: 'Overflow Trade', html: LOGO }),
       h('button', { class: 'ghost', onclick: () => this.nav('#/'), title: 'Back to sessions' }, '← Sessions'),
-      h('div', { class: 'brand-sm' }, h('b', {}, s.name), h('small', {}, s.symbols.join(' · '))),
+      h('h1', { class: 'brand-sm' }, h('b', {}, s.name), h('small', {}, s.symbols.join(' · '))),
       h('div', { class: 'spacer' }),
       h('div', { class: 'segs', title: 'Chart layout' }, ...layoutBtns),
       h('button', { class: 'ghost', onclick: () => this.indicatorsModal() }, 'ƒx Indicators'),

@@ -466,7 +466,7 @@ export class AnalyticsView {
       extra = h(
         'div',
         { class: 'score-box' },
-        h('h5', {}, 'Leaderboard'),
+        h('h5', { 'aria-level': 3 }, 'Leaderboard'),
         el.ranked
           ? h('p', { class: 'empty' }, 'Eligible and published — this strategy is ranked on the leaderboard.')
           : h('ul', {}, ...el.reasons.map((x) => h('li', {}, x))),
@@ -482,7 +482,7 @@ export class AnalyticsView {
       extra = h(
         'div',
         { class: 'score-box' },
-        h('h5', {}, 'Compete on the leaderboard'),
+        h('h5', { 'aria-level': 3 }, 'Compete on the leaderboard'),
         h(
           'p',
           { class: 'empty' },
@@ -789,7 +789,11 @@ export class AnalyticsView {
             h(
               'table',
               { class: 'tbl' },
-              h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'r' }, 'First half'), h('th', { class: 'r' }, 'Second half'))),
+              h(
+                'thead',
+                {},
+                h('tr', {}, h('th', { 'aria-label': 'Measure' }, ''), h('th', { class: 'r' }, 'First half'), h('th', { class: 'r' }, 'Second half')),
+              ),
               h(
                 'tbody',
                 {},

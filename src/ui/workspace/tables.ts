@@ -180,7 +180,7 @@ export function renderBottom(ws: Workspace) {
   body.append(t);
   if (ws.tab === 'positions') {
     const levd = br.s.positions.some((p) => p.leverage);
-    t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th>${levd ? '<th>Lev</th><th>Margin</th><th>Liq</th>' : ''}<th>Entry</th><th>SL</th><th>TP</th><th>Pips</th><th>R</th><th>P&L</th><th>Opened</th><th></th></tr></thead>`;
+    t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th>${levd ? '<th>Lev</th><th>Margin</th><th>Liq</th>' : ''}<th>Entry</th><th>SL</th><th>TP</th><th>Pips</th><th>R</th><th>P&L</th><th>Opened</th><th aria-label="Actions"></th></tr></thead>`;
     const tb = h('tbody');
     for (const p of br.s.positions) {
       const sp = ws.session.specs[p.symbol];
@@ -272,7 +272,7 @@ export function renderBottom(ws: Workspace) {
       tb.append(emptyRow(levd ? 15 : 12, 'No open positions — use the ticket on the right, Shift+B / Shift+S, or the Long/Short R:R tool.'));
     t.append(tb);
   } else if (ws.tab === 'orders') {
-    t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Type</th><th>Side</th><th>Lots</th><th>Price</th><th>SL</th><th>TP</th><th>Placed</th><th></th></tr></thead>`;
+    t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Type</th><th>Side</th><th>Lots</th><th>Price</th><th>SL</th><th>TP</th><th>Placed</th><th aria-label="Actions"></th></tr></thead>`;
     const tb = h('tbody');
     const off = offsetFn(ws.tz);
     for (const o of br.s.orders) {
@@ -311,7 +311,7 @@ export function renderBottom(ws: Workspace) {
     if (!br.s.orders.length) tb.append(emptyRow(10, 'No pending orders. Drag order/SL/TP lines on the chart to adjust them.'));
     t.append(tb);
   } else {
-    t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Pips</th><th>R</th><th>P&L</th><th>Exit by</th><th>Held</th><th>Tags</th><th></th></tr></thead>`;
+    t.innerHTML = `<thead><tr><th>#</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Pips</th><th>R</th><th>P&L</th><th>Exit by</th><th>Held</th><th>Tags</th><th aria-label="Actions"></th></tr></thead>`;
     const tb = h('tbody');
     for (const [ti, tr] of [...br.s.trades].reverse().slice(0, 200).entries()) {
       const dg = ws.session.specs[tr.symbol]?.digits ?? 5;

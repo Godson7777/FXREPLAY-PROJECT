@@ -122,7 +122,7 @@ export function heatmap(matrix: Record<Trend, Record<Vol, GroupStats | null>>, u
   const maxAbs = Math.max(0.05, ...cells.map((g) => Math.abs(g.exp ?? 0)));
   const grid = h(
     'div',
-    { class: 'heat', role: 'table', 'aria-label': 'Expectancy by trend and volatility' },
+    { class: 'heat', role: 'group', 'aria-label': 'Expectancy by trend and volatility' },
     h('div', { class: 'h' }),
     ...VOLS.map((v) => h('div', { class: 'h col' }, VOL_LABEL[v].replace(' volatility', ' vol.'))),
   );

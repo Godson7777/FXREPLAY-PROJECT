@@ -107,14 +107,14 @@ export function renderData(page: HTMLElement, datasets: DatasetMeta[], refresh: 
     'table',
     { class: 'tbl data-tbl' },
     h('thead', {
-      html: '<tr><th>Symbol</th><th>Source</th><th>Base TF</th><th>From (UTC)</th><th>To (UTC)</th><th>Bars</th><th>Pip size</th><th>Contract/lot</th><th>Digits</th><th></th></tr>',
+      html: '<tr><th>Symbol</th><th>Source</th><th>Base TF</th><th>From (UTC)</th><th>To (UTC)</th><th>Bars</th><th>Pip size</th><th>Contract/lot</th><th>Digits</th><th aria-label="Actions"></th></tr>',
     }),
   );
   const tb = h('tbody');
   for (const d of datasets) {
-    const pip = h('input', { type: 'number', step: 'any', value: d.spec.pipSize, class: 'sm' });
-    const cs = h('input', { type: 'number', step: 'any', value: d.spec.contractSize, class: 'sm' });
-    const dg = h('input', { type: 'number', step: 1, value: d.spec.digits, class: 'sm' });
+    const pip = h('input', { type: 'number', step: 'any', value: d.spec.pipSize, class: 'sm', 'aria-label': `${d.symbol} pip size` });
+    const cs = h('input', { type: 'number', step: 'any', value: d.spec.contractSize, class: 'sm', 'aria-label': `${d.symbol} contract size` });
+    const dg = h('input', { type: 'number', step: 1, value: d.spec.digits, class: 'sm', 'aria-label': `${d.symbol} digits` });
     const upd = async () => {
       const ps = +pip.value,
         c = +cs.value,
@@ -524,7 +524,7 @@ function importGuide(refresh: () => void) {
     download('SAMPLE_1m.csv', lines.join('\n'));
   };
   const step = (n: string, title: string, body: HTMLElement | string) =>
-    h('div', { class: 'point' }, h('span', { class: 'n' }, n), h('h5', {}, title), typeof body === 'string' ? h('p', {}, body) : body);
+    h('div', { class: 'point' }, h('span', { class: 'n' }, n), h('h5', { 'aria-level': 2 }, title), typeof body === 'string' ? h('p', {}, body) : body);
   return h(
     'section',
     { class: 'card stack import-guide' },
@@ -592,7 +592,11 @@ function cloudDataCard(local: DatasetMeta[], refresh: () => void) {
         return;
       }
       const have = new Set(local.map((d) => d.id));
-      const t = h('table', { class: 'tbl' }, h('thead', { html: '<tr><th>Symbol</th><th>Size</th><th>Uploaded</th><th>On this device</th><th></th></tr>' }));
+      const t = h(
+        'table',
+        { class: 'tbl' },
+        h('thead', { html: '<tr><th>Symbol</th><th>Size</th><th>Uploaded</th><th>On this device</th><th aria-label="Actions"></th></tr>' }),
+      );
       const tb = h('tbody');
       for (const f of files) {
         tb.append(

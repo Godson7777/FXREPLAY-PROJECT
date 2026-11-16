@@ -294,10 +294,16 @@ export function settingsModal(ws: Workspace) {
   const pauseClose = h('input', { type: 'checkbox', checked: ws.pauseOnClose });
   const specRows = s.symbols.map((sym) => {
     const sp = s.specs[sym];
-    const spread = h('input', { type: 'number', step: 0.1, value: s.spreadPips[sym] ?? s.spreadPips['*'] ?? 0, class: 'sm' });
-    const pip = h('input', { type: 'number', step: 'any', value: sp.pipSize, class: 'sm' });
-    const cs = h('input', { type: 'number', step: 'any', value: sp.contractSize, class: 'sm' });
-    const dg = h('input', { type: 'number', step: 1, value: sp.digits, class: 'sm' });
+    const spread = h('input', {
+      type: 'number',
+      step: 0.1,
+      value: s.spreadPips[sym] ?? s.spreadPips['*'] ?? 0,
+      class: 'sm',
+      'aria-label': `${sym} spread in pips`,
+    });
+    const pip = h('input', { type: 'number', step: 'any', value: sp.pipSize, class: 'sm', 'aria-label': `${sym} pip size` });
+    const cs = h('input', { type: 'number', step: 'any', value: sp.contractSize, class: 'sm', 'aria-label': `${sym} contract size` });
+    const dg = h('input', { type: 'number', step: 1, value: sp.digits, class: 'sm', 'aria-label': `${sym} digits` });
     return { sym, spread, pip, cs, dg, row: h('tr', {}, h('td', {}, sym), h('td', {}, spread), h('td', {}, pip), h('td', {}, cs), h('td', {}, dg)) };
   });
   const tbl = h(

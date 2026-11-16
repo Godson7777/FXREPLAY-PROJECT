@@ -109,7 +109,7 @@ export function renderMethodology(root: HTMLElement, nav: (hash: string) => void
         h(
           'div',
           { class: 'score-box' },
-          h('h5', {}, 'Eligibility'),
+          h('h5', { 'aria-level': 3 }, 'Eligibility'),
           h(
             'ul',
             {},
@@ -122,7 +122,7 @@ export function renderMethodology(root: HTMLElement, nav: (hash: string) => void
         h(
           'div',
           { class: 'score-box good' },
-          h('h5', {}, 'Badges'),
+          h('h5', { 'aria-level': 3 }, 'Badges'),
           h(
             'ul',
             {},

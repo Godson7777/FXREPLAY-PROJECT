@@ -8,7 +8,7 @@ export function controls(ws: Workspace) {
   ws.playBtn = h('button', { class: 'play', title: 'Play / pause (Space)', onclick: () => ws.togglePlay() }, '▶');
   const speed = h(
     'select',
-    { title: 'Playback speed' },
+    { title: 'Playback speed', 'aria-label': 'Playback speed' },
     ...[0.5, 1, 2, 3, 5, 10, 20, 50, 100].map((v) => h('option', { value: v, selected: v === ws.prefs.speed }, `${v}×/s`)),
   );
   speed.onchange = () => {
@@ -17,7 +17,7 @@ export function controls(ws: Workspace) {
   };
   const unit = h(
     'select',
-    { title: 'What one playback step reveals' },
+    { title: 'What one playback step reveals', 'aria-label': 'What one playback step reveals' },
     h('option', { value: 'candle', selected: ws.prefs.unit === 'candle' }, 'per candle'),
     h('option', { value: 'base', selected: ws.prefs.unit === 'base' }, 'per 1m tick'),
   );
@@ -25,7 +25,12 @@ export function controls(ws: Workspace) {
     ws.prefs.unit = unit.value as PlayUnit;
     ws.savePrefs();
   };
-  const jumpInput = h('input', { type: 'datetime-local', class: 'jump', title: 'Jump forward to (chart timezone)' });
+  const jumpInput = h('input', {
+    type: 'datetime-local',
+    class: 'jump',
+    title: 'Jump forward to (chart timezone)',
+    'aria-label': 'Jump forward to a date and time (chart timezone)',
+  });
   const jumpBtn = h('button', { class: 'ghost', title: 'Jump forward — all orders are processed on the way' }, 'Go');
   jumpBtn.onclick = () => {
     if (!jumpInput.value) return;
