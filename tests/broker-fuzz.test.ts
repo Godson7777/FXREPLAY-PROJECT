@@ -13,12 +13,18 @@ function run(seed: number, cfg: Partial<BrokerConfig>, sym: 'EURUSD' | 'BTC', st
   const rand = rng(seed);
   const spec = sym === 'BTC' ? BTC : EUR;
   const start = 10000;
-  const br = new Broker({ initialBalance: start, commissionPerLot: sym === 'BTC' ? 0 : 3.5, spreadPips: { '*': sym === 'BTC' ? 0 : 0.8 }, slFirst: rand() < 0.5, ...cfg }, { [sym]: spec }, newBrokerState(start));
+  const br = new Broker(
+    { initialBalance: start, commissionPerLot: sym === 'BTC' ? 0 : 3.5, spreadPips: { '*': sym === 'BTC' ? 0 : 0.8 }, slFirst: rand() < 0.5, ...cfg },
+    { [sym]: spec },
+    newBrokerState(start),
+  );
   let px = sym === 'BTC' ? 60000 : 1.1;
-  const pip = spec.pipSize, vol = sym === 'BTC' ? 60 : 0.0006;
+  const pip = spec.pipSize,
+    vol = sym === 'BTC' ? 60 : 0.0006;
   let t = 0;
   br.setPrice(sym, t, px);
-  let seen = 0, closed = 0;
+  let seen = 0,
+    closed = 0;
   const ids = new Set<number>();
   const check = (what: string) => {
     const s = br.s;
@@ -46,14 +52,24 @@ function run(seed: number, cfg: Partial<BrokerConfig>, sym: 'EURUSD' | 'BTC', st
   };
   for (let i = 0; i < steps; i++) {
     const a = rand();
-    const bid = br.bid(sym), ask = br.ask(sym);
+    const bid = br.bid(sym),
+      ask = br.ask(sym);
     const side = rand() < 0.5 ? 'long' : 'short';
     const d = side === 'long' ? 1 : -1;
     const dist = (5 + rand() * 40) * pip * (sym === 'BTC' ? 10 : 1);
     const lots = sym === 'BTC' ? +(0.01 + rand() * 0.05).toFixed(2) : +(0.01 + rand() * 0.3).toFixed(2);
     if (a < 0.2) {
       const e = side === 'long' ? ask : bid;
-      br.place({ symbol: sym, side, type: 'market', lots, sl: rand() < 0.8 ? e - d * dist : null, tp: rand() < 0.7 ? e + d * dist * 2 : null, trailPips: rand() < 0.15 ? 15 : null, beAtR: rand() < 0.15 ? 1 : null });
+      br.place({
+        symbol: sym,
+        side,
+        type: 'market',
+        lots,
+        sl: rand() < 0.8 ? e - d * dist : null,
+        tp: rand() < 0.7 ? e + d * dist * 2 : null,
+        trailPips: rand() < 0.15 ? 15 : null,
+        beAtR: rand() < 0.15 ? 1 : null,
+      });
     } else if (a < 0.3) {
       const type = rand() < 0.5 ? 'limit' : 'stop';
       const off = dist * (type === 'limit' ? -d : d);
@@ -78,7 +94,8 @@ function run(seed: number, cfg: Partial<BrokerConfig>, sym: 'EURUSD' | 'BTC', st
       // a bar, sometimes with a gap
       const o = px + (rand() < 0.05 ? (rand() - 0.5) * vol * 12 : 0);
       const c = o + (rand() - 0.5) * vol * 2;
-      const hi = Math.max(o, c) + rand() * vol, lo = Math.min(o, c) - rand() * vol;
+      const hi = Math.max(o, c) + rand() * vol,
+        lo = Math.min(o, c) - rand() * vol;
       t += 60;
       br.onBar(sym, t, o, hi, Math.max(lo, pip), Math.max(c, pip));
       px = Math.max(c, pip * 10);

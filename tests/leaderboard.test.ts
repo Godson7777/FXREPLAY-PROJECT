@@ -17,10 +17,23 @@ const spec = { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 
 
 function session(rs: number[], opts: { id?: string; trend?: (i: number) => Trend; perDay?: number } = {}): Session {
   const s = newSession({
-    id: opts.id ?? 's1', name: 'Test', description: '', symbols: ['EURUSD'], start: T0, end: null, balance: 10000,
-    commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: 'UTC', riskPct: 1, createdAt: 0, specs: { EURUSD: spec },
+    id: opts.id ?? 's1',
+    name: 'Test',
+    description: '',
+    symbols: ['EURUSD'],
+    start: T0,
+    end: null,
+    balance: 10000,
+    commissionPerLot: 0,
+    spreadPips: { '*': 0 },
+    slFirst: true,
+    timezone: 'UTC',
+    riskPct: 1,
+    createdAt: 0,
+    specs: { EURUSD: spec },
   });
-  let bal = s.balance, day = 0;
+  let bal = s.balance,
+    day = 0;
   const perDay = opts.perDay ?? 1;
   rs.forEach((r, i) => {
     if (i % perDay === 0) {
@@ -28,23 +41,65 @@ function session(rs: number[], opts: { id?: string; trend?: (i: number) => Trend
       while ([0, 6].includes(new Date((T0 + day * DAY) * 1000).getUTCDay())) day++;
     }
     const entryTime = T0 + day * DAY + 8 * 3600 + (i % perDay) * 3600;
-    const risk = bal * 0.01, pnl = r * risk;
+    const risk = bal * 0.01,
+      pnl = r * risk;
     bal += pnl;
     const t: Trade = {
-      id: i + 1, symbol: 'EURUSD', side: i % 2 ? 'short' : 'long', lots: 1, entry: 1.1, exit: 1.1, entryTime, exitTime: entryTime + 1800,
-      gross: pnl, commission: 0, pnl, pips: r * 10, risk, r, maePips: 5, mfePips: 10, maeR: 0.5, mfeR: Math.max(0, r) + 0.2,
-      holdSec: 1800, exitReason: r > 0 ? 'tp' : 'sl', orderType: 'market', tags: [], note: '', balanceAfter: bal,
-      regime: { trend: opts.trend?.(i) ?? (['up', 'down', 'range'] as Trend[])[i % 3], vol: (['low', 'normal', 'high'] as Vol[])[Math.floor(i / 3) % 3], adx: 25, atrPct: 0.001 },
+      id: i + 1,
+      symbol: 'EURUSD',
+      side: i % 2 ? 'short' : 'long',
+      lots: 1,
+      entry: 1.1,
+      exit: 1.1,
+      entryTime,
+      exitTime: entryTime + 1800,
+      gross: pnl,
+      commission: 0,
+      pnl,
+      pips: r * 10,
+      risk,
+      r,
+      maePips: 5,
+      mfePips: 10,
+      maeR: 0.5,
+      mfeR: Math.max(0, r) + 0.2,
+      holdSec: 1800,
+      exitReason: r > 0 ? 'tp' : 'sl',
+      orderType: 'market',
+      tags: [],
+      note: '',
+      balanceAfter: bal,
+      regime: {
+        trend: opts.trend?.(i) ?? (['up', 'down', 'range'] as Trend[])[i % 3],
+        vol: (['low', 'normal', 'high'] as Vol[])[Math.floor(i / 3) % 3],
+        adx: 25,
+        atrPct: 0.001,
+      },
     };
     s.state.broker.trades.push(t);
   });
   s.state.broker.balance = bal;
   return s;
 }
-const meta = (source: DatasetMeta['source'] = 'csv') => new Map<string, DatasetMeta>([['EURUSD', { id: 'EURUSD', symbol: 'EURUSD', source, resolution: 60, from: 0, to: 0, count: 0, spec, createdAt: 0 }]]);
-const edge = (n: number, seed = 3, win = 0.5, w = 2) => { const r = rng(seed); return Array.from({ length: n }, () => (r() < win ? w : -1)); };
+const meta = (source: DatasetMeta['source'] = 'csv') =>
+  new Map<string, DatasetMeta>([['EURUSD', { id: 'EURUSD', symbol: 'EURUSD', source, resolution: 60, from: 0, to: 0, count: 0, spec, createdAt: 0 }]]);
+const edge = (n: number, seed = 3, win = 0.5, w = 2) => {
+  const r = rng(seed);
+  return Array.from({ length: n }, () => (r() < win ? w : -1));
+};
 const report = (s: Session, source: DatasetMeta['source'] = 'csv') => buildReport(buildRecords([s], meta(source)), { initial: 10000, off: offsetFn('UTC') })!;
-const strat = (o: Partial<Strategy> = {}): Strategy => ({ id: 'st', name: 'S', author: 'A', timeframe: '', description: '', sessionIds: ['s1'], published: true, createdAt: 1, updatedAt: 1, ...o });
+const strat = (o: Partial<Strategy> = {}): Strategy => ({
+  id: 'st',
+  name: 'S',
+  author: 'A',
+  timeframe: '',
+  description: '',
+  sessionIds: ['s1'],
+  published: true,
+  createdAt: 1,
+  updatedAt: 1,
+  ...o,
+});
 
 describe('leaderboard eligibility', () => {
   it('ranks a published, long, real-data strategy', () => {
@@ -121,7 +176,8 @@ describe('strategy store helpers', () => {
     expect(s.createdAt).toBe(0);
   });
   it('drops sessions that no longer exist and orders by start', () => {
-    const a = session([1], { id: 'a' }), b = session([1], { id: 'b' });
+    const a = session([1], { id: 'a' }),
+      b = session([1], { id: 'b' });
     b.start = a.start - DAY;
     const list = strategySessions(strat({ sessionIds: ['a', 'gone', 'b'] }), [a, b]);
     expect(list.map((s) => s.id)).toEqual(['b', 'a']);

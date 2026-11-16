@@ -31,7 +31,11 @@ export function normalizeProjectUrl(raw: string): string {
   }
 }
 
-const cleanKey = (k: string) => k.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, '');
+const cleanKey = (k: string) =>
+  k
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\s+/g, '');
 
 export function cloudConfig(): CloudConfig | null {
   const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -53,12 +57,15 @@ export function configFromEnv() {
 export function friendlyError(e: unknown): string {
   const m = (e as Error)?.message ?? String(e);
   if (/Invalid path specified/i.test(m)) return 'The Supabase Project URL is wrong — it must look like https://xxxx.supabase.co (nothing after .co).';
-  if (/Invalid API key|No API key|invalid.*jwt/i.test(m)) return 'The Supabase key is not accepted — use the Publishable key (sb_publishable_…) or the legacy anon key, never the secret key.';
+  if (/Invalid API key|No API key|invalid.*jwt/i.test(m))
+    return 'The Supabase key is not accepted — use the Publishable key (sb_publishable_…) or the legacy anon key, never the secret key.';
   if (/Invalid login credentials/i.test(m)) return 'Wrong email or password. No account yet? Use "Create one".';
   if (/Email not confirmed/i.test(m)) return 'Confirm your email first (check your inbox and spam folder), then sign in.';
-  if (/rate limit/i.test(m)) return 'Too many emails sent — Supabase\'s built-in mailer is limited. Wait a bit, or turn off "Confirm email" / add your own SMTP in Supabase.';
+  if (/rate limit/i.test(m))
+    return 'Too many emails sent — Supabase\'s built-in mailer is limited. Wait a bit, or turn off "Confirm email" / add your own SMTP in Supabase.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Could not reach Supabase — check your internet connection and the Project URL.';
-  if (/relation .* does not exist|Could not find the table/i.test(m)) return 'Database tables are missing — run supabase/schema.sql in the Supabase SQL Editor.';
+  if (/relation .* does not exist|Could not find the table/i.test(m))
+    return 'Database tables are missing — run supabase/schema.sql in the Supabase SQL Editor.';
   return m;
 }
 
@@ -73,7 +80,7 @@ export function setCloudConfig(c: CloudConfig | null) {
 }
 
 let client: SupabaseClient | null = null;
-export function sb(): SupabaseClient | null {
+function sb(): SupabaseClient | null {
   if (client) return client;
   const c = cloudConfig();
   if (!c) return null;
@@ -88,7 +95,7 @@ export function sb(): SupabaseClient | null {
 // ---- auth & status ---------------------------------------------------------------
 
 let user: User | null = null;
-export type SyncStatus = 'off' | 'signed-out' | 'idle' | 'syncing' | 'error';
+type SyncStatus = 'off' | 'signed-out' | 'idle' | 'syncing' | 'error';
 let status: SyncStatus = 'off';
 let lastError = '';
 let lastSync = 0;
@@ -302,7 +309,11 @@ export async function listCloudDatasets(): Promise<{ id: string; size: number; u
   if (error) throw error;
   return (data ?? [])
     .filter((f) => f.name.endsWith('.bin.gz'))
-    .map((f) => ({ id: decodeURIComponent(f.name.replace(/\.bin\.gz$/, '')), size: Number((f.metadata as { size?: number } | null)?.size ?? 0), updated: f.updated_at ?? '' }));
+    .map((f) => ({
+      id: decodeURIComponent(f.name.replace(/\.bin\.gz$/, '')),
+      size: Number((f.metadata as { size?: number } | null)?.size ?? 0),
+      updated: f.updated_at ?? '',
+    }));
 }
 
 export async function downloadDataset(id: string): Promise<DatasetMeta> {
@@ -329,9 +340,10 @@ export async function restoreMissingData(symbols: string[]): Promise<string[]> {
   if (!missing.length) return [];
   const cloud = new Set((await listCloudDatasets()).map((d) => d.id));
   const got: string[] = [];
-  for (const m of missing) if (cloud.has(m)) {
-    await downloadDataset(m);
-    got.push(m);
-  }
+  for (const m of missing)
+    if (cloud.has(m)) {
+      await downloadDataset(m);
+      got.push(m);
+    }
   return got;
 }

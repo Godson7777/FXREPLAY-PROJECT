@@ -26,7 +26,7 @@ export const VOL_LABEL: Record<Vol, string> = { low: 'Low volatility', normal: '
 export const TRENDS: Trend[] = ['up', 'down', 'range'];
 export const VOLS: Vol[] = ['low', 'normal', 'high'];
 
-export const ADX_TREND = 20;
+const ADX_TREND = 20;
 const P = 14;
 const RANK_WINDOW = 500;
 const RANK_MIN = 50;
@@ -44,14 +44,23 @@ export interface RegimeSeries {
 export function regimeSeries(b: Bars): RegimeSeries {
   const agg = aggregate(b, parseTf('4H')!, offsetFn('UTC'));
   const n = agg.n;
-  const adx = new Float64Array(n).fill(NaN), pdi = new Float64Array(n).fill(NaN), mdi = new Float64Array(n).fill(NaN);
-  const atrPct = new Float64Array(n).fill(NaN), volRank = new Float64Array(n).fill(NaN);
+  const adx = new Float64Array(n).fill(NaN),
+    pdi = new Float64Array(n).fill(NaN),
+    mdi = new Float64Array(n).fill(NaN);
+  const atrPct = new Float64Array(n).fill(NaN),
+    volRank = new Float64Array(n).fill(NaN);
   const ready = new Uint8Array(n);
-  let trS = 0, pS = 0, mS = 0, dxSum = 0, adxPrev = NaN;
+  let trS = 0,
+    pS = 0,
+    mS = 0,
+    dxSum = 0,
+    adxPrev = NaN;
   for (let i = 1; i < n; i++) {
     const tr = Math.max(agg.h[i] - agg.l[i], Math.abs(agg.h[i] - agg.c[i - 1]), Math.abs(agg.l[i] - agg.c[i - 1]));
-    const up = agg.h[i] - agg.h[i - 1], dn = agg.l[i - 1] - agg.l[i];
-    const pdm = up > dn && up > 0 ? up : 0, mdm = dn > up && dn > 0 ? dn : 0;
+    const up = agg.h[i] - agg.h[i - 1],
+      dn = agg.l[i - 1] - agg.l[i];
+    const pdm = up > dn && up > 0 ? up : 0,
+      mdm = dn > up && dn > 0 ? dn : 0;
     if (i <= P) {
       trS += tr;
       pS += pdm;
@@ -62,7 +71,8 @@ export function regimeSeries(b: Bars): RegimeSeries {
       pS = pS - pS / P + pdm;
       mS = mS - mS / P + mdm;
     }
-    const pd = trS ? (100 * pS) / trS : 0, md = trS ? (100 * mS) / trS : 0;
+    const pd = trS ? (100 * pS) / trS : 0,
+      md = trS ? (100 * mS) / trS : 0;
     pdi[i] = pd;
     mdi[i] = md;
     atrPct[i] = agg.c[i] > 0 ? trS / P / agg.c[i] : NaN;
@@ -81,7 +91,8 @@ export function regimeSeries(b: Bars): RegimeSeries {
   for (let i = 0; i < n; i++) {
     const v = atrPct[i];
     if (isNaN(v)) continue;
-    let below = 0, cnt = 0;
+    let below = 0,
+      cnt = 0;
     for (let j = Math.max(0, i - RANK_WINDOW + 1); j <= i; j++) {
       const w = atrPct[j];
       if (isNaN(w)) continue;
@@ -94,7 +105,7 @@ export function regimeSeries(b: Bars): RegimeSeries {
   return { agg, adx, pdi, mdi, atrPct, volRank, ready };
 }
 
-export function classify(adx: number, pdi: number, mdi: number, rank: number): { trend: Trend; vol: Vol } {
+function classify(adx: number, pdi: number, mdi: number, rank: number): { trend: Trend; vol: Vol } {
   const trend: Trend = adx >= ADX_TREND ? (pdi >= mdi ? 'up' : 'down') : 'range';
   const vol: Vol = rank < 1 / 3 ? 'low' : rank > 2 / 3 ? 'high' : 'normal';
   return { trend, vol };

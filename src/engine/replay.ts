@@ -10,7 +10,7 @@ export interface PaneConfig {
   indicators: IndicatorConfig[];
 }
 
-export interface IndicatorConfig {
+interface IndicatorConfig {
   id: string;
   type: string;
   params: Record<string, number>;
@@ -44,7 +44,7 @@ export interface SessionConfig {
   imported?: { source: 'fxreplay' | 'csv'; file: string; rows: number } | null;
 }
 
-export interface SessionState {
+interface SessionState {
   clock: number;
   broker: BrokerState;
   drawings: Record<string, Drawing[]>;
@@ -95,7 +95,8 @@ export function dataWindow(metas: { from: number; to: number }[]): { from: numbe
 export function checkRange(win: { from: number; to: number }, start: number, end: number | null, fmt: (t: number) => string): string | null {
   if (win.from >= win.to) return 'The selected symbols have no overlapping dates — pick symbols that cover the same period.';
   if (!isFinite(start)) return 'Invalid start date';
-  if (start < win.from || start >= win.to) return `Start must be between ${fmt(win.from)} and ${fmt(win.to)} — that is where your data is. After the last bar there is nothing to replay.`;
+  if (start < win.from || start >= win.to)
+    return `Start must be between ${fmt(win.from)} and ${fmt(win.to)} — that is where your data is. After the last bar there is nothing to replay.`;
   if (end != null && (!isFinite(end) || end <= start)) return 'End must be after the start';
   return null;
 }
@@ -119,7 +120,15 @@ export class Replay {
   ) {
     const s = session;
     this.broker = new Broker(
-      { initialBalance: s.balance, commissionPerLot: s.commissionPerLot, spreadPips: s.spreadPips, slFirst: s.slFirst, leverage: s.leverage, maxLeverage: s.maxLeverage, feePct: s.feePct },
+      {
+        initialBalance: s.balance,
+        commissionPerLot: s.commissionPerLot,
+        spreadPips: s.spreadPips,
+        slFirst: s.slFirst,
+        leverage: s.leverage,
+        maxLeverage: s.maxLeverage,
+        feePct: s.feePct,
+      },
       s.specs,
       s.state.broker,
     );

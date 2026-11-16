@@ -14,7 +14,11 @@ export const reduced = () => typeof matchMedia === 'function' && matchMedia('(pr
  * rectangle test cannot be fooled by how an element is painted, and anything that is
  * removed again (or never added) is finished rather than left in its hidden state.
  */
-interface Waiting { fn: () => void; attached: boolean; since: number }
+interface Waiting {
+  fn: () => void;
+  attached: boolean;
+  since: number;
+}
 const waiting = new Map<Element, Waiting>();
 let armed = false;
 let queued = 0;
@@ -31,7 +35,9 @@ function finish(el: Element, w: Waiting) {
 function sweep() {
   queued = 0;
   if (!waiting.size) return;
-  const vw = window.innerWidth, vh = window.innerHeight, now = Date.now();
+  const vw = window.innerWidth,
+    vh = window.innerHeight,
+    now = Date.now();
   for (const [el, w] of [...waiting]) {
     if (!el.isConnected) {
       if (w.attached || now - w.since > 4000) finish(el, w);
@@ -62,9 +68,6 @@ export function onSeen(el: Element, fn: () => void) {
   queueSweep();
 }
 
-/** Number of elements still waiting to be seen (for tests). */
-export const waitingCount = () => waiting.size;
-
 /**
  * Fade + rise when the element enters the viewport.
  *
@@ -72,7 +75,7 @@ export const waitingCount = () => waiting.size;
  * from the hidden state at the moment it is seen (the check runs before that frame is
  * painted, so nothing flashes). If the check never ran, the content would simply be there.
  */
-export function reveal<T extends HTMLElement>(el: T, delay = 0): T {
+function reveal<T extends HTMLElement>(el: T, delay = 0): T {
   if (reduced()) return el;
   onSeen(el, () => {
     if (delay) el.style.setProperty('--rv-d', `${delay}ms`);
@@ -148,13 +151,16 @@ const NS = 'http://www.w3.org/2000/svg';
  * The stroke colour comes from CSS (`.ring-fg`), so it follows the tier.
  */
 export function scoreRing(score: number | null, inner: Node, animate = true) {
-  const R = 54, C = 2 * Math.PI * R;
+  const R = 54,
+    C = 2 * Math.PI * R;
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 120 120');
   svg.setAttribute('aria-hidden', 'true');
   const circle = (cls: string) => {
     const c = document.createElementNS(NS, 'circle');
-    c.setAttribute('cx', '60'); c.setAttribute('cy', '60'); c.setAttribute('r', String(R));
+    c.setAttribute('cx', '60');
+    c.setAttribute('cy', '60');
+    c.setAttribute('r', String(R));
     c.setAttribute('class', cls);
     return c;
   };
@@ -170,7 +176,9 @@ export function scoreRing(score: number | null, inner: Node, animate = true) {
   mid.append(inner);
   box.append(svg, mid);
   if (animate && !reduced() && typeof fg.animate === 'function') {
-    onSeen(box, () => fg.animate([{ strokeDashoffset: C.toFixed(2) }, { strokeDashoffset: target.toFixed(2) }], { duration: 1400, easing: 'cubic-bezier(0.3, 0.6, 0.2, 1)' }));
+    onSeen(box, () =>
+      fg.animate([{ strokeDashoffset: C.toFixed(2) }, { strokeDashoffset: target.toFixed(2) }], { duration: 1400, easing: 'cubic-bezier(0.3, 0.6, 0.2, 1)' }),
+    );
   }
   return box;
 }

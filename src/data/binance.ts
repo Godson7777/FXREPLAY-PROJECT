@@ -13,7 +13,10 @@ export async function downloadBinance(
   market: 'spot' | 'futures' = 'spot',
 ): Promise<Bars> {
   // spot falls back to Binance's public market-data mirror (works where api.binance.com is blocked)
-  const bases = market === 'spot' ? ['https://api.binance.com/api/v3/klines', 'https://data-api.binance.vision/api/v3/klines'] : ['https://fapi.binance.com/fapi/v1/klines'];
+  const bases =
+    market === 'spot'
+      ? ['https://api.binance.com/api/v3/klines', 'https://data-api.binance.vision/api/v3/klines']
+      : ['https://fapi.binance.com/fapi/v1/klines'];
   let bi = 0;
   const rows: number[][] = [];
   let cursor = from * 1000;
@@ -41,7 +44,8 @@ export async function downloadBinance(
     if (!res.ok) throw new Error(`Binance request failed (HTTP ${res.status})${res.status === 400 ? ' — check the symbol, e.g. BTCUSDT' : ''}`);
     const data = (await res.json()) as unknown[][];
     if (!data.length) break;
-    for (const k of data) rows.push([Math.floor(+(k[0] as number) / 1000), +(k[1] as string), +(k[2] as string), +(k[3] as string), +(k[4] as string), +(k[5] as string)]);
+    for (const k of data)
+      rows.push([Math.floor(+(k[0] as number) / 1000), +(k[1] as string), +(k[2] as string), +(k[3] as string), +(k[4] as string), +(k[5] as string)]);
     const last = +(data[data.length - 1][0] as number);
     cursor = last + 60000;
     onProgress?.(Math.min(1, (cursor - from * 1000) / (end - from * 1000)), rows.length);

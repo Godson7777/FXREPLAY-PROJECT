@@ -18,13 +18,55 @@ export interface ProviderInfo {
 }
 
 export const PROVIDERS: ProviderInfo[] = [
-  { id: 'binance', label: 'Binance — Spot', markets: 'Crypto', example: 'BTCUSDT', needsKey: false, note: 'Years of 1-minute history. Falls back to data-api.binance.vision if binance.com is blocked.' },
-  { id: 'binance-futures', label: 'Binance — USDⓈ-M Futures', markets: 'Crypto perps', example: 'BTCUSDT', needsKey: false, note: 'Perpetual futures, 1-minute history.' },
+  {
+    id: 'binance',
+    label: 'Binance — Spot',
+    markets: 'Crypto',
+    example: 'BTCUSDT',
+    needsKey: false,
+    note: 'Years of 1-minute history. Falls back to data-api.binance.vision if binance.com is blocked.',
+  },
+  {
+    id: 'binance-futures',
+    label: 'Binance — USDⓈ-M Futures',
+    markets: 'Crypto perps',
+    example: 'BTCUSDT',
+    needsKey: false,
+    note: 'Perpetual futures, 1-minute history.',
+  },
   { id: 'bybit', label: 'Bybit — Spot', markets: 'Crypto', example: 'BTCUSDT', needsKey: false, note: '1-minute history, 1,000 bars per request.' },
-  { id: 'bybit-linear', label: 'Bybit — USDT Perpetual', markets: 'Crypto perps', example: 'BTCUSDT', needsKey: false, note: '1-minute history, 1,000 bars per request.' },
-  { id: 'okx', label: 'OKX — Spot / Swap', markets: 'Crypto', example: 'BTC-USDT', needsKey: false, note: 'Use BTC-USDT for spot or BTC-USDT-SWAP for the perpetual. 100 bars per request, so long ranges take a while.' },
-  { id: 'twelvedata', label: 'Twelve Data — Forex, gold, indices, stocks', markets: 'Forex · Metals · Indices · Stocks', example: 'XAU/USD', needsKey: true, note: 'Needs a free API key from twelvedata.com (≈800 requests/day, 8 per minute; up to 5,000 one-minute bars each). Examples: EUR/USD, XAU/USD, GBP/JPY, AAPL, SPY.' },
-  { id: 'hyperliquid', label: 'Hyperliquid — Perps', markets: 'Crypto perps', example: 'BTC', needsKey: false, note: 'Only the latest 5,000 candles per interval are served (1m ≈ 3.5 days).' },
+  {
+    id: 'bybit-linear',
+    label: 'Bybit — USDT Perpetual',
+    markets: 'Crypto perps',
+    example: 'BTCUSDT',
+    needsKey: false,
+    note: '1-minute history, 1,000 bars per request.',
+  },
+  {
+    id: 'okx',
+    label: 'OKX — Spot / Swap',
+    markets: 'Crypto',
+    example: 'BTC-USDT',
+    needsKey: false,
+    note: 'Use BTC-USDT for spot or BTC-USDT-SWAP for the perpetual. 100 bars per request, so long ranges take a while.',
+  },
+  {
+    id: 'twelvedata',
+    label: 'Twelve Data — Forex, gold, indices, stocks',
+    markets: 'Forex · Metals · Indices · Stocks',
+    example: 'XAU/USD',
+    needsKey: true,
+    note: 'Needs a free API key from twelvedata.com (≈800 requests/day, 8 per minute; up to 5,000 one-minute bars each). Examples: EUR/USD, XAU/USD, GBP/JPY, AAPL, SPY.',
+  },
+  {
+    id: 'hyperliquid',
+    label: 'Hyperliquid — Perps',
+    markets: 'Crypto perps',
+    example: 'BTC',
+    needsKey: false,
+    note: 'Only the latest 5,000 candles per interval are served (1m ≈ 3.5 days).',
+  },
 ];
 
 export const providerInfo = (id: ProviderId) => PROVIDERS.find((p) => p.id === id)!;
@@ -51,13 +93,20 @@ export function setTdKey(k: string) {
 export function datasetId(p: ProviderId, symbol: string): string {
   const s = symbol.toUpperCase().replace(/[^A-Z0-9.]/g, '');
   switch (p) {
-    case 'binance': return s;
-    case 'binance-futures': return `${s}.P`;
-    case 'bybit': return `BYBIT-${s}`;
-    case 'bybit-linear': return `BYBIT-${s}.P`;
-    case 'okx': return `OKX-${s}`;
-    case 'twelvedata': return s; // XAU/USD → XAUUSD, so the usual specs apply
-    case 'hyperliquid': return `HL-${s}`;
+    case 'binance':
+      return s;
+    case 'binance-futures':
+      return `${s}.P`;
+    case 'bybit':
+      return `BYBIT-${s}`;
+    case 'bybit-linear':
+      return `BYBIT-${s}.P`;
+    case 'okx':
+      return `OKX-${s}`;
+    case 'twelvedata':
+      return s; // XAU/USD → XAUUSD, so the usual specs apply
+    case 'hyperliquid':
+      return `HL-${s}`;
   }
 }
 
@@ -82,7 +131,10 @@ export interface FetchOpts {
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 class FetchError extends Error {
-  constructor(msg: string, public fatal = false) {
+  constructor(
+    msg: string,
+    public fatal = false,
+  ) {
     super(msg);
   }
 }
@@ -145,7 +197,7 @@ export async function fetchCandles(p: ProviderId, symbol: string, from: number, 
       rows = await twelvedata(sym, res, from, to, o);
       break;
     case 'hyperliquid': {
-      const iv = o.resolution ? RES_TO[o.resolution]?.hl ?? pickInterval(from, Date.now() / 1000).id : pickInterval(from, Date.now() / 1000).id;
+      const iv = o.resolution ? (RES_TO[o.resolution]?.hl ?? pickInterval(from, Date.now() / 1000).id) : pickInterval(from, Date.now() / 1000).id;
       rows = await hlCandles(sym, iv, from, to, { signal: o.signal, onProgress: o.onProgress, fetch: o.fetch });
       if (!o.resolution) o.resolution = HL_INTERVALS.find((x) => x.id === iv)!.sec;
       break;
@@ -217,7 +269,12 @@ async function twelvedata(sym: string, res: number, from: number, to: number, o:
     if (calls > 0) await sleep(7600); // stay under 8 requests per minute
     calls++;
     const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym.toUpperCase())}&interval=${interval}&start_date=${encodeURIComponent(fmt(from))}&end_date=${encodeURIComponent(fmt(end))}&outputsize=5000&timezone=UTC&order=desc&format=JSON&apikey=${encodeURIComponent(key)}`;
-    let j = await getJson<{ status?: string; code?: number; message?: string; values?: { datetime: string; open: string; high: string; low: string; close: string; volume?: string }[] }>('Twelve Data', url, o);
+    let j = await getJson<{
+      status?: string;
+      code?: number;
+      message?: string;
+      values?: { datetime: string; open: string; high: string; low: string; close: string; volume?: string }[];
+    }>('Twelve Data', url, o);
     if (j.status === 'error' && j.code === 429) {
       // per-minute credits used up: wait for the next minute and retry once
       for (let s = 60; s > 0; s -= 5) {

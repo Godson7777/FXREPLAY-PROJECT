@@ -34,7 +34,11 @@ describe('position tool math', () => {
     expect(o.tp).toBeCloseTo(1.197);
   });
   it('finds the first level touched, never past the clock', () => {
-    const bars = [{ h: 1.101, l: 1.099 }, { h: 1.106, l: 1.1 }, { h: 1.1, l: 1.09 }];
+    const bars = [
+      { h: 1.101, l: 1.099 },
+      { h: 1.106, l: 1.1 },
+      { h: 1.1, l: 1.09 },
+    ];
     const bar = (n: number) => (i: number) => (i < n ? bars[i] : null);
     expect(firstHit(L, 0, 2, bar(3))).toEqual({ kind: 'tp', index: 1 });
     expect(firstHit(L, 0, 2, bar(1))).toBeNull(); // bar 1 not revealed yet

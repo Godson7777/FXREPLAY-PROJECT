@@ -7,7 +7,13 @@ import { TRENDS, TREND_LABEL, VOLS, VOL_LABEL, type Trend, type Vol } from '../a
 
 export function kpi(label: string, value: string, c: string, sub: string, title = '') {
   // data-v keeps the full value for the row's fit and for a tooltip, whatever the count-up is showing
-  return h('div', { class: 'kpi', title: title || null }, h('span', {}, label), h('b', { class: c, 'data-v': value, title: title ? null : value }, value), h('small', {}, sub));
+  return h(
+    'div',
+    { class: 'kpi', title: title || null },
+    h('span', {}, label),
+    h('b', { class: c, 'data-v': value, title: title ? null : value }, value),
+    h('small', {}, sub),
+  );
 }
 
 /**
@@ -20,7 +26,8 @@ export function kpiRow(cls: string, ...items: (HTMLElement | null)[]) {
     row.style.removeProperty('--kpi-scale');
     let scale = 1;
     for (const b of row.querySelectorAll<HTMLElement>('.kpi > b')) {
-      const shown = b.textContent, full = b.dataset.v;
+      const shown = b.textContent,
+        full = b.dataset.v;
       if (full && full !== shown) b.textContent = full; // measure the real value, not a count-up frame
       if (b.clientWidth > 0 && b.scrollWidth > b.clientWidth) scale = Math.min(scale, b.clientWidth / b.scrollWidth);
       if (full && full !== shown) b.textContent = shown;
@@ -39,7 +46,12 @@ export function kpiRow(cls: string, ...items: (HTMLElement | null)[]) {
  */
 export function stat(label: string, value: string, c = '', title = '', why = '') {
   const na = value === '—' && !!why;
-  return h('div', { class: `stat${na ? ' na' : ''}`, title: title || null }, h('span', {}, label), na ? h('b', { class: 'why' }, why) : h('b', { class: c }, value));
+  return h(
+    'div',
+    { class: `stat${na ? ' na' : ''}`, title: title || null },
+    h('span', {}, label),
+    na ? h('b', { class: 'why' }, why) : h('b', { class: c }, value),
+  );
 }
 
 export const statsGrid = (...items: (HTMLElement | null)[]) => h('div', { class: 'stats-grid' }, ...items);
@@ -61,41 +73,81 @@ export function signedUnit(v: number | null | undefined, unit: string, d = 2) {
 /** Horizontal bars, scaled to the largest absolute value. */
 export function hbars(items: { label: string; value: number; display: string; color: string; title?: string }[]) {
   const max = Math.max(1e-12, ...items.map((i) => Math.abs(i.value)));
-  return h('div', { class: 'hbars' }, ...items.map((i) =>
-    h('div', { class: 'hbar', title: i.title || null },
-      h('span', {}, i.label),
-      h('div', { class: 'track' }, h('i', { style: `width:${Math.max(i.value ? 1.5 : 0, (Math.abs(i.value) / max) * 100).toFixed(1)}%;background:${i.color}` })),
-      h('b', {}, i.display))));
+  return h(
+    'div',
+    { class: 'hbars' },
+    ...items.map((i) =>
+      h(
+        'div',
+        { class: 'hbar', title: i.title || null },
+        h('span', {}, i.label),
+        h(
+          'div',
+          { class: 'track' },
+          h('i', { style: `width:${Math.max(i.value ? 1.5 : 0, (Math.abs(i.value) / max) * 100).toFixed(1)}%;background:${i.color}` }),
+        ),
+        h('b', {}, i.display),
+      ),
+    ),
+  );
 }
 
 /** Stacked 100% bar with a legend. */
 export function stackBar(parts: { label: string; value: number; color: string }[]) {
   const total = parts.reduce((a, p) => a + p.value, 0) || 1;
-  return h('div', { class: 'stack' },
-    h('div', { class: 'stackbar', role: 'img', 'aria-label': parts.map((p) => `${p.label} ${Math.round((p.value / total) * 100)}%`).join(', ') },
-      ...parts.map((p) => h('i', { style: `width:${((p.value / total) * 100).toFixed(2)}%;background:${p.color}`, title: `${p.label}: ${((p.value / total) * 100).toFixed(1)}%` }))),
-    h('div', { class: 'legend' }, ...parts.map((p) => h('span', {}, h('i', { style: `background:${p.color}` }), `${p.label} ${((p.value / total) * 100).toFixed(1)}%`))));
+  return h(
+    'div',
+    { class: 'stack' },
+    h(
+      'div',
+      { class: 'stackbar', role: 'img', 'aria-label': parts.map((p) => `${p.label} ${Math.round((p.value / total) * 100)}%`).join(', ') },
+      ...parts.map((p) =>
+        h('i', {
+          style: `width:${((p.value / total) * 100).toFixed(2)}%;background:${p.color}`,
+          title: `${p.label}: ${((p.value / total) * 100).toFixed(1)}%`,
+        }),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'legend' },
+      ...parts.map((p) => h('span', {}, h('i', { style: `background:${p.color}` }), `${p.label} ${((p.value / total) * 100).toFixed(1)}%`)),
+    ),
+  );
 }
 
 /** Trend × volatility heatmap of expectancy. */
 export function heatmap(matrix: Record<Trend, Record<Vol, GroupStats | null>>, unit: string) {
   const cells = TRENDS.flatMap((t) => VOLS.map((v) => matrix[t][v])).filter((g): g is GroupStats => g != null && g.trades > 0);
   const maxAbs = Math.max(0.05, ...cells.map((g) => Math.abs(g.exp ?? 0)));
-  const grid = h('div', { class: 'heat', role: 'table', 'aria-label': 'Expectancy by trend and volatility' },
+  const grid = h(
+    'div',
+    { class: 'heat', role: 'table', 'aria-label': 'Expectancy by trend and volatility' },
     h('div', { class: 'h' }),
-    ...VOLS.map((v) => h('div', { class: 'h col' }, VOL_LABEL[v].replace(' volatility', ' vol.'))));
+    ...VOLS.map((v) => h('div', { class: 'h col' }, VOL_LABEL[v].replace(' volatility', ' vol.'))),
+  );
   for (const t of TRENDS) {
     grid.append(h('div', { class: 'h' }, TREND_LABEL[t]));
     for (const v of VOLS) {
       const g = matrix[t][v];
-      if (!g || !g.trades) {
+      if (!g?.trades) {
         grid.append(h('div', { class: 'cell na' }, h('b', {}, '—'), h('small', {}, 'no trades')));
         continue;
       }
       const e = g.exp ?? 0;
-      const cell = h('div', { class: `cell ${e > 0 ? 'pos' : e < 0 ? 'neg' : ''}` }, h('b', {}, signedUnit(e, unit)), h('small', {}, `${g.trades} trade${g.trades === 1 ? '' : 's'} · ${Math.round(g.winRate * 100)}% win`));
+      const cell = h(
+        'div',
+        { class: `cell ${e > 0 ? 'pos' : e < 0 ? 'neg' : ''}` },
+        h('b', {}, signedUnit(e, unit)),
+        h('small', {}, `${g.trades} trade${g.trades === 1 ? '' : 's'} · ${Math.round(g.winRate * 100)}% win`),
+      );
       cell.style.setProperty('--a', (0.1 + 0.32 * Math.min(1, Math.abs(e) / maxAbs) * Math.min(1, g.trades / 10)).toFixed(2));
-      cell.addEventListener('mousemove', (ev) => showTip(ev, `<div class="tt-h">${TREND_LABEL[t]} · ${VOL_LABEL[v]}</div><div>Trades <b>${g.trades}</b></div><div>Expectancy <b>${signedUnit(e, unit)}</b></div><div>Win rate <b>${Math.round(g.winRate * 100)}%</b></div>`));
+      cell.addEventListener('mousemove', (ev) =>
+        showTip(
+          ev,
+          `<div class="tt-h">${TREND_LABEL[t]} · ${VOL_LABEL[v]}</div><div>Trades <b>${g.trades}</b></div><div>Expectancy <b>${signedUnit(e, unit)}</b></div><div>Win rate <b>${Math.round(g.winRate * 100)}%</b></div>`,
+        ),
+      );
       cell.addEventListener('mouseleave', hideTip);
       grid.append(cell);
     }
@@ -118,10 +170,17 @@ export function ciChart(lo: number, mid: number, hi: number, unit: string) {
     const H = 86;
     box.innerHTML = '';
     const span = Math.max(Math.abs(lo), Math.abs(hi), 0.05) * 1.25;
-    const minX = Math.min(-span * 0.35, lo - span * 0.1), maxX = Math.max(span * 0.35, hi + span * 0.1);
+    const minX = Math.min(-span * 0.35, lo - span * 0.1),
+      maxX = Math.max(span * 0.35, hi + span * 0.1);
     const m = { l: 12, r: 12 };
     const x = (v: number) => m.l + ((v - minX) / (maxX - minX)) * (W - m.l - m.r);
-    const root = svgEl('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `95% confidence interval from ${lo.toFixed(2)} to ${hi.toFixed(2)} ${unit}` });
+    const root = svgEl('svg', {
+      width: W,
+      height: H,
+      viewBox: `0 0 ${W} ${H}`,
+      role: 'img',
+      'aria-label': `95% confidence interval from ${lo.toFixed(2)} to ${hi.toFixed(2)} ${unit}`,
+    });
     root.append(svgEl('line', { x1: m.l, x2: W - m.r, y1: 44, y2: 44, class: 'gridline' }));
     root.append(svgEl('line', { x1: x(0), x2: x(0), y1: 16, y2: 70, class: 'zero' }));
     const t0 = svgEl('text', { x: x(0), y: 84, 'text-anchor': 'middle', class: 'tick' });

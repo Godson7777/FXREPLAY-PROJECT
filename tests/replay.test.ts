@@ -4,10 +4,29 @@ import { barsFromRows } from '../src/core/types';
 
 const spec = { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 5 };
 // Friday 20:00–20:59 then nothing until Monday 00:00 (a weekend gap)
-const FRI = Date.UTC(2024, 0, 5, 20) / 1000, MON = Date.UTC(2024, 0, 8) / 1000;
-const rows = [...Array.from({ length: 60 }, (_, i) => [FRI + i * 60, 1.1, 1.1, 1.1, 1.1, 1]), ...Array.from({ length: 60 }, (_, i) => [MON + i * 60, 1.2, 1.2, 1.2, 1.2, 1])];
+const FRI = Date.UTC(2024, 0, 5, 20) / 1000,
+  MON = Date.UTC(2024, 0, 8) / 1000;
+const rows = [
+  ...Array.from({ length: 60 }, (_, i) => [FRI + i * 60, 1.1, 1.1, 1.1, 1.1, 1]),
+  ...Array.from({ length: 60 }, (_, i) => [MON + i * 60, 1.2, 1.2, 1.2, 1.2, 1]),
+];
 const mk = () => {
-  const s = newSession({ id: 'x', name: 'x', description: '', symbols: ['EURUSD'], start: FRI + 3600, end: null, balance: 1e4, commissionPerLot: 0, spreadPips: {}, slFirst: true, timezone: 'UTC', riskPct: 1, createdAt: 0, specs: { EURUSD: spec } });
+  const s = newSession({
+    id: 'x',
+    name: 'x',
+    description: '',
+    symbols: ['EURUSD'],
+    start: FRI + 3600,
+    end: null,
+    balance: 1e4,
+    commissionPerLot: 0,
+    spreadPips: {},
+    slFirst: true,
+    timezone: 'UTC',
+    riskPct: 1,
+    createdAt: 0,
+    specs: { EURUSD: spec },
+  });
   return new Replay(s, { EURUSD: barsFromRows(rows.map((r) => [...r])) });
 };
 

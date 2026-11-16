@@ -20,7 +20,8 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
 function sameShape(a: Node, b: Node): boolean {
   if (a.nodeType !== b.nodeType) return false;
   if (a.nodeType !== 1) return true;
-  const ea = a as Element, eb = b as Element;
+  const ea = a as Element,
+    eb = b as Element;
   if (ea.tagName !== eb.tagName) return false;
   if (ea.hasAttribute('data-keep')) return true;
   if (a.childNodes.length !== b.childNodes.length) return false;
@@ -33,7 +34,8 @@ function applyMorph(a: Node, b: Node) {
     if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
     return;
   }
-  const ea = a as HTMLElement, eb = b as HTMLElement;
+  const ea = a as HTMLElement,
+    eb = b as HTMLElement;
   for (const at of Array.from(eb.attributes)) {
     let v = at.value;
     // transient feedback classes (price flash, new row) outlive the next update
@@ -47,18 +49,6 @@ function applyMorph(a: Node, b: Node) {
     if (ea.value !== nb.value) ea.value = nb.value;
     if (ea instanceof HTMLInputElement && ea.checked !== nb.checked) ea.checked = nb.checked;
   }
-}
-
-/**
- * Update `old` in place so it shows what `next` shows: text, attributes and form values
- * are copied over while the elements (and their listeners, focus, open dropdowns, a click
- * in progress) stay. Returns false and changes nothing when the two trees differ in shape.
- * Elements marked `data-keep` keep their own children.
- */
-export function morph(old: Node, next: Node): boolean {
-  if (!sameShape(old, next)) return false;
-  applyMorph(old, next);
-  return true;
 }
 
 /** Morph the children of `root` into `nodes` when `key` (what the listeners depend on) is unchanged; rebuild otherwise. */
@@ -79,7 +69,7 @@ export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-export const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
+const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
 export function esc(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -141,10 +131,10 @@ export function theme(): Theme {
 
 // ---- theme mode (system / light / dark) ------------------------------------------
 
-export type ThemeMode = 'system' | 'light' | 'dark';
+type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_KEY = 'overflowtrade.theme';
 
-export function getThemeMode(): ThemeMode {
+function getThemeMode(): ThemeMode {
   try {
     const m = localStorage.getItem(THEME_KEY);
     return m === 'light' || m === 'dark' ? m : 'system';
@@ -153,7 +143,7 @@ export function getThemeMode(): ThemeMode {
   }
 }
 
-export function setThemeMode(mode: ThemeMode) {
+function setThemeMode(mode: ThemeMode) {
   const root = document.documentElement;
   // switch instantly: suspend colour transitions for a frame so text and charts change together
   root.classList.add('theme-switching');
@@ -227,7 +217,9 @@ export function modal(title: string, body: HTMLElement, opts: { wide?: boolean; 
   const back = h(
     'div',
     { class: 'modal-back' },
-    h('div', { class: `modal${opts.wide ? ' wide' : ''}`, role: 'dialog', 'aria-label': title },
+    h(
+      'div',
+      { class: `modal${opts.wide ? ' wide' : ''}`, role: 'dialog', 'aria-label': title },
       h('div', { class: 'modal-head' }, h('h3', {}, title), h('button', { class: 'icon-btn', onclick: close, 'aria-label': 'Close' }, '✕')),
       body,
     ),

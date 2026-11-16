@@ -27,7 +27,9 @@ describe('candle CSV layouts', () => {
     sane(b);
   });
   it('MetaTrader 5: tab separated with <DATE> <TIME> header', () => {
-    const b = parseCsv('<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>\n2024.01.02\t00:00:00\t2063.11\t2063.80\t2062.90\t2063.50\t120\t0\t15\n2024.01.02\t00:01:00\t2063.50\t2064.10\t2063.40\t2063.95\t98\t0\t15');
+    const b = parseCsv(
+      '<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>\n2024.01.02\t00:00:00\t2063.11\t2063.80\t2062.90\t2063.50\t120\t0\t15\n2024.01.02\t00:01:00\t2063.50\t2064.10\t2063.40\t2063.95\t98\t0\t15',
+    );
     expect(b.n).toBe(2);
     expect(b.t[1]).toBe(T(2024, 1, 2, 0, 1));
     expect(ohlc(b, 0)).toEqual([2063.11, 2063.8, 2062.9, 2063.5]);
@@ -57,7 +59,9 @@ describe('candle CSV layouts', () => {
     sane(b);
   });
   it('Dukascopy: day first with milliseconds', () => {
-    const b = parseCsv('Gmt time,Open,High,Low,Close,Volume\n02.01.2024 00:00:00.000,1.1042,1.1045,1.1040,1.1043,12.5\n02.01.2024 00:01:00.000,1.1043,1.1046,1.1041,1.1044,9');
+    const b = parseCsv(
+      'Gmt time,Open,High,Low,Close,Volume\n02.01.2024 00:00:00.000,1.1042,1.1045,1.1040,1.1043,12.5\n02.01.2024 00:01:00.000,1.1043,1.1046,1.1041,1.1044,9',
+    );
     expect([b.t[0], b.t[1]]).toEqual([T(2024, 1, 2), T(2024, 1, 2, 0, 1)]);
     sane(b);
   });
@@ -74,7 +78,9 @@ describe('candle CSV layouts', () => {
 
 describe('candle CSVs that went through a spreadsheet', () => {
   it('European style: semicolons with decimal commas', () => {
-    const b = parseCsv('Date;Time;Open;High;Low;Close;Volume\n02.01.2024;00:00;1,10420;1,10450;1,10400;1,10430;123\n02.01.2024;00:01;1,10430;1,10460;1,10410;1,10440;98');
+    const b = parseCsv(
+      'Date;Time;Open;High;Low;Close;Volume\n02.01.2024;00:00;1,10420;1,10450;1,10400;1,10430;123\n02.01.2024;00:01;1,10430;1,10460;1,10410;1,10440;98',
+    );
     expect(b.n).toBe(2);
     expect(ohlc(b, 0)).toEqual([1.1042, 1.1045, 1.104, 1.1043]);
     expect(b.t[1]).toBe(T(2024, 1, 2, 0, 1));
@@ -82,18 +88,24 @@ describe('candle CSVs that went through a spreadsheet', () => {
   });
   it('US dates (month first) are read the same way on every line', () => {
     // the 13th can only be a day, so the whole file is month/day/year
-    const rows = ['01/05/2024 00:00', '01/12/2024 00:00', '01/13/2024 00:00', '02/01/2024 00:00'].map((d, i) => `${d},${1 + i / 10},${1.05 + i / 10},${0.95 + i / 10},${1.02 + i / 10},5`);
+    const rows = ['01/05/2024 00:00', '01/12/2024 00:00', '01/13/2024 00:00', '02/01/2024 00:00'].map(
+      (d, i) => `${d},${1 + i / 10},${1.05 + i / 10},${0.95 + i / 10},${1.02 + i / 10},5`,
+    );
     const b = parseCsv('Date,Open,High,Low,Close,Volume\n' + rows.join('\n'));
     expect(Array.from(b.t.slice(0, b.n))).toEqual([T(2024, 1, 5), T(2024, 1, 12), T(2024, 1, 13), T(2024, 2, 1)]);
     sane(b);
   });
   it('day-first dates with slashes stay day first', () => {
-    const rows = ['05/01/2024 00:00', '12/01/2024 00:00', '13/01/2024 00:00', '01/02/2024 00:00'].map((d, i) => `${d},${1 + i / 10},${1.05 + i / 10},${0.95 + i / 10},${1.02 + i / 10},5`);
+    const rows = ['05/01/2024 00:00', '12/01/2024 00:00', '13/01/2024 00:00', '01/02/2024 00:00'].map(
+      (d, i) => `${d},${1 + i / 10},${1.05 + i / 10},${0.95 + i / 10},${1.02 + i / 10},5`,
+    );
     const b = parseCsv('Date,Open,High,Low,Close,Volume\n' + rows.join('\n'));
     expect(Array.from(b.t.slice(0, b.n))).toEqual([T(2024, 1, 5), T(2024, 1, 12), T(2024, 1, 13), T(2024, 2, 1)]);
   });
   it('quoted fields, spaces after separators, a byte-order mark and Windows line ends', () => {
-    const b = parseCsv('﻿"Date","Open","High","Low","Close"\r\n"2024-01-02 00:00", "1.1", "1.2", "1.0", "1.15"\r\n"2024-01-02 00:01", "1.15", "1.25", "1.1", "1.2"\r\n');
+    const b = parseCsv(
+      '﻿"Date","Open","High","Low","Close"\r\n"2024-01-02 00:00", "1.1", "1.2", "1.0", "1.15"\r\n"2024-01-02 00:01", "1.15", "1.25", "1.1", "1.2"\r\n',
+    );
     expect(b.n).toBe(2);
     expect(ohlc(b, 1)).toEqual([1.15, 1.25, 1.1, 1.2]);
     sane(b);
@@ -111,24 +123,28 @@ describe('candle CSVs that went through a spreadsheet', () => {
 
 describe('damaged candle CSVs', () => {
   it('rows out of order and repeated rows are sorted and merged', () => {
-    const b = parseCsv('time,open,high,low,close\n2024-01-02 00:02,3,3,3,3\n2024-01-02 00:00,1,1,1,1\n2024-01-02 00:01,2,2,2,2\n2024-01-02 00:01,2.5,2.6,2.4,2.5');
+    const b = parseCsv(
+      'time,open,high,low,close\n2024-01-02 00:02,3,3,3,3\n2024-01-02 00:00,1,1,1,1\n2024-01-02 00:01,2,2,2,2\n2024-01-02 00:01,2.5,2.6,2.4,2.5',
+    );
     expect(b.n).toBe(3);
     expect(Array.from(b.c.slice(0, 3))).toEqual([1, 2.5, 3]);
     sane(b);
   });
   it('broken lines are skipped, never turned into broken candles', () => {
-    const b = parseCsv([
-      'time,open,high,low,close,volume',
-      '2024-01-02 00:00,1.1,1.2,1.0,1.15,5',
-      'this line is nonsense',
-      '2024-01-02 00:01,abc,1.2,1.0,1.15,5',
-      '2024-01-02 00:02,1.1',
-      '2024-01-02 00:03,1.1,,,1.15,5',
-      '2024-01-02 00:04,0,0,0,0,0',
-      '2024-01-02 00:05,-1,1,-2,1,0',
-      '2024-01-02 00:06,1.15,1.25,1.1,1.2,7',
-      '',
-    ].join('\n'));
+    const b = parseCsv(
+      [
+        'time,open,high,low,close,volume',
+        '2024-01-02 00:00,1.1,1.2,1.0,1.15,5',
+        'this line is nonsense',
+        '2024-01-02 00:01,abc,1.2,1.0,1.15,5',
+        '2024-01-02 00:02,1.1',
+        '2024-01-02 00:03,1.1,,,1.15,5',
+        '2024-01-02 00:04,0,0,0,0,0',
+        '2024-01-02 00:05,-1,1,-2,1,0',
+        '2024-01-02 00:06,1.15,1.25,1.1,1.2,7',
+        '',
+      ].join('\n'),
+    );
     sane(b);
     // 00:00 and 00:06 are good; 00:03 has open and close, so its high and low come from them
     expect(Array.from(b.t.slice(0, b.n))).toEqual([T(2024, 1, 2, 0, 0), T(2024, 1, 2, 0, 3), T(2024, 1, 2, 0, 6)]);

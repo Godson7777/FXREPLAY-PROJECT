@@ -7,27 +7,54 @@
 //   npm run build && npm run preview &   then   node tests/e2e/chart-window.mjs
 import { open, demoSession } from './lib.mjs';
 
-const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
+const ok = (c, m) => {
+  console.log((c ? 'PASS ' : 'FAIL ') + m);
+  if (!c) process.exitCode = 1;
+};
 const { browser, ctx, page, errors } = await open();
-await ctx.addInitScript(() => { try { localStorage.setItem('overflowtrade.debug', '1'); localStorage.setItem('overflowtrade.debug.window', '400,600,2000'); } catch {} });
+await ctx.addInitScript(() => {
+  try {
+    localStorage.setItem('overflowtrade.debug', '1');
+    localStorage.setItem('overflowtrade.debug.window', '400,600,2000');
+  } catch {}
+});
 await demoSession(page);
 await page.locator('.ws .chip', { hasText: /^1m$/ }).first().click();
 await page.waitForTimeout(500);
 
-const state = () => page.evaluate(() => {
-  const p = window.__ot.panes[0], ts = p.chart.timeScale(), vr = ts.getVisibleLogicalRange(), tr = ts.getVisibleRange();
-  return { start: p.start, k: p.k, len: p.k - p.start + 1, from: vr ? Math.round(vr.from) : null, to: vr ? Math.round(vr.to) : null, right: +ts.scrollPosition().toFixed(1), tFrom: tr?.from ?? null, lastVisible: vr ? vr.to >= p.k - p.start : null };
-});
+const state = () =>
+  page.evaluate(() => {
+    const p = window.__ot.panes[0],
+      ts = p.chart.timeScale(),
+      vr = ts.getVisibleLogicalRange(),
+      tr = ts.getVisibleRange();
+    return {
+      start: p.start,
+      k: p.k,
+      len: p.k - p.start + 1,
+      from: vr ? Math.round(vr.from) : null,
+      to: vr ? Math.round(vr.to) : null,
+      right: +ts.scrollPosition().toFixed(1),
+      tFrom: tr?.from ?? null,
+      lastVisible: vr ? vr.to >= p.k - p.start : null,
+    };
+  });
 const play = async (ms, speed = '100') => {
   await page.locator('select[title="Playback speed"]').selectOption(speed);
-  await page.keyboard.press('Space'); await page.waitForTimeout(ms); await page.keyboard.press('Space'); await page.waitForTimeout(300);
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(ms);
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(300);
 };
 const box = await page.locator('.ws .pane canvas').first().boundingBox();
 const drag = async (dx, steps = 20) => {
-  const y = box.y + box.height / 2, x0 = box.x + box.width / 2;
-  await page.mouse.move(x0, y); await page.mouse.down();
+  const y = box.y + box.height / 2,
+    x0 = box.x + box.width / 2;
+  await page.mouse.move(x0, y);
+  await page.mouse.down();
   for (let i = 1; i <= steps; i++) await page.mouse.move(x0 + (dx * i) / steps, y);
-  await page.mouse.up(); await page.waitForTimeout(250);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
   await page.mouse.move(box.x + 300, box.y + box.height + 60);
 };
 
@@ -56,7 +83,10 @@ const s2 = await state();
 ok(!s2.lastVisible, `scrolled back: the view now ends ${Math.round(-s2.right)} candles before the latest`);
 await play(9000);
 const s3 = await state();
-ok(s3.tFrom === s2.tFrom, `exactly the same candles stay in view while ${s3.k - s2.k} more are replayed (left edge moved by ${(s3.tFrom - s2.tFrom) / 60} candles)`);
+ok(
+  s3.tFrom === s2.tFrom,
+  `exactly the same candles stay in view while ${s3.k - s2.k} more are replayed (left edge moved by ${(s3.tFrom - s2.tFrom) / 60} candles)`,
+);
 ok(s3.len > 600 && s3.from >= 0, `the candles in view were kept: window grew to ${s3.len}`);
 ok(s3.len <= 2000 + 200, `…but the hard limit holds (${s3.len} ≤ 2,000)`);
 
@@ -68,13 +98,20 @@ ok(s4.len <= 600 && s4.lastVisible, `after returning to the latest candle the wi
 
 // 4) the left edge loads older candles and keeps the view
 let s5 = s4;
-for (let i = 0; i < 12 && s5.start >= s4.start; i++) { await drag(900); s5 = await state(); }
+for (let i = 0; i < 12 && s5.start >= s4.start; i++) {
+  await drag(900);
+  s5 = await state();
+}
 await page.waitForTimeout(400);
 ok(s5.start < s4.start && s5.from >= 0, `scrolling to the left edge loaded older candles (window start ${s4.start} → ${s5.start}), no empty space`);
 const before = await state();
-await drag(900); await drag(900);
+await drag(900);
+await drag(900);
 const after = await state();
-ok(after.start <= before.start && after.tFrom != null && after.tFrom < before.tFrom, `keeps going back in time (${new Date(before.tFrom * 1000).toISOString().slice(0, 16)} → ${new Date(after.tFrom * 1000).toISOString().slice(0, 16)})`);
+ok(
+  after.start <= before.start && after.tFrom != null && after.tFrom < before.tFrom,
+  `keeps going back in time (${new Date(before.tFrom * 1000).toISOString().slice(0, 16)} → ${new Date(after.tFrom * 1000).toISOString().slice(0, 16)})`,
+);
 ok(after.len <= 2000 + 200, `the hard limit holds while scrolling back (${after.len} candles)`);
 
 // 5) a jump forward resets the window and follows
@@ -90,7 +127,10 @@ ok(s7.len <= 400 && s7.lastVisible, `a +1D skip while following: window ${s7.len
 
 // 6) timeframe changes still work with the window
 for (const tf of ['5m', '1H', '1m']) {
-  await page.locator('.ws .chip', { hasText: new RegExp(`^${tf}$`) }).first().click();
+  await page
+    .locator('.ws .chip', { hasText: new RegExp(`^${tf}$`) })
+    .first()
+    .click();
   await page.waitForTimeout(400);
   const s = await state();
   ok(s.len >= 1 && s.len <= 400 && s.lastVisible, `${tf}: window ${s.len}, latest candle in view`);

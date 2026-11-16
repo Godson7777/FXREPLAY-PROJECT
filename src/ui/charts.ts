@@ -21,7 +21,8 @@ export function showTip(e: MouseEvent, html: string) {
   tip.innerHTML = html;
   tip.style.display = 'block';
   const r = tip.getBoundingClientRect();
-  let x = e.clientX + 14, y = e.clientY + 14;
+  let x = e.clientX + 14,
+    y = e.clientY + 14;
   if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
   if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
   tip.style.left = x + 'px';
@@ -124,12 +125,14 @@ export function lineChart(opts: {
     const all = opts.series.flatMap((s) => s.ys).concat(opts.band?.flatMap((b) => [...b.lo, ...b.hi]) ?? []);
     const xsAll = opts.series.flatMap((s) => s.xs);
     if (!xsAll.length) return;
-    let lo = Math.min(...all), hi = Math.max(...all);
+    let lo = Math.min(...all),
+      hi = Math.max(...all);
     if (opts.baseline != null) (lo = Math.min(lo, opts.baseline)), (hi = Math.max(hi, opts.baseline));
     const pad = (hi - lo) * 0.06 || 1;
     lo -= pad;
     hi += pad;
-    const xlo = Math.min(...xsAll), xhi = Math.max(...xsAll) || xlo + 1;
+    const xlo = Math.min(...xsAll),
+      xhi = Math.max(...xsAll) || xlo + 1;
     const x = (v: number) => m.l + ((v - xlo) / (xhi - xlo || 1)) * (W - m.l - m.r);
     const y = (v: number) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
     axisY(root, niceTicks(lo, hi, 5), y, m.l, W - m.r, opts.yFmt);
@@ -155,7 +158,16 @@ export function lineChart(opts: {
         const base = y(opts.zeroArea ? 0 : Math.max(lo, Math.min(hi, opts.baseline ?? lo)));
         root.append(svg('path', { d: `${d}L${x(s.xs[s.xs.length - 1])},${base}L${x(s.xs[0])},${base}Z`, fill: s.color, opacity: 0.16 }));
       }
-      root.append(svg('path', { d, fill: 'none', stroke: s.color, 'stroke-width': s.width ?? 2, 'stroke-linejoin': 'round', 'stroke-dasharray': s.dashed ? '5 4' : 'none' }));
+      root.append(
+        svg('path', {
+          d,
+          fill: 'none',
+          stroke: s.color,
+          'stroke-width': s.width ?? 2,
+          'stroke-linejoin': 'round',
+          'stroke-dasharray': s.dashed ? '5 4' : 'none',
+        }),
+      );
     }
     // crosshair + tooltip
     const cross = svg('line', { y1: m.t, y2: H - m.b, class: 'crossline', visibility: 'hidden' });
@@ -173,7 +185,8 @@ export function lineChart(opts: {
       const rows: string[] = [];
       let cx = 0;
       opts.series.forEach((s, si) => {
-        let bi = 0, bd = Infinity;
+        let bi = 0,
+          bd = Infinity;
         for (let i = 0; i < s.xs.length; i++) {
           const d = Math.abs(s.xs[i] - xv);
           if (d < bd) (bd = d), (bi = i);
@@ -213,7 +226,8 @@ export function barChart(opts: { items: BarItem[]; height?: number; yFmt: (v: nu
     const items = opts.items;
     if (!items.length) return;
     const m = { l: 60, r: 10, t: 16, b: 34 };
-    let lo = Math.min(0, ...items.map((i) => i.value)), hi = Math.max(0, ...items.map((i) => i.value));
+    let lo = Math.min(0, ...items.map((i) => i.value)),
+      hi = Math.max(0, ...items.map((i) => i.value));
     const pad = (hi - lo) * 0.1 || 1;
     if (hi > 0) hi += pad;
     if (lo < 0) lo -= pad;
@@ -225,14 +239,16 @@ export function barChart(opts: { items: BarItem[]; height?: number; yFmt: (v: nu
     items.forEach((it, i) => {
       const w = Math.max(1, Math.min(bw - gap, 64));
       const x0 = m.l + i * bw + (bw - w) / 2;
-      const y0 = y(Math.max(0, it.value)), y1 = y(Math.min(0, it.value));
-      const color = it.color ?? (it.value >= 0 ? opts.posColor ?? 'var(--good)' : opts.negColor ?? 'var(--bad)');
+      const y0 = y(Math.max(0, it.value)),
+        y1 = y(Math.min(0, it.value));
+      const color = it.color ?? (it.value >= 0 ? (opts.posColor ?? 'var(--good)') : (opts.negColor ?? 'var(--bad)'));
       const hgt = Math.max(1, y1 - y0);
       const r = Math.min(4, w / 2, hgt);
       // rounded at the data end only, flat at the baseline
-      const d = it.value >= 0
-        ? `M${x0},${y1}V${y0 + r}Q${x0},${y0} ${x0 + r},${y0}H${x0 + w - r}Q${x0 + w},${y0} ${x0 + w},${y0 + r}V${y1}Z`
-        : `M${x0},${y0}V${y1 - r}Q${x0},${y1} ${x0 + r},${y1}H${x0 + w - r}Q${x0 + w},${y1} ${x0 + w},${y1 - r}V${y0}Z`;
+      const d =
+        it.value >= 0
+          ? `M${x0},${y1}V${y0 + r}Q${x0},${y0} ${x0 + r},${y0}H${x0 + w - r}Q${x0 + w},${y0} ${x0 + w},${y0 + r}V${y1}Z`
+          : `M${x0},${y0}V${y1 - r}Q${x0},${y1} ${x0 + r},${y1}H${x0 + w - r}Q${x0 + w},${y1} ${x0 + w},${y1 - r}V${y0}Z`;
       root.append(svg('path', { d, fill: color }));
       if (opts.showValues && items.length <= 12 && it.value !== 0) {
         const t = svg('text', { x: x0 + w / 2, y: it.value >= 0 ? y0 - 4 : y1 + 11, 'text-anchor': 'middle', class: 'val' });
@@ -261,14 +277,24 @@ export interface ScatterPt {
   tip: string;
 }
 
-export function scatter(opts: { points: ScatterPt[]; height?: number; xFmt: (v: number) => string; yFmt: (v: number) => string; xLabel: string; yLabel: string; diagonal?: boolean }) {
+export function scatter(opts: {
+  points: ScatterPt[];
+  height?: number;
+  xFmt: (v: number) => string;
+  yFmt: (v: number) => string;
+  xLabel: string;
+  yLabel: string;
+  diagonal?: boolean;
+}) {
   const H = opts.height ?? 260;
   return responsive(H, (root, W) => {
     const P = opts.points;
     if (!P.length) return;
     const m = { l: 56, r: 14, t: 12, b: 38 };
-    let xlo = Math.min(0, ...P.map((p) => p.x)), xhi = Math.max(...P.map((p) => p.x));
-    let ylo = Math.min(0, ...P.map((p) => p.y)), yhi = Math.max(...P.map((p) => p.y));
+    let xlo = Math.min(0, ...P.map((p) => p.x)),
+      xhi = Math.max(...P.map((p) => p.x));
+    let ylo = Math.min(0, ...P.map((p) => p.y)),
+      yhi = Math.max(...P.map((p) => p.y));
     xhi += (xhi - xlo) * 0.05 || 1;
     yhi += (yhi - ylo) * 0.05 || 1;
     const x = (v: number) => m.l + ((v - xlo) / (xhi - xlo)) * (W - m.l - m.r);

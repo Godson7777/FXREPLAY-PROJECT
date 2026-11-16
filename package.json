@@ -14,13 +14,27 @@
     "audit:live": "node tests/e2e/live.mjs",
     "audit:human": "node tests/e2e/human-backtest.mjs",
     "audit:visible": "node tests/e2e/analytics-visible.mjs",
-    "audit:window": "node tests/e2e/chart-window.mjs"
+    "audit:window": "node tests/e2e/chart-window.mjs",
+    "lint": "biome lint",
+    "format": "biome format --write",
+    "format:check": "biome format",
+    "unused": "knip",
+    "check": "tsc --noEmit && biome lint && biome format && vitest run",
+    "audit:numbers": "node tests/e2e/analytics-numbers.mjs",
+    "audit:data": "node tests/e2e/data-safety.mjs",
+    "audit:rough": "node tests/e2e/rough-input.mjs",
+    "audit:sessions": "node tests/e2e/session-types.mjs",
+    "audit:controls": "node tests/e2e/replay-controls.mjs",
+    "audit:trading": "node tests/e2e/trading-scenarios.mjs",
+    "audit:crawl": "node tests/e2e/crawl.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
     "lightweight-charts": "^5.2.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
+    "knip": "^6.45.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"

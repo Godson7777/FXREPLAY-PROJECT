@@ -1,7 +1,7 @@
 import type { Bars } from './types';
 import type { OffsetFn } from './tz';
 
-export type TfUnit = 's' | 'm' | 'h' | 'D' | 'W' | 'M';
+type TfUnit = 's' | 'm' | 'h' | 'D' | 'W' | 'M';
 
 export interface Timeframe {
   unit: TfUnit;
@@ -25,20 +25,36 @@ export function parseTf(input: string): Timeframe | null {
   if (!m || (!m[1] && !m[2])) return null;
   const n = m[1] ? parseInt(m[1], 10) : 1;
   if (!(n >= 1 && n <= 100000)) return null;
-  let u = m[2] || 'm';
+  const u = m[2] || 'm';
   const map: Record<string, TfUnit> = {
-    s: 's', m: 'm', min: 'm', mins: 'm', minute: 'm', minutes: 'm',
-    h: 'h', H: 'h', hour: 'h', hours: 'h',
-    d: 'D', D: 'D', day: 'D', days: 'D',
-    w: 'W', W: 'W', week: 'W', weeks: 'W',
-    M: 'M', month: 'M', months: 'M',
+    s: 's',
+    m: 'm',
+    min: 'm',
+    mins: 'm',
+    minute: 'm',
+    minutes: 'm',
+    h: 'h',
+    H: 'h',
+    hour: 'h',
+    hours: 'h',
+    d: 'D',
+    D: 'D',
+    day: 'D',
+    days: 'D',
+    w: 'W',
+    W: 'W',
+    week: 'W',
+    weeks: 'W',
+    M: 'M',
+    month: 'M',
+    months: 'M',
   };
   const unit = map[u];
   if (!unit) return null;
   return makeTf(unit, n);
 }
 
-export function makeTf(unit: TfUnit, n: number): Timeframe {
+function makeTf(unit: TfUnit, n: number): Timeframe {
   const label = unit === 's' ? `${n}s` : unit === 'm' ? `${n}m` : unit === 'h' ? `${n}H` : `${n === 1 ? '' : n}${unit}`;
   return { unit, n, sec: UNIT_SEC[unit] * n, label };
 }
@@ -98,7 +114,11 @@ export function aggregate(b: Bars, tf: Timeframe, off: OffsetFn): Agg {
   const cap = N; // worst case: 1:1
   const time = new Float64Array(cap);
   const start = new Int32Array(cap);
-  const o = new Float64Array(cap), h = new Float64Array(cap), l = new Float64Array(cap), c = new Float64Array(cap), v = new Float64Array(cap);
+  const o = new Float64Array(cap),
+    h = new Float64Array(cap),
+    l = new Float64Array(cap),
+    c = new Float64Array(cap),
+    v = new Float64Array(cap);
   const baseToAgg = new Int32Array(N);
   let k = -1;
   let cur = -Infinity;
@@ -126,9 +146,15 @@ export function aggregate(b: Bars, tf: Timeframe, off: OffsetFn): Agg {
   }
   const n = k + 1;
   return {
-    tf, n,
-    time: time.slice(0, n), start: start.slice(0, n),
-    o: o.slice(0, n), h: h.slice(0, n), l: l.slice(0, n), c: c.slice(0, n), v: v.slice(0, n),
+    tf,
+    n,
+    time: time.slice(0, n),
+    start: start.slice(0, n),
+    o: o.slice(0, n),
+    h: h.slice(0, n),
+    l: l.slice(0, n),
+    c: c.slice(0, n),
+    v: v.slice(0, n),
     baseToAgg,
   };
 }
@@ -140,7 +166,9 @@ export function partialCandle(b: Bars, a: Agg, k: number, cursor: number) {
   if (e === (k + 1 < a.n ? a.start[k + 1] - 1 : b.n - 1)) {
     return { time: a.time[k], open: a.o[k], high: a.h[k], low: a.l[k], close: a.c[k], volume: a.v[k] };
   }
-  let hi = -Infinity, lo = Infinity, vol = 0;
+  let hi = -Infinity,
+    lo = Infinity,
+    vol = 0;
   for (let i = s; i <= e; i++) {
     if (b.h[i] > hi) hi = b.h[i];
     if (b.l[i] < lo) lo = b.l[i];
@@ -148,5 +176,3 @@ export function partialCandle(b: Bars, a: Agg, k: number, cursor: number) {
   }
   return { time: a.time[k], open: b.o[s], high: hi, low: lo, close: b.c[e], volume: vol };
 }
-
-export const DEFAULT_TFS = ['1m', '5m', '15m', '30m', '1H', '4H', 'D', 'W'];

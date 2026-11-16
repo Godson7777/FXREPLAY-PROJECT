@@ -19,8 +19,20 @@ const spec = { symbol: 'EURUSD', pipSize: 0.0001, contractSize: 100000, digits: 
 /** Build a session whose trades have the given R results, 1% risk each, one trade per weekday. */
 function session(rs: number[], opts: { trend?: (i: number) => Trend; vol?: (i: number) => Vol; perDay?: number; id?: string; balance?: number } = {}): Session {
   const s = newSession({
-    id: opts.id ?? 's1', name: 'Test', description: '', symbols: ['EURUSD'], start: T0, end: null, balance: opts.balance ?? 10000,
-    commissionPerLot: 0, spreadPips: { '*': 0 }, slFirst: true, timezone: 'UTC', riskPct: 1, createdAt: 0, specs: { EURUSD: spec },
+    id: opts.id ?? 's1',
+    name: 'Test',
+    description: '',
+    symbols: ['EURUSD'],
+    start: T0,
+    end: null,
+    balance: opts.balance ?? 10000,
+    commissionPerLot: 0,
+    spreadPips: { '*': 0 },
+    slFirst: true,
+    timezone: 'UTC',
+    riskPct: 1,
+    createdAt: 0,
+    specs: { EURUSD: spec },
   });
   let bal = s.balance;
   let day = 0;
@@ -35,10 +47,36 @@ function session(rs: number[], opts: { trend?: (i: number) => Trend; vol?: (i: n
     const pnl = r * risk;
     bal += pnl;
     const t: Trade = {
-      id: i + 1, symbol: 'EURUSD', side: i % 2 ? 'short' : 'long', lots: 1, entry: 1.1, exit: 1.1 + r * 0.001, entryTime, exitTime: entryTime + 1800,
-      gross: pnl, commission: 0, pnl, pips: r * 10, risk, r, maePips: 5, mfePips: Math.max(0, r) * 10 + 2, maeR: 0.5, mfeR: Math.max(0, r) + 0.2,
-      holdSec: 1800, exitReason: r > 0 ? 'tp' : 'sl', orderType: 'market', tags: [], note: '', balanceAfter: bal,
-      regime: { trend: opts.trend?.(i) ?? (['up', 'down', 'range'] as Trend[])[i % 3], vol: opts.vol?.(i) ?? (['low', 'normal', 'high'] as Vol[])[Math.floor(i / 3) % 3], adx: 25, atrPct: 0.001 },
+      id: i + 1,
+      symbol: 'EURUSD',
+      side: i % 2 ? 'short' : 'long',
+      lots: 1,
+      entry: 1.1,
+      exit: 1.1 + r * 0.001,
+      entryTime,
+      exitTime: entryTime + 1800,
+      gross: pnl,
+      commission: 0,
+      pnl,
+      pips: r * 10,
+      risk,
+      r,
+      maePips: 5,
+      mfePips: Math.max(0, r) * 10 + 2,
+      maeR: 0.5,
+      mfeR: Math.max(0, r) + 0.2,
+      holdSec: 1800,
+      exitReason: r > 0 ? 'tp' : 'sl',
+      orderType: 'market',
+      tags: [],
+      note: '',
+      balanceAfter: bal,
+      regime: {
+        trend: opts.trend?.(i) ?? (['up', 'down', 'range'] as Trend[])[i % 3],
+        vol: opts.vol?.(i) ?? (['low', 'normal', 'high'] as Vol[])[Math.floor(i / 3) % 3],
+        adx: 25,
+        atrPct: 0.001,
+      },
     };
     s.state.broker.trades.push(t);
   });
@@ -75,12 +113,18 @@ describe('math', () => {
     expect(quantile([1, 2, 3, 4], 0.25)).toBeCloseTo(1.75);
     expect(linreg([1, 3, 5, 7]).r2).toBeCloseTo(1);
     expect(linreg([1, 3, 5, 7]).slope).toBeCloseTo(2);
-    const a = [[0, 0], [10, 100]] as const;
+    const a = [
+      [0, 0],
+      [10, 100],
+    ] as const;
     expect(lerpAnchors(5, a)).toBe(50);
     expect(lerpAnchors(-1, a)).toBe(0);
     expect(lerpAnchors(Infinity, a)).toBe(100);
     expect(lerpAnchors(null, a)).toBeNull();
-    const desc = [[0, 100], [0.4, 0]] as const;
+    const desc = [
+      [0, 100],
+      [0.4, 0],
+    ] as const;
     expect(lerpAnchors(0.2, desc)).toBe(50);
     expect(skewness([1, 2, 3])).toBeCloseTo(0);
     expect(kurtosis([-1, 1, -1, 1])).toBeCloseTo(1);
@@ -209,15 +253,31 @@ describe('Monte Carlo', () => {
   const rets = edgeSeries(200, 2).map((r) => r * 0.01);
   it('is deterministic and produces consistent bands', () => {
     const o = { runs: 300, horizon: 50, mode: 'bootstrap' as const, skip: 0, friction: 0, seed: 1, ruinLevels: [0.1, 0.2, 0.3] };
-    const a = simulatePaths(rets, rets.map(() => 0.0005), o)!;
-    const b = simulatePaths(rets, rets.map(() => 0.0005), o)!;
+    const a = simulatePaths(
+      rets,
+      rets.map(() => 0.0005),
+      o,
+    )!;
+    const b = simulatePaths(
+      rets,
+      rets.map(() => 0.0005),
+      o,
+    )!;
     expect(a.final.p50).toBe(b.final.p50);
     expect(a.bands.p50).toHaveLength(51);
     expect(a.bands.p5[50]).toBeLessThanOrEqual(a.bands.p95[50]);
     expect(a.ruin[0].prob).toBeGreaterThanOrEqual(a.ruin[2].prob);
-    const stressed = simulatePaths(rets, rets.map(() => 0.0005), { ...o, friction: 4, skip: 0.1 })!;
+    const stressed = simulatePaths(
+      rets,
+      rets.map(() => 0.0005),
+      { ...o, friction: 4, skip: 0.1 },
+    )!;
     expect(stressed.final.p50).toBeLessThan(a.final.p50);
-    const sh = simulatePaths(rets, rets.map(() => 0), { ...o, mode: 'shuffle' })!;
+    const sh = simulatePaths(
+      rets,
+      rets.map(() => 0),
+      { ...o, mode: 'shuffle' },
+    )!;
     expect(sh.horizon).toBe(200);
     expect(sh.final.p5).toBeCloseTo(sh.final.p95, 8); // same trades, any order → same final equity
   });
@@ -227,8 +287,20 @@ describe('Monte Carlo', () => {
     expect(rows[0].medianDD).toBeLessThan(rows[2].medianDD);
     expect(ruinProbability(rets, 0.05)!).toBeGreaterThan(ruinProbability(rets, 0.4)!);
     const rules = { profitTarget: 0.1, maxDailyLoss: 0.05, maxTotalLoss: 0.1, minTradingDays: 4, trailingDrawdown: false };
-    const good = propFirmSim(units.map((u) => u * 0.01), [0, 1, 1, 2], rules, 500, 60)!;
-    const bad = propFirmSim(edgeSeries(200, 2, 0.3, 1, -1).map((u) => u * 0.01), [0, 1, 1, 2], rules, 500, 60)!;
+    const good = propFirmSim(
+      units.map((u) => u * 0.01),
+      [0, 1, 1, 2],
+      rules,
+      500,
+      60,
+    )!;
+    const bad = propFirmSim(
+      edgeSeries(200, 2, 0.3, 1, -1).map((u) => u * 0.01),
+      [0, 1, 1, 2],
+      rules,
+      500,
+      60,
+    )!;
     expect(good.pass).toBeGreaterThan(0.5);
     expect(bad.pass).toBeLessThan(0.1);
     expect(good.pass + good.failDaily + good.failTotal + good.unfinished).toBeCloseTo(1);

@@ -6,7 +6,7 @@ import { emptyBars, type Bars, type InstrumentSpec } from '../core/types';
  * WS    wss://api.hyperliquid.xyz/ws           — candle + trades streams
  */
 export const HL_INFO = 'https://api.hyperliquid.xyz/info';
-export const HL_WS = 'wss://api.hyperliquid.xyz/ws';
+const HL_WS = 'wss://api.hyperliquid.xyz/ws';
 /** Hyperliquid only serves the most recent 5000 candles per interval. */
 export const HL_MAX_CANDLES = 5000;
 /** default taker fee (base tier), % of notional */
@@ -27,7 +27,7 @@ export const coinLabel = (name: string) => {
   return i < 0 ? name : `${name.slice(i + 1)} · ${name.slice(0, i)}`;
 };
 
-export interface HlCandle {
+interface HlCandle {
   t: number; // open time, ms
   T?: number;
   s?: string;
@@ -88,10 +88,12 @@ async function post<T>(body: unknown, signal?: AbortSignal, f: typeof fetch = fe
 
 type Universe = { universe: (HlCoin & { isDelisted?: boolean })[] };
 const listed = (m: Universe | null | undefined): HlCoin[] =>
-  (m?.universe ?? []).filter((u) => !u.isDelisted && u.name).map((u) => {
-    const i = u.name.indexOf(':');
-    return { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, ...(i > 0 ? { dex: u.name.slice(0, i) } : {}) };
-  });
+  (m?.universe ?? [])
+    .filter((u) => !u.isDelisted && u.name)
+    .map((u) => {
+      const i = u.name.indexOf(':');
+      return { name: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, ...(i > 0 ? { dex: u.name.slice(0, i) } : {}) };
+    });
 
 let metaCache: Promise<HlCoin[]> | null = null;
 /**
@@ -114,13 +116,16 @@ export function hlCoins(f: typeof fetch = fetch): Promise<HlCoin[]> {
   return metaCache;
 }
 
-export function candleRow(c: HlCandle): number[] {
+function candleRow(c: HlCandle): number[] {
   return [Math.floor(c.t / 1000), +c.o, +c.h, +c.l, +c.c, +c.v];
 }
 
 /** Candles between two UTC-second times, paging forward 5000 at a time. */
 export async function hlCandles(
-  coin: string, interval: HlInterval, from: number, to: number,
+  coin: string,
+  interval: HlInterval,
+  from: number,
+  to: number,
   o: { signal?: AbortSignal; onProgress?: (pct: number, n: number) => void; fetch?: typeof fetch } = {},
 ): Promise<number[][]> {
   const sec = HL_INTERVALS.find((x) => x.id === interval)!.sec;
@@ -191,8 +196,8 @@ export function applyTick(b: Bars, t: number, px: number): 'update' | 'append' |
 export type FeedStatus = 'connecting' | 'live' | 'polling' | 'reconnecting' | 'offline';
 
 /** no message for this long on an open socket means it is dead (the server answers a ping every 10 s) */
-export const FEED_STALE_MS = 25000;
-export const FEED_POLL_MS = 3000;
+const FEED_STALE_MS = 25000;
+const FEED_POLL_MS = 3000;
 
 export interface FeedOptions {
   url?: string;

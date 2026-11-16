@@ -68,7 +68,10 @@ describe('trade CSV import', () => {
     const r = buildReport(recs, { initial: 100000, off: offsetFn('UTC') })!;
     expect(r.synthetic).toBe('none');
     expect(badges(r, [s]).map((b) => b.id)).toContain('imported');
-    const e = eligibility({ id: 'st', name: 'S', author: 'A', timeframe: '', description: '', sessionIds: ['imp'], published: true, createdAt: 1, updatedAt: 1 }, r);
+    const e = eligibility(
+      { id: 'st', name: 'S', author: 'A', timeframe: '', description: '', sessionIds: ['imp'], published: true, createdAt: 1, updatedAt: 1 },
+      r,
+    );
     expect(e.reasons.join(' ')).not.toMatch(/not on this device|synthetic/);
   });
 });

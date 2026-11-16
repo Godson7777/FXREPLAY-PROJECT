@@ -1,6 +1,22 @@
 import {
-  AreaSeries, BarSeries, CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, HistogramSeries, LineSeries, LineStyle,
-  type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type SeriesType, type Time, type UTCTimestamp,
+  AreaSeries,
+  BarSeries,
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  createSeriesMarkers,
+  CrosshairMode,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  type IChartApi,
+  type IPriceLine,
+  type ISeriesApi,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
+  type SeriesType,
+  type Time,
+  type UTCTimestamp,
 } from 'lightweight-charts';
 import { aggregate, parseTf, partialCandle, type Agg, type Timeframe } from '../core/timeframe';
 import { indexAtOrBefore, type Bars } from '../core/types';
@@ -36,7 +52,7 @@ const IND_WINDOW = 3000;
 const RIGHT_OFFSET = 12;
 const aggCache = new Map<string, Agg>();
 
-export function getAgg(sym: string, b: Bars, tf: Timeframe, tz: string): Agg {
+function getAgg(sym: string, b: Bars, tf: Timeframe, tz: string): Agg {
   const key = `${sym}|${b.n}|${b.t[0]}|${tf.label}|${tz}`;
   let a = aggCache.get(key);
   if (!a) {
@@ -108,7 +124,7 @@ interface LineWant {
   tag?: { text: string; action?: LineAction; id: number; tip: string };
 }
 
-export const CHART_TYPES: { type: ChartType; label: string }[] = [
+const CHART_TYPES: { type: ChartType; label: string }[] = [
   { type: 'candles', label: 'Candles' },
   { type: 'hollow', label: 'Hollow candles' },
   { type: 'heikin', label: 'Heikin Ashi' },
@@ -258,7 +274,15 @@ export class ChartPane {
     return this.ind.map((x) => {
       const cfg = this.cfg.indicators.find((c) => c.id === x.id);
       const def = cfg && indicatorDef(cfg.type);
-      const label = def ? `${def.label}${Object.keys(def.params).length ? ` (${Object.keys(def.params).map((k) => cfg!.params[k] ?? def.params[k]).join(', ')})` : ''}` : x.id;
+      const label = def
+        ? `${def.label}${
+            Object.keys(def.params).length
+              ? ` (${Object.keys(def.params)
+                  .map((k) => cfg!.params[k] ?? def.params[k])
+                  .join(', ')})`
+              : ''
+          }`
+        : x.id;
       return { label, color: cfg?.color ?? this.th.muted, values: x.series.map((s) => (sd.get(s) as { value?: number } | undefined)?.value ?? NaN) };
     });
   }
@@ -270,7 +294,8 @@ export class ChartPane {
       const cfg = this.cfg.indicators.find((c) => c.id === x.id);
       const def = cfg && indicatorDef(cfg.type);
       return {
-        label: def?.label ?? x.id, color: cfg?.color ?? this.th.muted,
+        label: def?.label ?? x.id,
+        color: cfg?.color ?? this.th.muted,
         values: x.series.map((s) => {
           const d = s.data();
           const last = d[d.length - 1] as { value?: number } | undefined;
@@ -317,8 +342,10 @@ export class ChartPane {
   }
 
   private mainOptions() {
-    const th = this.th, t = this.chartType();
-    const up = th.up, dn = th.down;
+    const th = this.th,
+      t = this.chartType();
+    const up = th.up,
+      dn = th.down;
     if (t === 'line') return { color: th.series1, lineWidth: 2 as const };
     if (t === 'area') return { lineColor: th.series1, topColor: withAlpha(th.series1, 0.32), bottomColor: withAlpha(th.series1, 0), lineWidth: 2 as const };
     if (t === 'bars') return { upColor: up, downColor: dn, thinBars: false };
@@ -390,7 +417,11 @@ export class ChartPane {
     const tfBtn = h('button', { class: 'pane-tf', title: 'Change timeframe (type any: 7m, 2H, 3D…)' }, this.cfg.tf);
     tfBtn.onclick = () => this.host.onTfRequest(this);
     const ct = this.chartType();
-    const typeSel = h('select', { class: 'pane-type', title: 'Chart type' }, ...CHART_TYPES.map((c) => h('option', { value: c.type, selected: c.type === ct }, c.label)));
+    const typeSel = h(
+      'select',
+      { class: 'pane-type', title: 'Chart type' },
+      ...CHART_TYPES.map((c) => h('option', { value: c.type, selected: c.type === ct }, c.label)),
+    );
     typeSel.onchange = () => this.host.setChartType(this, typeSel.value as ChartType);
     this.header.append(sel, tfBtn, typeSel);
   }
@@ -436,8 +467,12 @@ export class ChartPane {
       this.bars = b;
       this.agg = getAgg(this.cfg.symbol, b, this.tf, this.host.tz);
     } else {
-      const a = this.agg, k = a.n - 1, s0 = a.start[k];
-      let hi = -Infinity, lo = Infinity, v = 0;
+      const a = this.agg,
+        k = a.n - 1,
+        s0 = a.start[k];
+      let hi = -Infinity,
+        lo = Infinity,
+        v = 0;
       for (let i = s0; i < b.n; i++) {
         if (b.h[i] > hi) hi = b.h[i];
         if (b.l[i] < lo) lo = b.l[i];
@@ -594,10 +629,15 @@ export class ChartPane {
   // ---- indicators -------------------------------------------------------------
 
   private series(from: number): Series {
-    const a = this.agg, k = this.k;
+    const a = this.agg,
+      k = this.k;
     const cursor = this.host.replay.cursor[this.cfg.symbol];
     const n = k - from + 1;
-    const o = a.o.slice(from, k + 1), hh = a.h.slice(from, k + 1), l = a.l.slice(from, k + 1), c = a.c.slice(from, k + 1), v = a.v.slice(from, k + 1);
+    const o = a.o.slice(from, k + 1),
+      hh = a.h.slice(from, k + 1),
+      l = a.l.slice(from, k + 1),
+      c = a.c.slice(from, k + 1),
+      v = a.v.slice(from, k + 1);
     const p = partialCandle(this.bars, a, k, cursor);
     o[n - 1] = p.open;
     hh[n - 1] = p.high;
@@ -635,12 +675,15 @@ export class ChartPane {
           const val = o.values[i];
           const t = data.time[i] as UTCTimestamp;
           if (isNaN(val)) pts.push({ time: t });
-          else pts.push(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? this.th.up : this.th.down } : { time: t, value: val });
+          else
+            pts.push(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? this.th.up : this.th.down } : { time: t, value: val });
         }
         (s as ISeriesApi<'Line'>).setData(pts);
         created.push(s);
       });
-      if (def.levels && created[0]) for (const lv of def.levels) created[created.length - 1].createPriceLine({ price: lv, color: this.th.muted, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
+      if (def.levels && created[0])
+        for (const lv of def.levels)
+          created[created.length - 1].createPriceLine({ price: lv, color: this.th.muted, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
       if (pane > 0) this.chart.panes()[pane]?.setHeight(110);
       this.ind.push({ id: cfg.id, series: created, pane });
     });
@@ -661,7 +704,10 @@ export class ChartPane {
           const val = o.values[i];
           const t = data.time[i] as UTCTimestamp;
           if (isNaN(val)) (s as ISeriesApi<'Line'>).update({ time: t });
-          else (s as ISeriesApi<'Line'>).update(o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? this.th.up : this.th.down } : { time: t, value: val });
+          else
+            (s as ISeriesApi<'Line'>).update(
+              o.kind === 'hist' && cfg.type === 'macd' ? { time: t, value: val, color: val >= 0 ? this.th.up : this.th.down } : { time: t, value: val },
+            );
         }
       });
     });
@@ -747,22 +793,91 @@ export class ChartPane {
       const fl = br.floating(p);
       const side = p.side === 'long' ? 'BUY' : 'SELL';
       const lev = p.leverage ? ` ${p.leverage}×` : '';
-      want.set(`p${p.id}`, { price: p.entry, color: p.side === 'long' ? this.th.series2 : this.th.series3, title: '', style: LineStyle.Solid, width: 2,
-        tag: { text: `${side} ${p.lots}${lev} ${money(fl, true)}`, action: 'close', id: p.id, tip: `Close position #${p.id} at market` } });
-      if (p.sl != null) want.set(`s${p.id}`, { price: p.sl, color: this.th.down, title: '', style: LineStyle.Dashed, width: 1,
-        tag: { text: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`, action: 'clear-sl', id: p.id, tip: 'Remove the stop loss' } });
-      if (p.tp != null) want.set(`t${p.id}`, { price: p.tp, color: this.th.up, title: '', style: LineStyle.Dashed, width: 1,
-        tag: { text: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`, action: 'clear-tp', id: p.id, tip: 'Remove the take profit' } });
-      if (p.liq != null) want.set(`l${p.id}`, { price: p.liq, color: '#e8890c', title: '', style: LineStyle.SparseDotted, width: 1,
-        tag: { text: `LIQ ${p.liq.toFixed(dg)}`, id: p.id, tip: `Liquidation price — the position loses its ${money(p.margin ?? 0)} margin here` } });
+      want.set(`p${p.id}`, {
+        price: p.entry,
+        color: p.side === 'long' ? this.th.series2 : this.th.series3,
+        title: '',
+        style: LineStyle.Solid,
+        width: 2,
+        tag: { text: `${side} ${p.lots}${lev} ${money(fl, true)}`, action: 'close', id: p.id, tip: `Close position #${p.id} at market` },
+      });
+      if (p.sl != null)
+        want.set(`s${p.id}`, {
+          price: p.sl,
+          color: this.th.down,
+          title: '',
+          style: LineStyle.Dashed,
+          width: 1,
+          tag: {
+            text: `SL ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.sl - p.entry), p.lots, p.sl), true)}`,
+            action: 'clear-sl',
+            id: p.id,
+            tip: 'Remove the stop loss',
+          },
+        });
+      if (p.tp != null)
+        want.set(`t${p.id}`, {
+          price: p.tp,
+          color: this.th.up,
+          title: '',
+          style: LineStyle.Dashed,
+          width: 1,
+          tag: {
+            text: `TP ${money(br.value(sym, (p.side === 'long' ? 1 : -1) * (p.tp - p.entry), p.lots, p.tp), true)}`,
+            action: 'clear-tp',
+            id: p.id,
+            tip: 'Remove the take profit',
+          },
+        });
+      if (p.liq != null)
+        want.set(`l${p.id}`, {
+          price: p.liq,
+          color: '#e8890c',
+          title: '',
+          style: LineStyle.SparseDotted,
+          width: 1,
+          tag: { text: `LIQ ${p.liq.toFixed(dg)}`, id: p.id, tip: `Liquidation price — the position loses its ${money(p.margin ?? 0)} margin here` },
+        });
     }
     for (const o of br.s.orders) {
       if (o.symbol !== sym) continue;
-      want.set(`o${o.id}`, { price: o.price, color: '#d4a24c', title: '', style: LineStyle.Dotted, width: 1,
-        tag: { text: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, action: 'cancel', id: o.id, tip: `Cancel order #${o.id}` } });
+      want.set(`o${o.id}`, {
+        price: o.price,
+        color: '#d4a24c',
+        title: '',
+        style: LineStyle.Dotted,
+        width: 1,
+        tag: { text: `${o.side === 'long' ? 'BUY' : 'SELL'} ${o.type.toUpperCase()} ${o.lots}`, action: 'cancel', id: o.id, tip: `Cancel order #${o.id}` },
+      });
       const od = o.side === 'long' ? 1 : -1;
-      if (o.sl != null) want.set(`os${o.id}`, { price: o.sl, color: this.th.down, title: '', style: LineStyle.Dotted, width: 1, tag: { text: `SL ${money(br.value(sym, od * (o.sl - o.price), o.lots, o.sl), true)} · ${o.lots}`, action: 'clear-osl', id: o.id, tip: 'Remove the order stop loss' } });
-      if (o.tp != null) want.set(`ot${o.id}`, { price: o.tp, color: this.th.up, title: '', style: LineStyle.Dotted, width: 1, tag: { text: `TP ${money(br.value(sym, od * (o.tp - o.price), o.lots, o.tp), true)} · ${o.lots}`, action: 'clear-otp', id: o.id, tip: 'Remove the order take profit' } });
+      if (o.sl != null)
+        want.set(`os${o.id}`, {
+          price: o.sl,
+          color: this.th.down,
+          title: '',
+          style: LineStyle.Dotted,
+          width: 1,
+          tag: {
+            text: `SL ${money(br.value(sym, od * (o.sl - o.price), o.lots, o.sl), true)} · ${o.lots}`,
+            action: 'clear-osl',
+            id: o.id,
+            tip: 'Remove the order stop loss',
+          },
+        });
+      if (o.tp != null)
+        want.set(`ot${o.id}`, {
+          price: o.tp,
+          color: this.th.up,
+          title: '',
+          style: LineStyle.Dotted,
+          width: 1,
+          tag: {
+            text: `TP ${money(br.value(sym, od * (o.tp - o.price), o.lots, o.tp), true)} · ${o.lots}`,
+            action: 'clear-otp',
+            id: o.id,
+            tip: 'Remove the order take profit',
+          },
+        });
     }
     this.syncTags(want);
     for (const [key, pl] of this.priceLines) {
@@ -785,14 +900,36 @@ export class ChartPane {
     const ms: SeriesMarker<Time>[] = [];
     const trades = br.s.trades.filter((t) => t.symbol === sym).slice(-300);
     for (const t of trades) {
-      const te = this.candleTimeFor(t.entryTime), tx = this.candleTimeFor(t.exitTime);
-      if (te != null) ms.push({ time: te as UTCTimestamp, position: t.side === 'long' ? 'belowBar' : 'aboveBar', color: t.side === 'long' ? this.th.series2 : this.th.series3, shape: t.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${t.id}` });
-      if (tx != null) ms.push({ time: tx as UTCTimestamp, position: t.side === 'long' ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? this.th.up : this.th.down, shape: 'circle', text: `${money(t.pnl, true)}` });
+      const te = this.candleTimeFor(t.entryTime),
+        tx = this.candleTimeFor(t.exitTime);
+      if (te != null)
+        ms.push({
+          time: te as UTCTimestamp,
+          position: t.side === 'long' ? 'belowBar' : 'aboveBar',
+          color: t.side === 'long' ? this.th.series2 : this.th.series3,
+          shape: t.side === 'long' ? 'arrowUp' : 'arrowDown',
+          text: `#${t.id}`,
+        });
+      if (tx != null)
+        ms.push({
+          time: tx as UTCTimestamp,
+          position: t.side === 'long' ? 'aboveBar' : 'belowBar',
+          color: t.pnl >= 0 ? this.th.up : this.th.down,
+          shape: 'circle',
+          text: `${money(t.pnl, true)}`,
+        });
     }
     for (const p of br.s.positions) {
       if (p.symbol !== sym) continue;
       const te = this.candleTimeFor(p.entryTime);
-      if (te != null) ms.push({ time: te as UTCTimestamp, position: p.side === 'long' ? 'belowBar' : 'aboveBar', color: p.side === 'long' ? this.th.series2 : this.th.series3, shape: p.side === 'long' ? 'arrowUp' : 'arrowDown', text: `#${p.id}` });
+      if (te != null)
+        ms.push({
+          time: te as UTCTimestamp,
+          position: p.side === 'long' ? 'belowBar' : 'aboveBar',
+          color: p.side === 'long' ? this.th.series2 : this.th.series3,
+          shape: p.side === 'long' ? 'arrowUp' : 'arrowDown',
+          text: `#${p.id}`,
+        });
     }
     ms.sort((a, b) => (a.time as number) - (b.time as number));
     this.markers.setMarkers(ms);
@@ -813,13 +950,17 @@ export class ChartPane {
     out.height = Math.round(c.height * scale);
     out.getContext('2d')!.drawImage(c, 0, 0, out.width, out.height);
     return new Promise((resolve, reject) => {
-      out.toBlob((blob) => {
-        if (!blob) return reject(new Error('The chart could not be captured'));
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(fr.error ?? new Error('The chart could not be captured'));
-        fr.readAsDataURL(blob);
-      }, 'image/jpeg', 0.72);
+      out.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('The chart could not be captured'));
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(fr.error ?? new Error('The chart could not be captured'));
+          fr.readAsDataURL(blob);
+        },
+        'image/jpeg',
+        0.72,
+      );
     });
   }
 }

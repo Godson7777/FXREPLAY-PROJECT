@@ -1,6 +1,6 @@
 /** Small, dependency-free statistics toolkit used by the analytics engine. */
 
-export const sum = (a: ArrayLike<number>) => {
+const sum = (a: ArrayLike<number>) => {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += a[i];
   return s;
@@ -23,7 +23,8 @@ export function skewness(a: ArrayLike<number>): number {
   const n = a.length;
   if (n < 3) return 0;
   const m = mean(a);
-  let m2 = 0, m3 = 0;
+  let m2 = 0,
+    m3 = 0;
   for (let i = 0; i < n; i++) {
     const d = a[i] - m;
     m2 += d * d;
@@ -39,7 +40,8 @@ export function kurtosis(a: ArrayLike<number>): number {
   const n = a.length;
   if (n < 4) return 3;
   const m = mean(a);
-  let m2 = 0, m4 = 0;
+  let m2 = 0,
+    m4 = 0;
   for (let i = 0; i < n; i++) {
     const d = (a[i] - m) ** 2;
     m2 += d;
@@ -56,7 +58,8 @@ export function quantileSorted(s: ArrayLike<number>, p: number): number {
   if (!n) return NaN;
   if (n === 1) return s[0];
   const h = (n - 1) * Math.min(1, Math.max(0, p));
-  const lo = Math.floor(h), hi = Math.ceil(h);
+  const lo = Math.floor(h),
+    hi = Math.ceil(h);
   return s[lo] + (h - lo) * (s[hi] - s[lo]);
 }
 export const quantile = (a: ArrayLike<number>, p: number) => quantileSorted(Float64Array.from(a).sort(), p);
@@ -65,7 +68,7 @@ export const median = (a: ArrayLike<number>) => quantile(a, 0.5);
 // ---- distributions ---------------------------------------------------------------
 
 /** erf via Abramowitz & Stegun 7.1.26 (|error| < 1.5e-7). */
-export function erf(x: number): number {
+function erf(x: number): number {
   const s = x < 0 ? -1 : 1;
   const ax = Math.abs(x);
   const t = 1 / (1 + 0.3275911 * ax);
@@ -91,13 +94,17 @@ export function normInv(p: number): number {
     const q = Math.sqrt(-2 * Math.log(1 - p));
     return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
   }
-  const q = p - 0.5, r = q * q;
+  const q = p - 0.5,
+    r = q * q;
   return ((((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q) / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
 
 /** ln Γ(x), Lanczos approximation (g = 7). */
-export function lnGamma(x: number): number {
-  const g = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+function lnGamma(x: number): number {
+  const g = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012,
+    9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
   if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
   x -= 1;
   let a = g[0];
@@ -107,9 +114,14 @@ export function lnGamma(x: number): number {
 }
 
 function betacf(a: number, b: number, x: number): number {
-  const MAXIT = 300, EPS = 3e-14, FPMIN = 1e-300;
-  const qab = a + b, qap = a + 1, qam = a - 1;
-  let c = 1, d = 1 - (qab * x) / qap;
+  const MAXIT = 300,
+    EPS = 3e-14,
+    FPMIN = 1e-300;
+  const qab = a + b,
+    qap = a + 1,
+    qam = a - 1;
+  let c = 1,
+    d = 1 - (qab * x) / qap;
   if (Math.abs(d) < FPMIN) d = FPMIN;
   d = 1 / d;
   let h = d;
@@ -136,7 +148,7 @@ function betacf(a: number, b: number, x: number): number {
 }
 
 /** Regularised incomplete beta function I_x(a, b). */
-export function incBeta(a: number, b: number, x: number): number {
+function incBeta(a: number, b: number, x: number): number {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   const bt = Math.exp(lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
@@ -157,10 +169,14 @@ export function tCdf(t: number, df: number): number {
 export function linreg(ys: ArrayLike<number>): { slope: number; intercept: number; r2: number } {
   const n = ys.length;
   if (n < 2) return { slope: 0, intercept: n ? ys[0] : 0, r2: 0 };
-  const mx = (n - 1) / 2, my = mean(ys);
-  let sxy = 0, sxx = 0, syy = 0;
+  const mx = (n - 1) / 2,
+    my = mean(ys);
+  let sxy = 0,
+    sxx = 0,
+    syy = 0;
   for (let i = 0; i < n; i++) {
-    const dx = i - mx, dy = ys[i] - my;
+    const dx = i - mx,
+      dy = ys[i] - my;
     sxy += dx * dy;
     sxx += dx * dx;
     syy += dy * dy;
@@ -188,5 +204,3 @@ export function lerpAnchors(x: number | null | undefined, anchors: readonly (rea
   }
   return last[1];
 }
-
-export const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));

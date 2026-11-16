@@ -37,12 +37,20 @@ export const PRESETS: ChallengeRules[] = [
 
 export function newChallengeState(balance: number): ChallengeState {
   return {
-    status: 'active', reason: '', endedAt: null, dayKey: -1, dayStartRef: balance, highWater: balance,
-    tradingDays: [], worstDailyLoss: 0, maxDrawdown: 0, todayLoss: 0,
+    status: 'active',
+    reason: '',
+    endedAt: null,
+    dayKey: -1,
+    dayStartRef: balance,
+    highWater: balance,
+    tradingDays: [],
+    worstDailyLoss: 0,
+    maxDrawdown: 0,
+    todayLoss: 0,
   };
 }
 
-export function dayKeyOf(utc: number, off: OffsetFn) {
+function dayKeyOf(utc: number, off: OffsetFn) {
   return Math.floor((utc + off(utc)) / 86400);
 }
 
@@ -95,8 +103,14 @@ export function evaluate(rules: ChallengeRules, st: ChallengeState, br: Broker, 
     return 'failed' as const;
   };
   if (rules.maxDailyLoss > 0 && st.todayLoss >= (rules.maxDailyLoss / 100) * initial) return fail(`Daily loss limit of ${rules.maxDailyLoss}% hit`);
-  if (rules.maxTotalLoss > 0 && eq <= ddBase - (rules.maxTotalLoss / 100) * initial) return fail(`Max ${rules.trailingDrawdown ? 'trailing ' : ''}loss of ${rules.maxTotalLoss}% hit`);
-  if (rules.profitTarget > 0 && bal >= initial * (1 + rules.profitTarget / 100) && br.s.positions.length === 0 && st.tradingDays.length >= rules.minTradingDays) {
+  if (rules.maxTotalLoss > 0 && eq <= ddBase - (rules.maxTotalLoss / 100) * initial)
+    return fail(`Max ${rules.trailingDrawdown ? 'trailing ' : ''}loss of ${rules.maxTotalLoss}% hit`);
+  if (
+    rules.profitTarget > 0 &&
+    bal >= initial * (1 + rules.profitTarget / 100) &&
+    br.s.positions.length === 0 &&
+    st.tradingDays.length >= rules.minTradingDays
+  ) {
     st.status = 'passed';
     st.reason = `Profit target of ${rules.profitTarget}% reached in ${st.tradingDays.length} trading days`;
     st.endedAt = utc;

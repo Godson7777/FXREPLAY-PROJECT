@@ -2,21 +2,48 @@
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 let pw;
-try { pw = require('playwright'); } catch { pw = require('/opt/node22/lib/node_modules/playwright'); }
+try {
+  pw = require('playwright');
+} catch {
+  pw = require('/opt/node22/lib/node_modules/playwright');
+}
 export const { chromium } = pw;
 export const BASE = process.env.BASE ?? 'http://localhost:4173/';
 
 export async function open({ width = 1440, height = 900, phone = false, scheme = 'dark', state = undefined } = {}) {
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, ...(phone ? { hasTouch: true, isMobile: true } : {}), ...(state ? { storageState: state } : {}) });
+  const ctx = await browser.newContext({
+    viewport: { width, height },
+    colorScheme: scheme,
+    ...(phone ? { hasTouch: true, isMobile: true } : {}),
+    ...(state ? { storageState: state } : {}),
+  });
   await ctx.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await ctx.addInitScript(() => {
     const m = (window.__ux = { long: [], events: [], cls: 0, frames: [] });
-    try { new PerformanceObserver((l) => l.getEntries().forEach((e) => m.long.push(Math.round(e.duration)))).observe({ type: 'longtask', buffered: true }); } catch {}
-    try { new PerformanceObserver((l) => l.getEntries().forEach((e) => m.events.push({ n: e.name, d: Math.round(e.duration) }))).observe({ type: 'event', durationThreshold: 16, buffered: true }); } catch {}
-    try { new PerformanceObserver((l) => l.getEntries().forEach((e) => { if (!e.hadRecentInput) m.cls += e.value; })).observe({ type: 'layout-shift', buffered: true }); } catch {}
+    try {
+      new PerformanceObserver((l) => l.getEntries().forEach((e) => m.long.push(Math.round(e.duration)))).observe({ type: 'longtask', buffered: true });
+    } catch {}
+    try {
+      new PerformanceObserver((l) => l.getEntries().forEach((e) => m.events.push({ n: e.name, d: Math.round(e.duration) }))).observe({
+        type: 'event',
+        durationThreshold: 16,
+        buffered: true,
+      });
+    } catch {}
+    try {
+      new PerformanceObserver((l) =>
+        l.getEntries().forEach((e) => {
+          if (!e.hadRecentInput) m.cls += e.value;
+        }),
+      ).observe({ type: 'layout-shift', buffered: true });
+    } catch {}
     let last = 0;
-    const tick = (t) => { if (last) m.frames.push(t - last); last = t; requestAnimationFrame(tick); };
+    const tick = (t) => {
+      if (last) m.frames.push(t - last);
+      last = t;
+      requestAnimationFrame(tick);
+    };
     requestAnimationFrame(tick);
   });
   const page = await ctx.newPage();
@@ -29,17 +56,34 @@ export async function open({ width = 1440, height = 900, phone = false, scheme =
 
 /** Reset the counters, run `fn`, and return what happened during it. */
 export async function measure(page, label, fn, settle = 300) {
-  await page.evaluate(() => { const m = window.__ux; m.long = []; m.events = []; m.cls = 0; m.frames = []; });
+  await page.evaluate(() => {
+    const m = window.__ux;
+    m.long = [];
+    m.events = [];
+    m.cls = 0;
+    m.frames = [];
+  });
   await fn();
   await page.waitForTimeout(settle);
   const r = await page.evaluate(() => {
-    const m = window.__ux, f = [...m.frames].sort((a, b) => a - b);
+    const m = window.__ux,
+      f = [...m.frames].sort((a, b) => a - b);
     const q = (p) => (f.length ? f[Math.min(f.length - 1, Math.floor(f.length * p))] : 0);
     const total = f.reduce((a, b) => a + b, 0);
-    return { fps: f.length ? Math.round((f.length / total) * 1000) : 0, p95: Math.round(q(0.95)), worst: Math.round(f[f.length - 1] ?? 0), slow: f.filter((x) => x > 34).length,
-      long: m.long.length, longMax: Math.max(0, ...m.long), inp: Math.max(0, ...m.events.map((e) => e.d)), cls: +m.cls.toFixed(3) };
+    return {
+      fps: f.length ? Math.round((f.length / total) * 1000) : 0,
+      p95: Math.round(q(0.95)),
+      worst: Math.round(f[f.length - 1] ?? 0),
+      slow: f.filter((x) => x > 34).length,
+      long: m.long.length,
+      longMax: Math.max(0, ...m.long),
+      inp: Math.max(0, ...m.events.map((e) => e.d)),
+      cls: +m.cls.toFixed(3),
+    };
   });
-  console.log(`${label.padEnd(34)} fps ${String(r.fps).padStart(3)} | frame p95 ${String(r.p95).padStart(3)}ms worst ${String(r.worst).padStart(4)}ms (${r.slow} slow) | long tasks ${r.long} (max ${r.longMax}ms) | input ${r.inp}ms | CLS ${r.cls}`);
+  console.log(
+    `${label.padEnd(34)} fps ${String(r.fps).padStart(3)} | frame p95 ${String(r.p95).padStart(3)}ms worst ${String(r.worst).padStart(4)}ms (${r.slow} slow) | long tasks ${r.long} (max ${r.longMax}ms) | input ${r.inp}ms | CLS ${r.cls}`,
+  );
   return r;
 }
 
@@ -47,8 +91,14 @@ export async function measure(page, label, fn, settle = 300) {
 export async function demoSession(page) {
   await page.goto(BASE);
   await page.getByRole('button', { name: 'Load demo data' }).click();
-  await page.getByRole('button', { name: /New session/ }).first().waitFor({ timeout: 60000 });
-  await page.getByRole('button', { name: /New session/ }).first().click();
+  await page
+    .getByRole('button', { name: /New session/ })
+    .first()
+    .waitFor({ timeout: 60000 });
+  await page
+    .getByRole('button', { name: /New session/ })
+    .first()
+    .click();
   await page.getByRole('button', { name: 'Create & start replay' }).click();
   await page.waitForURL(/#\/replay\//);
   await page.locator('.ws canvas').first().waitFor();
@@ -65,14 +115,26 @@ export async function throttle(page, rate = +(process.env.CPU ?? 4)) {
 
 /** A trade list in the FX Replay export layout: `n` XAUUSD trades over about four months. */
 export function sampleTradesCsv(n = 160) {
-  let s = 'id,dateStart,dateEnd,pair,uPnL,rPnL,side,entryPrice,initialSL,maxTP,idealTP,amount,amountClosed,status,day,tags,avgClosePrice,avgRiskReward,maxRiskReward,exchangeRate,initialBalance,currentRealizedBalance\n';
-  let bal = 100000, t = Date.UTC(2026, 4, 4, 8) / 1000, seed = 7;
+  let s =
+    'id,dateStart,dateEnd,pair,uPnL,rPnL,side,entryPrice,initialSL,maxTP,idealTP,amount,amountClosed,status,day,tags,avgClosePrice,avgRiskReward,maxRiskReward,exchangeRate,initialBalance,currentRealizedBalance\n';
+  let bal = 100000,
+    t = Date.UTC(2026, 4, 4, 8) / 1000,
+    seed = 7;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const p = (x) => String(x).padStart(2, '0');
-  const f = (u) => { const d = new Date(u * 1000); return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:00`; };
+  const f = (u) => {
+    const d = new Date(u * 1000);
+    return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:00`;
+  };
   for (let i = 0; i < n; i++) {
-    const e = 4000 + rnd() * 400, sl = 6 + rnd() * 6, buy = rnd() < 0.5, win = rnd() < 0.4, r = win ? 1.5 + rnd() * 3 : -1, amt = Math.round(600 / sl);
-    const x = buy ? e + r * sl : e - r * sl, pnl = +(r * sl * amt).toFixed(2);
+    const e = 4000 + rnd() * 400,
+      sl = 6 + rnd() * 6,
+      buy = rnd() < 0.5,
+      win = rnd() < 0.4,
+      r = win ? 1.5 + rnd() * 3 : -1,
+      amt = Math.round(600 / sl);
+    const x = buy ? e + r * sl : e - r * sl,
+      pnl = +(r * sl * amt).toFixed(2);
     bal += pnl;
     const d = t + 3600 * (1 + rnd() * 3);
     const maxR = win ? r + rnd() * 0.8 : rnd() * 0.9; // best open profit reached, in R
@@ -85,7 +147,10 @@ export function sampleTradesCsv(n = 160) {
 /** Import the sample trade list through the UI and land on its analytics page. */
 export async function importSample(page, csv = sampleTradesCsv()) {
   await page.goto(BASE);
-  await page.getByRole('button', { name: /Import trades/ }).first().click();
+  await page
+    .getByRole('button', { name: /Import trades/ })
+    .first()
+    .click();
   await page.locator('.modal input[type=file]').setInputFiles({ name: 'sample-trades.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
   await page.locator('.modal .callout').first().waitFor();
   await page.getByRole('button', { name: 'Import & analyse' }).click();
@@ -106,7 +171,10 @@ export async function quickTrades(page, n = 24) {
 export async function scrollThrough(page, settle = 2600) {
   for (let pass = 0; pass < 2; pass++) {
     const H = await page.evaluate(() => document.documentElement.scrollHeight);
-    for (let y = 0; y < H + 900; y += 600) { await page.evaluate((yy) => scrollTo(0, yy), y); await page.waitForTimeout(pass ? 40 : 110); }
+    for (let y = 0; y < H + 900; y += 600) {
+      await page.evaluate((yy) => scrollTo(0, yy), y);
+      await page.waitForTimeout(pass ? 40 : 110);
+    }
   }
   await page.waitForTimeout(settle);
 }
@@ -131,7 +199,8 @@ export function inspectInPage(o = {}) {
   };
   const name = (el) => {
     const t = (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || el.id || '').trim().replace(/\s+/g, ' ').slice(0, 40);
-    const where = (el.closest('.card')?.querySelector('.card-title span')?.textContent || el.closest('section')?.id || el.closest('.modal') ? 'modal' : '') || '';
+    const where =
+      (el.closest('.card')?.querySelector('.card-title span')?.textContent || el.closest('section')?.id || el.closest('.modal') ? 'modal' : '') || '';
     const card = el.closest('.card')?.querySelector('.card-title span')?.textContent?.trim();
     return `<${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}> "${t}"${card ? ` in "${card.slice(0, 30)}"` : where ? ` in ${where}` : ''}`;
   };
@@ -149,7 +218,8 @@ export function inspectInPage(o = {}) {
   if (bad) P.push(`text shows ${[...new Set(bad)].join(', ')}`);
 
   // 2) the page must not scroll sideways
-  if (!o.root && document.documentElement.scrollWidth > window.innerWidth + 1) P.push(`page scrolls sideways (${document.documentElement.scrollWidth} px wide in a ${window.innerWidth} px window)`);
+  if (!o.root && document.documentElement.scrollWidth > window.innerWidth + 1)
+    P.push(`page scrolls sideways (${document.documentElement.scrollWidth} px wide in a ${window.innerWidth} px window)`);
 
   const cv = document.createElement('canvas').getContext('2d');
   const all = root.querySelectorAll('*');
@@ -174,17 +244,25 @@ export function inspectInPage(o = {}) {
           const ls = parseFloat(cs.letterSpacing) || 0;
           const tt = cs.textTransform === 'uppercase' ? txt.toUpperCase() : txt;
           const need = cv.measureText(tt).width + ls * tt.length;
-          const room = el.clientWidth - parseFloat(cs.paddingLeft) - (tag === 'SELECT' ? Math.max(parseFloat(cs.paddingRight), 20) : parseFloat(cs.paddingRight));
+          const room =
+            el.clientWidth - parseFloat(cs.paddingLeft) - (tag === 'SELECT' ? Math.max(parseFloat(cs.paddingRight), 20) : parseFloat(cs.paddingRight));
           if (need > room + 1.5) P.push(`value does not fit: "${txt.slice(0, 40)}" needs ${Math.round(need)} px, field has ${Math.round(room)} px ${name(el)}`);
         }
       }
     }
 
     // 5) button / chip / tab text spilling out of its box
-    if ((tag === 'BUTTON' || el.matches('.badge, .chip, .tab, .seg, .pill')) && cs.overflowX !== 'visible' && el.scrollWidth > el.clientWidth + 2) P.push(`label clipped: ${name(el)}`);
+    if ((tag === 'BUTTON' || el.matches('.badge, .chip, .tab, .seg, .pill')) && cs.overflowX !== 'visible' && el.scrollWidth > el.clientWidth + 2)
+      P.push(`label clipped: ${name(el)}`);
 
     // 6) tap targets on touch screens
-    if (o.touch && (tag === 'BUTTON' || tag === 'SELECT' || (tag === 'INPUT' && !['checkbox', 'radio', 'hidden', 'file'].includes(el.type)) || (tag === 'A' && cs.display !== 'inline'))) {
+    if (
+      o.touch &&
+      (tag === 'BUTTON' ||
+        tag === 'SELECT' ||
+        (tag === 'INPUT' && !['checkbox', 'radio', 'hidden', 'file'].includes(el.type)) ||
+        (tag === 'A' && cs.display !== 'inline'))
+    ) {
       const r = el.getBoundingClientRect();
       if (r.height < 36 || r.width < 36) P.push(`small tap target ${Math.round(r.width)}×${Math.round(r.height)}: ${name(el)}`);
     }
@@ -199,8 +277,9 @@ export function inspectInPage(o = {}) {
   for (const v of root.querySelectorAll('.viz')) {
     if (!shown(v)) continue;
     const svg = v.querySelector('svg');
-    if (!svg || !svg.querySelector('path, rect, circle, polyline, line')) P.push(`chart is empty: ${name(v)}`);
-    else if ([...svg.querySelectorAll('*')].some((e) => e.getAttributeNames().some((a) => /NaN|undefined|Infinity/.test(e.getAttribute(a) ?? '')))) P.push(`chart has NaN in its drawing: ${name(v)}`);
+    if (!svg?.querySelector('path, rect, circle, polyline, line')) P.push(`chart is empty: ${name(v)}`);
+    else if ([...svg.querySelectorAll('*')].some((e) => e.getAttributeNames().some((a) => /NaN|undefined|Infinity/.test(e.getAttribute(a) ?? ''))))
+      P.push(`chart has NaN in its drawing: ${name(v)}`);
   }
   for (const c of root.querySelectorAll('.card')) {
     if (!shown(c)) continue;

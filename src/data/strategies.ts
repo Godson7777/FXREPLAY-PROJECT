@@ -26,11 +26,10 @@ const byUpdated = (a: Strategy, b: Strategy) => b.updatedAt - a.updatedAt;
 
 export async function listStrategies(): Promise<Strategy[]> {
   const all = (await idb.get<Strategy[]>('kv', KEY)) ?? [];
-  return all.map(sanitizeStrategy).filter((s): s is Strategy => s != null).sort(byUpdated);
-}
-
-export async function getStrategy(id: string): Promise<Strategy | null> {
-  return (await listStrategies()).find((s) => s.id === id) ?? null;
+  return all
+    .map(sanitizeStrategy)
+    .filter((s): s is Strategy => s != null)
+    .sort(byUpdated);
 }
 
 /** Inserts or replaces a strategy (matched by id). */

@@ -2,7 +2,20 @@ import type { IChartApi, ISeriesApi, Logical, SeriesType } from 'lightweight-cha
 import { firstHit, posCalc, type PosEnv, type PosLevels, type PosSettings } from '../engine/position';
 
 export type DrawingType =
-  | 'trend' | 'ray' | 'extended' | 'hline' | 'hray' | 'vline' | 'rect' | 'fib' | 'long' | 'short' | 'text' | 'measure' | 'arrowUp' | 'arrowDown';
+  | 'trend'
+  | 'ray'
+  | 'extended'
+  | 'hline'
+  | 'hray'
+  | 'vline'
+  | 'rect'
+  | 'fib'
+  | 'long'
+  | 'short'
+  | 'text'
+  | 'measure'
+  | 'arrowUp'
+  | 'arrowDown';
 
 export interface Pt {
   t: number; // local display seconds
@@ -75,8 +88,15 @@ export const TOOL_INFO: { type: DrawingType | 'cursor'; icon: string; title: str
 const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.618];
 const ONE_POINT: DrawingType[] = ['hline', 'hray', 'vline', 'text', 'arrowUp', 'arrowDown'];
 const DEFAULT_COLOR: Partial<Record<DrawingType, string>> = {
-  hline: '#d4a24c', hray: '#d4a24c', vline: '#8a8780', rect: '#9085e9', fib: '#1a9e93', measure: '#5b93d6', text: '#8a8780',
-  arrowUp: '#1a9e93', arrowDown: '#e0605a',
+  hline: '#d4a24c',
+  hray: '#d4a24c',
+  vline: '#8a8780',
+  rect: '#9085e9',
+  fib: '#1a9e93',
+  measure: '#5b93d6',
+  text: '#8a8780',
+  arrowUp: '#1a9e93',
+  arrowDown: '#e0605a',
 };
 
 export interface LayerHost {
@@ -183,11 +203,14 @@ export class DrawingLayer {
   }
 
   timeToLogical(t: number): number {
-    const T = this.host.times(), n = this.host.count(), tf = this.host.tfSec();
+    const T = this.host.times(),
+      n = this.host.count(),
+      tf = this.host.tfSec();
     if (!n) return 0;
     if (t <= T[0]) return (t - T[0]) / tf;
     if (t >= T[n - 1]) return n - 1 + (t - T[n - 1]) / tf;
-    let lo = 0, hi = n - 1;
+    let lo = 0,
+      hi = n - 1;
     while (hi - lo > 1) {
       const m = (lo + hi) >> 1;
       if (T[m] <= t) lo = m;
@@ -197,7 +220,9 @@ export class DrawingLayer {
   }
 
   logicalToTime(lg: number): number {
-    const T = this.host.times(), n = this.host.count(), tf = this.host.tfSec();
+    const T = this.host.times(),
+      n = this.host.count(),
+      tf = this.host.tfSec();
     if (!n) return 0;
     if (lg <= 0) return T[0] + lg * tf;
     if (lg >= n - 1) return T[n - 1] + (lg - (n - 1)) * tf;
@@ -219,7 +244,8 @@ export class DrawingLayer {
       const i = Math.round(lg);
       const b = this.host.bar(i);
       if (b) {
-        let best = p, bd = 14;
+        let best = p,
+          bd = 14;
         for (const v of [b.o, b.h, b.l, b.c]) {
           const d = Math.abs(this.y(v) - y);
           if (d < bd) (bd = d), (best = v);
@@ -376,7 +402,8 @@ export class DrawingLayer {
       } else d.pts[hit.handle] = pt;
     } else {
       const cur = this.toPt(x, y, false);
-      const dt = cur.t - this.drag.start.t, dp = cur.p - this.drag.start.p;
+      const dt = cur.t - this.drag.start.t,
+        dp = cur.p - this.drag.start.p;
       d.pts = this.drag.orig.map((p) => ({ t: p.t + dt, p: p.p + dp }));
     }
     this.host.onEdit?.(d, false);
@@ -393,7 +420,11 @@ export class DrawingLayer {
       return;
     }
     if (this.placing) {
-      if (dr.moved && Math.abs(this.x(this.placing.pts[0].t) - this.x(this.placing.pts[1].t)) + Math.abs(this.y(this.placing.pts[0].p) - this.y(this.placing.pts[1].p)) > 6) this.finishPlacing();
+      if (
+        dr.moved &&
+        Math.abs(this.x(this.placing.pts[0].t) - this.x(this.placing.pts[1].t)) + Math.abs(this.y(this.placing.pts[0].p) - this.y(this.placing.pts[1].p)) > 6
+      )
+        this.finishPlacing();
       return; // otherwise click-move-click mode
     }
     if (dr.moved) {
@@ -472,7 +503,8 @@ export class DrawingLayer {
 
   private handles(d: Drawing): { x: number; y: number }[] {
     if (d.type === 'long' || d.type === 'short') {
-      const x0 = this.x(d.pts[0].t), x1 = this.x(d.pts[1].t);
+      const x0 = this.x(d.pts[0].t),
+        x1 = this.x(d.pts[1].t);
       return [
         { x: x0, y: this.y(d.pts[0].p) },
         { x: x0, y: this.y(d.pts[1].p) },
@@ -526,8 +558,10 @@ export class DrawingLayer {
       }
       case 'rect':
       case 'fib': {
-        const x0 = Math.min(P[0].x, P[1].x), x1 = Math.max(P[0].x, P[1].x);
-        const y0 = Math.min(P[0].y, P[1].y), y1 = Math.max(P[0].y, P[1].y);
+        const x0 = Math.min(P[0].x, P[1].x),
+          x1 = Math.max(P[0].x, P[1].x);
+        const y0 = Math.min(P[0].y, P[1].y),
+          y1 = Math.max(P[0].y, P[1].y);
         if (d.type === 'fib') {
           if (x < x0 - 5 || x > W) return false;
           return FIB.some((f) => Math.abs(this.y(d.pts[1].p + (d.pts[0].p - d.pts[1].p) * f) - y) < 5);
@@ -536,7 +570,8 @@ export class DrawingLayer {
       }
       case 'long':
       case 'short': {
-        const x0 = P[0].x, x1 = P[1].x;
+        const x0 = P[0].x,
+          x1 = P[1].x;
         const ys = [P[1].y, P[2].y];
         return x >= x0 && x <= x1 && y >= Math.min(...ys) && y <= Math.max(...ys);
       }
@@ -551,8 +586,10 @@ export class DrawingLayer {
   // ---- rendering ----------------------------------------------------------------
 
   render() {
-    const c = this.canvas, dpr = window.devicePixelRatio || 1;
-    const W = this.host.container.clientWidth, H = this.host.container.clientHeight;
+    const c = this.canvas,
+      dpr = window.devicePixelRatio || 1;
+    const W = this.host.container.clientWidth,
+      H = this.host.container.clientHeight;
     if (c.width !== W * dpr || c.height !== H * dpr) {
       c.width = W * dpr;
       c.height = H * dpr;
@@ -597,7 +634,8 @@ export class DrawingLayer {
   private drawOne(d: Drawing, sel: boolean) {
     const ctx = this.ctx;
     const P = d.pts.map((p) => ({ x: this.x(p.t), y: this.y(p.p) }));
-    const W = this.paneW(), H = this.paneH();
+    const W = this.paneW(),
+      H = this.paneH();
     const dg = this.host.digits();
     ctx.strokeStyle = d.color;
     ctx.fillStyle = d.color;
@@ -630,7 +668,8 @@ export class DrawingLayer {
         break;
       case 'fib': {
         const x0 = Math.min(P[0].x, P[1].x);
-        const p0 = d.pts[0].p, p1 = d.pts[1].p;
+        const p0 = d.pts[0].p,
+          p1 = d.pts[1].p;
         ctx.setLineDash([4, 3]);
         line(ctx, P[0].x, P[0].y, P[1].x, P[1].y);
         ctx.setLineDash([]);
@@ -697,7 +736,9 @@ export class DrawingLayer {
   private drawZones() {
     const zs = this.host.zones?.() ?? [];
     if (!zs.length) return;
-    const ctx = this.ctx, c = this.colors(), W = this.paneW();
+    const ctx = this.ctx,
+      c = this.colors(),
+      W = this.paneW();
     for (const z of zs) {
       const x0 = Math.max(0, this.x(z.t));
       if (x0 >= W) continue;
@@ -729,9 +770,12 @@ export class DrawingLayer {
 
   /** TradingView-style long/short position: zones, read-outs and the replay outcome. */
   private drawPosition(d: Drawing, P: { x: number; y: number }[]) {
-    const ctx = this.ctx, c = this.colors(), dg = this.host.digits();
+    const ctx = this.ctx,
+      c = this.colors(),
+      dg = this.host.digits();
     const [e, s, t] = P;
-    const x1 = P[1].x, w = x1 - e.x;
+    const x1 = P[1].x,
+      w = x1 - e.x;
     const lv = posLevels(d);
     const env = this.host.posEnv?.();
     const calc = env ? posCalc(lv, d.pos ?? this.host.posDefaults?.() ?? { riskMode: 'pct', risk: 1 }, env) : null;
@@ -751,10 +795,10 @@ export class DrawingLayer {
     if (!d.preview && endIdx >= from) {
       // price path from the entry to the exit (or the latest revealed close)
       const ex = (this.host.chart.timeScale().logicalToCoordinate(endIdx as Logical) ?? x1) as number;
-      const exitP = hit ? (hit.kind === 'tp' ? lv.tp : lv.sl) : this.host.bar(endIdx)?.c ?? lv.entry;
+      const exitP = hit ? (hit.kind === 'tp' ? lv.tp : lv.sl) : (this.host.bar(endIdx)?.c ?? lv.entry);
       const zoneY = this.y(exitP);
       ctx.globalAlpha = 0.28;
-      ctx.fillStyle = (hit ? hit.kind === 'tp' : (lv.side === 'long' ? exitP >= lv.entry : exitP <= lv.entry)) ? c.up : c.down;
+      ctx.fillStyle = (hit ? hit.kind === 'tp' : lv.side === 'long' ? exitP >= lv.entry : exitP <= lv.entry) ? c.up : c.down;
       ctx.fillRect(e.x, Math.min(e.y, zoneY), Math.max(0, Math.min(ex, x1) - e.x), Math.abs(zoneY - e.y));
       ctx.globalAlpha = 1;
       ctx.strokeStyle = c.muted;
@@ -767,11 +811,25 @@ export class DrawingLayer {
     line(ctx, e.x, e.y, x1, e.y);
     const cx = e.x + w / 2;
     const money = (v: number) => `${v < 0 ? '−' : '+'}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const above = (y: number) => y - 5, below = (y: number) => y + 19;
-    const tUp = t.y < e.y, sUp = s.y < e.y;
+    const above = (y: number) => y - 5,
+      below = (y: number) => y + 19;
+    const tUp = t.y < e.y,
+      sUp = s.y < e.y;
     if (calc) {
-      this.label(cx, tUp ? above(t.y) : below(t.y), `Target ${lv.tp.toFixed(dg)} (${calc.tpPct.toFixed(2)}%) ${calc.tpPips.toFixed(1)} pips · ${money(calc.rewardUsd)}`, c.up, 'center');
-      this.label(cx, sUp ? above(s.y) : below(s.y), `Stop ${lv.sl.toFixed(dg)} (${calc.slPct.toFixed(2)}%) ${calc.slPips.toFixed(1)} pips · ${money(-calc.riskUsd)}`, c.down, 'center');
+      this.label(
+        cx,
+        tUp ? above(t.y) : below(t.y),
+        `Target ${lv.tp.toFixed(dg)} (${calc.tpPct.toFixed(2)}%) ${calc.tpPips.toFixed(1)} pips · ${money(calc.rewardUsd)}`,
+        c.up,
+        'center',
+      );
+      this.label(
+        cx,
+        sUp ? above(s.y) : below(s.y),
+        `Stop ${lv.sl.toFixed(dg)} (${calc.slPct.toFixed(2)}%) ${calc.slPips.toFixed(1)} pips · ${money(-calc.riskUsd)}`,
+        c.down,
+        'center',
+      );
       let mid = `${lv.side === 'long' ? 'Long' : 'Short'} · ${calc.lots.toFixed(2)} lots · R:R ${calc.rr.toFixed(2)}`;
       if (calc.invalid) mid = `${lv.side === 'long' ? 'Long' : 'Short'} · stop/target on the wrong side`;
       else if (hit) mid += hit.kind === 'tp' ? ` · Target hit ${money(calc.rewardUsd)}` : ` · Stop hit ${money(-calc.riskUsd)}`;
@@ -779,7 +837,7 @@ export class DrawingLayer {
         const close = this.host.bar(lastIdx)?.c;
         if (close != null) mid += ` · Open ${money((lv.side === 'long' ? 1 : -1) * env.value(close - lv.entry, calc.lots, close))}`;
       }
-      this.label(cx, (tUp ? e.y + 19 : e.y - 5), mid, calc.invalid ? c.down : c.surface, 'center', calc.invalid ? '#fff' : c.text);
+      this.label(cx, tUp ? e.y + 19 : e.y - 5, mid, calc.invalid ? c.down : c.surface, 'center', calc.invalid ? '#fff' : c.text);
     }
     const chip = this.closeChip(d);
     if (chip) {
@@ -808,7 +866,8 @@ export class DrawingLayer {
     tb.classList.remove('hidden');
     // keep the whole toolbar (incl. 🗑) inside the pane, whatever its width
     const place = () => {
-      const w = tb.offsetWidth || 220, ht = tb.offsetHeight || 32;
+      const w = tb.offsetWidth || 220,
+        ht = tb.offsetHeight || 32;
       tb.style.left = Math.max(4, Math.min(this.paneW() - w - 4, h.x + 12)) + 'px';
       tb.style.top = Math.max(4, Math.min(this.paneH() - ht - 4, h.y - ht - 12)) + 'px';
     };
@@ -875,14 +934,16 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 function segDist(px: number, py: number, a: { x: number; y: number }, b: { x: number; y: number }) {
-  const dx = b.x - a.x, dy = b.y - a.y;
+  const dx = b.x - a.x,
+    dy = b.y - a.y;
   const L = dx * dx + dy * dy;
   const t = L ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / L)) : 0;
   return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
 }
 
 function extendLine(a: { x: number; y: number }, b: { x: number; y: number }, W: number, both: boolean) {
-  const dx = b.x - a.x, dy = b.y - a.y;
+  const dx = b.x - a.x,
+    dy = b.y - a.y;
   if (Math.abs(dx) < 1e-6) return [a, b];
   const k = dy / dx;
   const xr = dx > 0 ? W + 10 : -10;
